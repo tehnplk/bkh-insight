@@ -6,9 +6,9 @@ import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import type { Patient } from "@/app/api/tehnplk/components-demo/patients";
 
 const STATUS_STYLE: Record<Patient["status"], string> = {
-  รักษาอยู่: "bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-300",
-  จำหน่าย: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
-  ส่งต่อ: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  รักษาอยู่: "bg-success-soft text-success border border-success-line",
+  จำหน่าย: "bg-surface-sunken text-muted border border-line",
+  ส่งต่อ: "bg-warning-soft text-warning border border-warning-line",
 };
 
 const dateTh = (iso: string) => new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
@@ -25,7 +25,7 @@ const columns = col.columns([
     header: "สถานะ",
     cell: (c) => {
       const s = c.getValue();
-      return <span className={`rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${STATUS_STYLE[s]}`}>{s}</span>;
+      return <span className={`inline-block rounded-full px-2 font-medium whitespace-nowrap ${STATUS_STYLE[s]}`}>{s}</span>;
     },
   }),
 ]);
@@ -45,7 +45,7 @@ function PatientDetail({ p }: { p: Patient }) {
     <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
       {items.map(([k, v]) => (
         <div key={k}>
-          <dt className="text-zinc-500 dark:text-zinc-400">{k}</dt>
+          <dt className="text-muted">{k}</dt>
           <dd className="font-medium">{v}</dd>
         </div>
       ))}
@@ -64,7 +64,7 @@ export function PatientGrid() {
 
   return (
     <div className="flex flex-col gap-4">
-      <nav aria-label="รูปแบบการแสดงรายละเอียด" className="inline-flex self-start rounded-lg bg-zinc-100 p-1 text-sm dark:bg-zinc-800">
+      <nav aria-label="รูปแบบการแสดงรายละเอียด" className="inline-flex self-start rounded-lg bg-surface-sunken p-1 text-sm">
         {(["modal", "expand"] as const).map((v) => (
           <Link
             key={v}
@@ -72,7 +72,7 @@ export function PatientGrid() {
             replace
             scroll={false}
             aria-current={mode === v ? "page" : undefined}
-            className="rounded-md px-3 py-1.5 font-medium text-zinc-600 aria-[current=page]:bg-white aria-[current=page]:text-zinc-900 aria-[current=page]:shadow-sm focus-visible:outline-2 focus-visible:outline-teal-600 dark:text-zinc-400 dark:aria-[current=page]:bg-zinc-950 dark:aria-[current=page]:text-zinc-100"
+            className="rounded-md px-3 py-1.5 font-medium text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
             {v === "modal" ? "เปิดเป็นหน้าต่าง" : "กางในแถว"}
           </Link>

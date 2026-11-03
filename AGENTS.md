@@ -53,6 +53,12 @@
 
 อ่านรายการนี้ก่อนค้นหรือสร้าง component เอง (ขั้นแรกของกฎ "ก่อนสร้าง component ใหม่") ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน รายการจะได้ตรงกับโค้ดจริง ตัวอย่างใช้งานจริงดูที่ `src/app/tehnplk/components-demo/`
 
+- `AppShell` (`@/components/app-shell/app-shell`): main layout ทุกหน้า มี sidebar ย่อได้ด้วย Ctrl/⌘+B ค้นหาเมนูด้วย Ctrl/⌘+K, topbar มี breadcrumb และปุ่มสลับธีม ใช้ใน `src/app/layout.tsx` แล้ว หน้าใหม่ไม่ต้องทำ layout เอง (AppShell มี `<main>` และ padding ให้แล้ว หน้าไม่ต้องใส่ `<main>` ซ้ำ)
+- `navItems` (`@/components/app-shell/nav-items`): ต้องเพิ่มเมนูทุกครั้งที่สร้างหน้า `{dev_name}/{module}` หน้าเดี่ยวใช้ `{ label, href, icon }` ส่วนหมวดใช้ `{ label, icon, children: [...] }` ชื่อไอคอนเลือกจาก `@/components/app-shell/icons` ถ้าไม่มีให้เพิ่ม SVG ในไฟล์นั้น
+- `ThemeSwitch` (`@/components/app-shell/theme-switch`): ปุ่มสลับธีม สว่าง/มืด/ตามระบบ (อยู่ใน topbar ของ AppShell แล้ว)
+- design token ใน `src/app/globals.css` ใช้ผ่าน Tailwind เช่น `bg-surface`, `bg-surface-sunken`, `bg-hover`, `border-line`, `text-muted`, `bg-accent text-accent-fg`, `bg-accent-soft text-accent-text`, `ring-ring` และ `{danger|warning|success}` (`text-*`, `bg-*-soft`, `border-*-line`) ห้ามใช้สีตายตัว (`zinc-*`, `white`, `#hex`) ทุก token มีทั้งสองธีมอยู่แล้วจึงไม่ต้องเขียน `dark:` ถ้าจำเป็นต้องใช้ `dark:` จะอิง `data-theme` ไม่ใช่ `prefers-color-scheme`
+  - ขนาดตัวอักษรใน content ไม่เกิน 13px ยกเว้นหัวข้อ page/section ใช้ `text-title` (14px, semibold) ใช้เฉพาะ type scale ใน globals.css (`text-xs` 11px, `text-sm` 12px, `text-base` 13px, `text-title`; `text-lg` ขึ้นไปถูกปิดไว้) ห้ามกำหนดขนาดเอง (`text-[..px]`, `font-size`) ลำดับชั้นอื่นแยกด้วยน้ำหนักและสี
+  - DataGrid ใช้ token ของตัวเอง `text-grid-head` (13px) และ `text-grid-cell` (11px) ใน globals.css เป็นค่าทดลอง ปรับที่ token ที่เดียว
 - `DataGrid` (`@/components/data-grid/data-grid`): ตารางข้อมูลจาก API แบบ server-side ทั้ง sort, ค้นหา, แบ่งหน้า และปุ่มส่งออก Excel state อยู่ใน URL (`page`, `pageSize`, `sort`, `dir`, `q`) จึง refresh หรือแชร์ link ได้หน้าเดิม
   - props: `endpoint`, `columns` (สร้างด้วย `gridColumnHelper<Row>()` ประกาศนอก component), `getRowId`, `renderDetail?(row)`, `detailMode?: "modal" | "expand"`, `detailTitle?(row)`, `searchPlaceholder?`
   - ใช้ `useSearchParams` จึงต้องครอบด้วย `<Suspense>` และ `columns`/`renderDetail` เป็นฟังก์ชัน จึงต้องวางใน client component ของ module

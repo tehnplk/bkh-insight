@@ -52,8 +52,10 @@ export type DataGridProps<T extends RowData> = {
 const API_KEYS = ["page", "pageSize", "sort", "dir", "q"] as const;
 const NO_ROWS: never[] = [];
 const fmt = (n: number) => n.toLocaleString("th-TH");
-const focusRing = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600";
-const btn = `inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 ${focusRing}`;
+const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const btnBase = `inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
+const btn = `${btnBase} border-line bg-surface text-foreground hover:bg-hover`;
+const btnPrimary = `${btnBase} border-transparent bg-accent text-accent-fg hover:bg-accent/90`;
 
 function Icon({ d, className = "size-4" }: { d: string; className?: string }) {
   return (
@@ -175,8 +177,8 @@ export function DataGrid<T extends RowData>({
     body = (
       <tr>
         <td colSpan={colSpan} className="px-4 py-12 text-center">
-          <p className="font-medium text-red-700 dark:text-red-400">โหลดข้อมูลไม่สำเร็จ</p>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{error}</p>
+          <p className="font-medium text-danger">โหลดข้อมูลไม่สำเร็จ</p>
+          <p className="mt-1 text-sm text-muted">{error}</p>
           <button type="button" className={`${btn} mt-4`} onClick={() => setReload((n) => n + 1)}>
             ลองอีกครั้ง
           </button>
@@ -185,9 +187,9 @@ export function DataGrid<T extends RowData>({
     );
   } else if (!data) {
     body = Array.from({ length: Math.min(pageSize, 8) }, (_, i) => (
-      <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800">
+      <tr key={i} className="border-t border-line">
         <td colSpan={colSpan} className="px-4 py-3">
-          <div className="h-4 animate-pulse rounded bg-zinc-200/70 dark:bg-zinc-800" style={{ width: `${90 - (i % 3) * 15}%` }} />
+          <div className="h-4 animate-pulse rounded bg-hover"style={{ width: `${90 - (i % 3) * 15}%` }} />
         </td>
       </tr>
     ));
@@ -217,16 +219,16 @@ export function DataGrid<T extends RowData>({
       const isOpen = row.getIsExpanded();
       return (
         <Fragment key={row.id}>
-          <tr className={`border-t border-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${isOpen ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
+          <tr className={`border-t border-line ${isOpen ? "bg-accent-soft text-accent-text" : "hover:bg-surface-sunken"}`}>
             {hasDetail && (
-              <td className="w-0 py-1.5 pr-0 pl-2">
+              <td className="w-0 py-1 pr-0 pl-2">
                 <button
                   type="button"
                   aria-label="รายละเอียด"
                   aria-expanded={detailMode === "expand" ? isOpen : undefined}
                   aria-haspopup={detailMode === "modal" ? "dialog" : undefined}
                   onClick={detailMode === "expand" ? row.getToggleExpandedHandler() : () => setSelected(row.original)}
-                  className={`grid size-8 place-items-center rounded-md text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-zinc-100 ${focusRing}`}
+                  className={`grid size-7 place-items-center rounded-md hover:bg-hover hover:text-foreground ${isOpen ? "" : "text-muted"} ${focusRing}`}
                 >
                   {detailMode === "expand" ? (
                     <Icon d="M8 5l5 5-5 5" className={`size-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
@@ -237,13 +239,13 @@ export function DataGrid<T extends RowData>({
               </td>
             )}
             {row.getAllCells().map((cell) => (
-              <td key={cell.id} className={`px-4 py-2.5 ${cell.column.columnDef.meta?.className ?? ""}`}>
+              <td key={cell.id} className={`px-3 py-2 text-grid-cell ${cell.column.columnDef.meta?.className ?? ""}`}>
                 <table.FlexRender cell={cell} />
               </td>
             ))}
           </tr>
           {isOpen && renderDetail && (
-            <tr className="bg-teal-50/60 dark:bg-teal-950/30">
+            <tr className="bg-accent-soft">
               <td colSpan={colSpan} className="px-4 pt-1 pb-5 pl-12">
                 <div className="max-w-3xl">{renderDetail(row.original)}</div>
               </td>
@@ -269,9 +271,9 @@ export function DataGrid<T extends RowData>({
             defaultValue={q}
             maxLength={100}
             placeholder={searchPlaceholder}
-            className={`h-9 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 placeholder:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-400 ${focusRing}`}
+            className={`h-9 min-w-0 flex-1 rounded-md border border-line bg-surface px-3 placeholder:text-muted ${focusRing}`}
           />
-          <button type="submit" className={btn}>
+          <button type="submit" className={btnPrimary}>
             <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" />
             ค้นหา
           </button>
@@ -282,9 +284,9 @@ export function DataGrid<T extends RowData>({
         </a>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+      <div className="overflow-x-auto rounded-lg border border-line">
         <table aria-busy={loading} className="w-full border-collapse tabular-nums">
-          <thead className="bg-zinc-50 text-left text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+          <thead className="bg-surface text-left text-grid-head text-muted">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hasDetail && (
@@ -299,18 +301,18 @@ export function DataGrid<T extends RowData>({
                     <th
                       key={h.id}
                       aria-sort={dirNow === "asc" ? "ascending" : dirNow === "desc" ? "descending" : undefined}
-                      className={`px-4 py-2.5 font-medium whitespace-nowrap ${cls}`}
+                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${cls}`}
                     >
                       {h.column.getCanSort() ? (
                         <button
                           type="button"
                           onClick={h.column.getToggleSortingHandler()}
-                          className={`-mx-1 inline-flex items-center gap-1 rounded px-1 hover:text-zinc-900 dark:hover:text-zinc-100 ${dirNow ? "text-zinc-900 dark:text-zinc-100" : ""} ${focusRing}`}
+                          className={`-mx-1 inline-flex items-center gap-1 rounded px-1 hover:text-foreground ${dirNow ? "text-foreground" : ""} ${focusRing}`}
                         >
                           <table.FlexRender header={h} />
                           <Icon
                             d={dirNow === "asc" ? "M10 15V5M6 9l4-4 4 4" : dirNow === "desc" ? "M10 5v10M6 11l4 4 4-4" : "M7 8l3-3 3 3M7 12l3 3 3-3"}
-                            className={`size-3.5 ${dirNow ? "text-teal-700 dark:text-teal-400" : "opacity-50"}`}
+                            className={`size-3.5 ${dirNow ? "text-accent-text" : "opacity-50"}`}
                           />
                         </button>
                       ) : (
@@ -326,7 +328,7 @@ export function DataGrid<T extends RowData>({
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-zinc-600 dark:text-zinc-400">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-muted">
         <p role="status" className="tabular-nums">
           {loading ? "กำลังโหลด…" : `แสดง ${fmt(from)}–${fmt(to)} จาก ${fmt(total)} รายการ`}
         </p>
@@ -336,7 +338,7 @@ export function DataGrid<T extends RowData>({
             <select
               value={pageSize}
               onChange={(e) => setParams({ pageSize: Number(e.target.value) === DEFAULT_PAGE_SIZE ? null : e.target.value, page: null })}
-              className={`h-9 rounded-md border border-zinc-300 bg-white px-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 ${focusRing}`}
+              className={`h-9 rounded-md border border-line bg-surface px-2 text-foreground ${focusRing}`}
             >
               {PAGE_SIZES.map((n) => (
                 <option key={n} value={n}>
@@ -352,7 +354,7 @@ export function DataGrid<T extends RowData>({
             <button type="button" className={btn} aria-label="หน้าก่อน" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
               <Icon d="M12 5l-5 5 5 5" />
             </button>
-            <span className="px-2 tabular-nums text-zinc-900 dark:text-zinc-100">
+            <span className="px-2 tabular-nums text-foreground">
               หน้า {fmt(page)} / {fmt(pageCount)}
             </span>
             <button type="button" className={btn} aria-label="หน้าถัดไป" disabled={page >= pageCount} onClick={() => goToPage(page + 1)}>
