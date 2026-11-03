@@ -44,6 +44,16 @@
   - ในสรุปงาน ให้บอกว่าค้นหาอะไรไปแล้ว และเลือกใช้ตัวเดิม ขยายตัวเดิม หรือสร้างใหม่ เพราะอะไร
 - เมื่อเพิ่มกฎใหม่ในไฟล์นี้ ให้เขียนสั้น ระบุเหตุผล และไม่ซ้ำกับกฎเดิม
 
+### Shared component และ helper ที่มีแล้ว
+
+อ่านรายการนี้ก่อนค้นหรือสร้างเอง ทุก PR ที่เพิ่ม แก้ หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน
+
+- `@/lib/db`: เชื่อมต่อฐานข้อมูล 2 ฐานด้วย `mysql2` (server-only, pool แบบ lazy, env ตั้งใน `.env` ตาม `.env.example`)
+  - `his`: ฐาน HIS ของโรงพยาบาล (production) **อ่านอย่างเดียว ห้ามเขียน his ไม่ว่ากรณีใด** ใช้ `hisQuery<T>(sql, params)` เท่านั้น ยอมแค่ statement เดียวที่ขึ้นต้นด้วย SELECT/WITH/SHOW/DESCRIBE/EXPLAIN และทุก connection ตั้ง `SET SESSION TRANSACTION READ ONLY` ห้ามสร้าง pool หรือ connection ไป his เองเพื่อเลี่ยงข้อนี้ และ DB user ของ his ต้องมีสิทธิ์ SELECT เท่านั้น
+  - `insight`: ฐานของระบบเอง อ่านด้วย `insightQuery<T>(sql, params)` เขียนด้วย `insightExecute(sql, params)` (คืน `ResultSetHeader`)
+  - ส่งค่าผ่าน placeholder `?` ใน `params` เสมอ ห้ามต่อสตริง SQL วันที่คืนเป็น string เวลาไทย (`dateStrings`, `+07:00`)
+  - ตรวจการเชื่อมต่อได้ที่ `/api/tehnplk/db-health`
+
 ## การแบ่งงานให้ subagent
 
 กฎส่วนนี้ใช้กับ Claude Code ส่วน agent อื่นที่ไม่มี `sr`/`jr` ให้ข้ามได้
@@ -101,7 +111,8 @@ db-cli -v
 ### วิธีใช้
 
 - ก่อนใช้งานให้อ่าน options ด้วย `db-cli --skill` (ตัวย่อ `-s`) และใช้พารามิเตอร์ตัวย่อในคำสั่ง: `-g` engine, `-H` host, `-P` port, `-u` user, `-d` database, `-e` SQL, `-o` output ส่วน `-p` password ให้ใช้ `DB_PASSWORD` แทนเพื่อไม่เปิดเผยรหัสผ่านในคำสั่ง
-- อ่านค่าจริงจาก `.env`: `HOST`, `PORT`, `USER`, `PASSWORD`, `DATABASE` แล้วตั้งใน process เป็น `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` ตามลำดับ
+- โปรเจกต์มี 2 ฐาน ต้องระบุในรายงานทุกครั้งว่าตรวจฐานไหน: `his` (env `HIS_*`, อ่านอย่างเดียว) หรือ `insight` (env `INSIGHT_*`)
+- อ่านค่าจริงจาก `.env` ของฐานที่จะตรวจ: `HIS_HOST`, `HIS_PORT`, `HIS_USER`, `HIS_PASSWORD`, `HIS_DATABASE` (หรือ `INSIGHT_*` ชุดเดียวกัน) แล้วตั้งใน process เป็น `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` ตามลำดับ
 - CLI ไม่ได้โหลด `.env` หรือแปลงชื่อตัวแปรเหล่านี้ให้อัตโนมัติ ห้ามใช้ค่า `USER` จาก environment ของระบบแทนผู้ใช้ฐานข้อมูล
 - ตรวจการเชื่อมต่อและชื่อฐานข้อมูล:
 
@@ -114,3 +125,4 @@ db-cli -g my -e "SELECT 1 AS connection_ok, DATABASE() AS database_name;"
 ### ข้อห้าม
 
 - ห้ามใช้ `db-cli` รัน `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `CREATE` และคำสั่งอื่น ๆ ที่มีผลเปลี่ยนแปลงข้อมูล
+- ฐาน `his` เป็น production ห้ามรันคำสั่งเขียนทุกชนิดไม่ว่าผ่านเครื่องมือใด
