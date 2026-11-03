@@ -18,6 +18,6 @@ export const navItems: NavItem[] = [
   {
     label: "ตัวอย่าง",
     icon: "components",
-    children: [{ label: "Shared components", href: "/tehnplk/components-demo" }],
+    children: [{ label: "Shared components", href: "/example/components-demo" }],
   },
 ];
