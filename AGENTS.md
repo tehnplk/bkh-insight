@@ -21,10 +21,14 @@
 - ไฟล์ที่ต้องใช้ร่วมกันต้อง commit: `AGENTS.md`, `CLAUDE.md`, `.claude/agents/`, `.claude/skills/`, `.claude/settings.json`
 - ห้าม commit `.env*` (ยกเว้น `.env.example`), `CLAUDE.local.md`, `.claude/settings.local.json`, credential และ artifact ของการทดสอบ ถ้าต้องเพิ่ม env ตัวใหม่ ให้เพิ่มชื่อตัวแปรใน `.env.example` ด้วย (ไม่ใส่ค่าจริง)
 - Git:
-  - ทำงานบน branch ของตัวเอง ห้าม commit หรือ push ตรงเข้า `main`
-  - ก่อนเริ่มงานให้ pull ล่าสุด
+  - ทุกคนรวมทั้งเจ้าของ repo ต้องพัฒนาบน branch ของตัวเอง ตั้งชื่อ `{dev_name}/{module}` (หรือ `{dev_name}/{เรื่องที่แก้}`) ห้าม commit หรือ push ตรงเข้า `main`
+  - ก่อนเริ่มงานให้ pull `main` ล่าสุด แล้วแตก branch จาก `main`
   - ห้าม force push, rebase หรือ reset งานที่คนอื่น push แล้ว
   - commit และ push เฉพาะเมื่อผู้ใช้สั่ง
+  - การส่งโค้ดเข้า `main` ต้องทำผ่าน Pull Request เสมอ ทุกคนรวมทั้งเจ้าของ repo แม้แต่การแก้เล็กๆ หรือแก้แค่เอกสาร:
+    - push branch แล้วเปิด PR ด้วย `gh pr create --base main` หัวข้อ PR บอกว่าแก้อะไร ส่วน body ต้องมี: สรุปการเปลี่ยนแปลง, ไฟล์ที่กระทบ, วิธีทดสอบและผลทดสอบ, เรื่องที่กระทบคนอื่น (dependency, config, shared component)
+    - ห้าม merge PR เอง เว้นแต่ผู้ใช้สั่ง เมื่อเปิด PR แล้วให้ส่ง link ของ PR ให้ผู้ใช้
+    - ถ้ามี PR ของ branch นั้นเปิดอยู่แล้ว ให้ push commit เพิ่มเข้า PR เดิม ไม่ต้องเปิด PR ใหม่
 - ถ้าเจอการเปลี่ยนแปลงที่ตัวเองไม่ได้ทำ (ไฟล์เปลี่ยน, branch ใหม่, migration ใหม่) ให้ถือว่าเป็นงานของคนอื่น ห้ามย้อนกลับหรือเขียนทับ ถ้าขัดกับงานที่ทำอยู่ ให้แจ้งผู้ใช้
 - ถ้าจะแก้ dependency (`package.json`, lockfile) หรือ config ที่ใช้ร่วมกัน (`next.config.ts`, `tsconfig.json`, ESLint) ให้แจ้งผู้ใช้ในสรุปงานทุกครั้ง เพราะกระทบทุกคน
 - page และ API ต้องวางใต้ path `{dev_name}/{module}` เสมอ แต่ละคนจะได้แก้แต่โฟลเดอร์ของตัวเองและไม่ชนกัน:
