@@ -8,8 +8,8 @@
 git clone https://github.com/tehnplk/bkh-insight.git
 cd bkh-insight
 npm install
-cp .env.example .env   # แล้วกรอกค่า HIS_* และ INSIGHT_*
-node --env-file=.env scripts/migrate.mjs
+cp .env.example .env   # แล้วกรอกค่า HIS_*, INSIGHT_* และ AUTH_*
+npm run db:migrate
 npm run dev
 ```
 
