@@ -277,9 +277,8 @@ function Sidebar({ collapsed, headerAction, onNavigate, searchRef }: SidebarProp
             onKeyDown={(e) => {
               if (e.key === "Escape") setQuery("");
             }}
-            placeholder="ค้นหาเมนู"
             aria-label="ค้นหาเมนู"
-            className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
+            className="min-w-0 flex-1 bg-transparent text-foreground outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {searchRef && (
             <kbd className="shrink-0 rounded border border-line bg-background px-1.5 font-sans text-xs text-muted">

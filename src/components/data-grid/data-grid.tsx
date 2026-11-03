@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   columnFilteringFeature,
@@ -46,7 +46,6 @@ export type DataGridProps<T extends RowData> = {
   detailMode?: "modal" | "expand";
   /** หัวข้อของ modal */
   detailTitle?: (row: T) => ReactNode;
-  searchPlaceholder?: string;
 };
 
 const API_KEYS = ["page", "pageSize", "sort", "dir", "q"] as const;
@@ -72,12 +71,10 @@ export function DataGrid<T extends RowData>({
   renderDetail,
   detailMode = "modal",
   detailTitle,
-  searchPlaceholder = "ค้นหา",
 }: DataGridProps<T>) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const searchId = useId();
 
   // state ของ grid อยู่ใน URL ทั้งหมด (refresh/แชร์ link ได้หน้าเดิม) server เป็นคน validate
   const page = Math.max(1, Number(sp.get("page")) || 1);
@@ -260,19 +257,18 @@ export function DataGrid<T extends RowData>({
     <div className="flex flex-col gap-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 gap-2 sm:max-w-md">
-          <label htmlFor={searchId} className="sr-only">
-            {searchPlaceholder}
+          <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
+            <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
+            <input
+              key={q}
+              name="q"
+              type="search"
+              aria-label="ค้นหา"
+              defaultValue={q}
+              maxLength={100}
+              className="min-w-0 flex-1 bg-transparent outline-none"
+            />
           </label>
-          <input
-            key={q}
-            id={searchId}
-            name="q"
-            type="search"
-            defaultValue={q}
-            maxLength={100}
-            placeholder={searchPlaceholder}
-            className={`h-9 min-w-0 flex-1 rounded-md border border-line bg-surface px-3 placeholder:text-muted ${focusRing}`}
-          />
           <button type="submit" className={btnPrimary}>
             <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" />
             ค้นหา

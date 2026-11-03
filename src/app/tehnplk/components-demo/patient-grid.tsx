@@ -86,7 +86,6 @@ export function PatientGrid() {
         detailMode={mode}
         renderDetail={(p) => <PatientDetail p={p} />}
         detailTitle={(p) => `${p.name} · ${p.hn}`}
-        searchPlaceholder="ค้นหา HN ชื่อ หอผู้ป่วย หรือการวินิจฉัย"
       />
     </div>
   );
