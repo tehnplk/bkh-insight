@@ -23,6 +23,11 @@
 - Git:
   - ทุกคนรวมทั้งเจ้าของ repo ต้องพัฒนาบน branch ของตัวเอง ตั้งชื่อ `{dev_name}/{module}` (หรือ `{dev_name}/{เรื่องที่แก้}`) ห้าม commit หรือ push ตรงเข้า `main`
   - ก่อนเริ่มงานให้ pull `main` ล่าสุด แล้วแตก branch จาก `main`
+  - ทุกวันก่อนเริ่มเขียนโค้ด ทุกคนต้องดึง `main` ล่าสุดเข้า branch ของตัวเอง เพื่อลด conflict ตอนเปิด PR และให้เห็น shared component กับกฎใน AGENTS.md ล่าสุด:
+    - `git switch main` → `git pull` → `git switch {dev_name}/{module}` → `git merge main`
+    - ใช้ `merge` ห้ามใช้ `rebase` กับ branch ที่ push แล้ว เพราะต้อง force push
+    - ถ้ามี conflict ให้แจ้งผู้ใช้และแก้ร่วมกัน ห้ามเลือกทิ้งฝั่งของคนอื่นเอง
+    - หลัง merge ถ้า AGENTS.md เปลี่ยน ให้อ่านกฎใหม่ก่อนทำงานต่อ
   - ห้าม force push, rebase หรือ reset งานที่คนอื่น push แล้ว
   - commit และ push เฉพาะเมื่อผู้ใช้สั่ง
   - การส่งโค้ดเข้า `main` ต้องทำผ่าน Pull Request เสมอ ทุกคนรวมทั้งเจ้าของ repo แม้แต่การแก้เล็กๆ หรือแก้แค่เอกสาร:
