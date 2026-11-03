@@ -261,7 +261,7 @@ function Sidebar({ collapsed, headerAction, onNavigate, searchRef }: SidebarProp
           <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent text-accent-fg">
             <Icon name="pulse" className="size-[18px]" />
           </span>
-          <span className="truncate text-[15px] font-semibold tracking-tight">{APP_NAME}</span>
+          <span className="truncate text-base font-semibold tracking-tight">{APP_NAME}</span>
         </Link>
         {headerAction}
       </div>
@@ -277,12 +277,11 @@ function Sidebar({ collapsed, headerAction, onNavigate, searchRef }: SidebarProp
             onKeyDown={(e) => {
               if (e.key === "Escape") setQuery("");
             }}
-            placeholder="ค้นหาเมนู"
             aria-label="ค้นหาเมนู"
-            className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
+            className="min-w-0 flex-1 bg-transparent text-foreground outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {searchRef && (
-            <kbd className="shrink-0 rounded border border-line bg-background px-1.5 font-sans text-[11px] text-muted">
+            <kbd className="shrink-0 rounded border border-line bg-background px-1.5 font-sans text-xs text-muted">
               {mod} K
             </kbd>
           )}

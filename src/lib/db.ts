@@ -58,6 +58,9 @@ export function assertReadOnlySql(sql: string): void {
   }
 }
 
+/** Escape % _ \ so user text matches literally: `LIKE ?` with `%${escapeLike(q)}%` as the param. */
+export const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+
 /** Read from the hospital HIS (production, read-only). There is intentionally no write API for HIS. */
 export async function hisQuery<T = RowDataPacket>(sql: string, params: Params = []): Promise<T[]> {
   assertReadOnlySql(sql);

@@ -1,0 +1,373 @@
+"use client";
+
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  columnFilteringFeature,
+  createColumnHelper,
+  createExpandedRowModel,
+  globalFilteringFeature,
+  metaHelper,
+  rowExpandingFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
+  type ColumnDef,
+  type RowData,
+  type SortingState,
+} from "@tanstack/react-table";
+import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
+
+const features = tableFeatures({
+  columnFilteringFeature,
+  globalFilteringFeature,
+  rowSortingFeature,
+  rowPaginationFeature,
+  rowExpandingFeature,
+  expandedRowModel: createExpandedRowModel(),
+  /** className ใส่ให้ทั้ง th และ td เช่น "text-right" สำหรับตัวเลข */
+  columnMeta: metaHelper<{ className?: string }>(),
+});
+
+/** ใช้สร้าง columns ให้ DataGrid: const col = gridColumnHelper<Row>(); col.columns([col.accessor("hn", { header: "HN" })]) */
+export const gridColumnHelper = <T extends RowData>() => createColumnHelper<typeof features, T>();
+
+export type DataGridProps<T extends RowData> = {
+  /** API ตามสัญญาใน src/lib/grid-query.ts */
+  endpoint: string;
+  /** id (หรือ accessor key) ของคอลัมน์ = ชื่อที่ส่งเป็น sort ถ้า server ไม่ให้ sort ให้ใส่ enableSorting: false
+   *  ต้องเป็นค่าคงที่ (ประกาศนอก component) ไม่สร้างใหม่ทุก render */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- แต่ละคอลัมน์มีชนิดค่าต่างกัน เหมือน helper.columns() ของ TanStack
+  columns: ColumnDef<typeof features, T, any>[];
+  getRowId: (row: T) => string;
+  renderDetail?: (row: T) => ReactNode;
+  detailMode?: "modal" | "expand";
+  /** หัวข้อของ modal */
+  detailTitle?: (row: T) => ReactNode;
+};
+
+const API_KEYS = ["page", "pageSize", "sort", "dir", "q"] as const;
+const NO_ROWS: never[] = [];
+const fmt = (n: number) => n.toLocaleString("th-TH");
+const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const btnBase = `inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
+const btn = `${btnBase} border-line bg-surface text-foreground hover:bg-hover`;
+const btnPrimary = `${btnBase} border-transparent bg-accent text-accent-fg hover:bg-accent/90`;
+
+function Icon({ d, className = "size-4" }: { d: string; className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+export function DataGrid<T extends RowData>({
+  endpoint,
+  columns,
+  getRowId,
+  renderDetail,
+  detailMode = "modal",
+  detailTitle,
+}: DataGridProps<T>) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+
+  // state ของ grid อยู่ใน URL ทั้งหมด (refresh/แชร์ link ได้หน้าเดิม) server เป็นคน validate
+  const page = Math.max(1, Number(sp.get("page")) || 1);
+  const pageSize = Number(sp.get("pageSize")) || DEFAULT_PAGE_SIZE;
+  const sort = sp.get("sort");
+  const dir = sp.get("dir") === "desc" ? "desc" : "asc";
+  const q = sp.get("q") ?? "";
+
+  const apiParams = new URLSearchParams();
+  for (const k of API_KEYS) {
+    const v = sp.get(k);
+    if (v) apiParams.set(k, v);
+  }
+  const apiQuery = apiParams.toString();
+  apiParams.delete("page");
+  apiParams.delete("pageSize");
+  apiParams.set("format", "xlsx");
+  const exportHref = `${endpoint}?${apiParams}`;
+
+  const [reload, setReload] = useState(0);
+  const requestKey = `${endpoint}?${apiQuery}#${reload}`;
+  const [result, setResult] = useState<{ key: string; data?: GridPage<T>; error?: string }>({ key: "" });
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${endpoint}?${apiQuery}`, { signal: ctrl.signal })
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(body?.error ?? `โหลดข้อมูลไม่สำเร็จ (HTTP ${res.status})`);
+        return body as GridPage<T>;
+      })
+      .then(
+        (data) => setResult({ key: requestKey, data }),
+        (e: Error) => {
+          if (!ctrl.signal.aborted) setResult((prev) => ({ key: requestKey, data: prev.data, error: e.message }));
+        },
+      );
+    return () => ctrl.abort();
+  }, [endpoint, apiQuery, requestKey]);
+
+  const loading = result.key !== requestKey;
+  const error = loading ? undefined : result.error;
+  const data = result.data;
+  const total = data?.total ?? 0;
+
+  const [selected, setSelected] = useState<T | null>(null);
+
+  function setParams(changes: Record<string, string | number | null>) {
+    const next = new URLSearchParams(sp.toString());
+    for (const [k, v] of Object.entries(changes)) {
+      if (v === null || v === "") next.delete(k);
+      else next.set(k, String(v));
+    }
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+  const goToPage = (p: number) => setParams({ page: p > 1 ? p : null });
+
+  const sorting: SortingState = sort ? [{ id: sort, desc: dir === "desc" }] : [];
+  const table = useTable({
+    features,
+    data: data?.rows ?? NO_ROWS,
+    columns,
+    getRowId,
+    state: { sorting, globalFilter: q, pagination: { pageIndex: page - 1, pageSize } },
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    rowCount: total,
+    enableMultiSort: false,
+    sortDescFirst: false,
+    onSortingChange: (updater) => {
+      const s = (typeof updater === "function" ? updater(sorting) : updater)[0];
+      setParams({ sort: s?.id ?? null, dir: s?.desc ? "desc" : null, page: null });
+    },
+    onGlobalFilterChange: (updater) => {
+      const v = typeof updater === "function" ? updater(q) : updater;
+      setParams({ q: String(v ?? "").trim() || null, page: null });
+    },
+    getRowCanExpand: () => detailMode === "expand" && !!renderDetail,
+  });
+
+  const pageCount = Math.max(1, table.getPageCount());
+  const rows = table.getRowModel().rows;
+  const hasDetail = !!renderDetail;
+  const colSpan = table.getAllLeafColumns().length + (hasDetail ? 1 : 0);
+  const from = total ? (page - 1) * pageSize + 1 : 0;
+  const to = Math.min(page * pageSize, total);
+
+  function onSearch(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    table.setGlobalFilter(String(new FormData(e.currentTarget).get("q") ?? ""));
+  }
+
+  let body: ReactNode;
+  if (error) {
+    body = (
+      <tr>
+        <td colSpan={colSpan} className="px-4 py-12 text-center">
+          <p className="font-medium text-danger">โหลดข้อมูลไม่สำเร็จ</p>
+          <p className="mt-1 text-sm text-muted">{error}</p>
+          <button type="button" className={`${btn} mt-4`} onClick={() => setReload((n) => n + 1)}>
+            ลองอีกครั้ง
+          </button>
+        </td>
+      </tr>
+    );
+  } else if (!data) {
+    body = Array.from({ length: Math.min(pageSize, 8) }, (_, i) => (
+      <tr key={i} className="border-t border-line">
+        <td colSpan={colSpan} className="px-4 py-3">
+          <div className="h-4 animate-pulse rounded bg-hover"style={{ width: `${90 - (i % 3) * 15}%` }} />
+        </td>
+      </tr>
+    ));
+  } else if (rows.length === 0) {
+    body = (
+      <tr>
+        <td colSpan={colSpan} className="px-4 py-12 text-center">
+          <p className="font-medium">
+            {total > 0 ? "หน้านี้ไม่มีข้อมูล" : q ? `ไม่พบรายการที่ตรงกับ “${q}”` : "ยังไม่มีข้อมูล"}
+          </p>
+          {total > 0 ? (
+            <button type="button" className={`${btn} mt-4`} onClick={() => goToPage(1)}>
+              ไปหน้าแรก
+            </button>
+          ) : (
+            q && (
+              <button type="button" className={`${btn} mt-4`} onClick={() => setParams({ q: null, page: null })}>
+                ล้างการค้นหา
+              </button>
+            )
+          )}
+        </td>
+      </tr>
+    );
+  } else {
+    body = rows.map((row) => {
+      const isOpen = row.getIsExpanded();
+      return (
+        <Fragment key={row.id}>
+          <tr className={`border-t border-line ${isOpen ? "bg-accent-soft text-accent-text" : "hover:bg-surface-sunken"}`}>
+            {hasDetail && (
+              <td className="w-0 py-1 pr-0 pl-2">
+                <button
+                  type="button"
+                  aria-label="รายละเอียด"
+                  aria-expanded={detailMode === "expand" ? isOpen : undefined}
+                  aria-haspopup={detailMode === "modal" ? "dialog" : undefined}
+                  onClick={detailMode === "expand" ? row.getToggleExpandedHandler() : () => setSelected(row.original)}
+                  className={`grid size-7 place-items-center rounded-md hover:bg-hover hover:text-foreground ${isOpen ? "" : "text-muted"} ${focusRing}`}
+                >
+                  {detailMode === "expand" ? (
+                    <Icon d="M8 5l5 5-5 5" className={`size-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
+                  ) : (
+                    <Icon d="M11 4h5v5M16 4l-7 7M14 12v3a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h3" />
+                  )}
+                </button>
+              </td>
+            )}
+            {row.getAllCells().map((cell) => (
+              <td key={cell.id} className={`px-3 py-2 text-grid-cell ${cell.column.columnDef.meta?.className ?? ""}`}>
+                <table.FlexRender cell={cell} />
+              </td>
+            ))}
+          </tr>
+          {isOpen && renderDetail && (
+            <tr className="bg-accent-soft">
+              <td colSpan={colSpan} className="px-4 pt-1 pb-5 pl-12">
+                <div className="max-w-3xl">{renderDetail(row.original)}</div>
+              </td>
+            </tr>
+          )}
+        </Fragment>
+      );
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 gap-2 sm:max-w-md">
+          <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
+            <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
+            <input
+              key={q}
+              name="q"
+              type="search"
+              aria-label="ค้นหา"
+              defaultValue={q}
+              maxLength={100}
+              className="min-w-0 flex-1 bg-transparent outline-none"
+            />
+          </label>
+          <button type="submit" className={btnPrimary}>
+            <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" />
+            ค้นหา
+          </button>
+        </form>
+        <a href={exportHref} download className={`${btn} aria-disabled:pointer-events-none aria-disabled:opacity-40`} aria-disabled={!total || undefined}>
+          <Icon d="M10 3v10M6 9l4 4 4-4M4 16h12" />
+          ส่งออก Excel
+        </a>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table aria-busy={loading} className="w-full border-collapse tabular-nums">
+          <thead className="bg-surface text-left text-grid-head text-muted">
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id}>
+                {hasDetail && (
+                  <th className="w-0 pl-2">
+                    <span className="sr-only">รายละเอียด</span>
+                  </th>
+                )}
+                {hg.headers.map((h) => {
+                  const dirNow = h.column.getIsSorted();
+                  const cls = h.column.columnDef.meta?.className ?? "";
+                  return (
+                    <th
+                      key={h.id}
+                      aria-sort={dirNow === "asc" ? "ascending" : dirNow === "desc" ? "descending" : undefined}
+                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${cls}`}
+                    >
+                      {h.column.getCanSort() ? (
+                        <button
+                          type="button"
+                          onClick={h.column.getToggleSortingHandler()}
+                          className={`-mx-1 inline-flex items-center gap-1 rounded px-1 hover:text-foreground ${dirNow ? "text-foreground" : ""} ${focusRing}`}
+                        >
+                          <table.FlexRender header={h} />
+                          <Icon
+                            d={dirNow === "asc" ? "M10 15V5M6 9l4-4 4 4" : dirNow === "desc" ? "M10 5v10M6 11l4 4 4-4" : "M7 8l3-3 3 3M7 12l3 3 3-3"}
+                            className={`size-3.5 ${dirNow ? "text-accent-text" : "opacity-50"}`}
+                          />
+                        </button>
+                      ) : (
+                        <table.FlexRender header={h} />
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            ))}
+          </thead>
+          <tbody className={`transition-opacity ${loading && data ? "opacity-50" : ""}`}>{body}</tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-muted">
+        <p role="status" className="tabular-nums">
+          {loading ? "กำลังโหลด…" : `แสดง ${fmt(from)}–${fmt(to)} จาก ${fmt(total)} รายการ`}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2">
+            แถวต่อหน้า
+            <select
+              value={pageSize}
+              onChange={(e) => setParams({ pageSize: Number(e.target.value) === DEFAULT_PAGE_SIZE ? null : e.target.value, page: null })}
+              className={`h-9 rounded-md border border-line bg-surface px-2 text-foreground ${focusRing}`}
+            >
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <nav aria-label="เลือกหน้า" className="flex items-center gap-1">
+            <button type="button" className={btn} aria-label="หน้าแรก" disabled={page <= 1} onClick={() => goToPage(1)}>
+              <Icon d="M10 5l-5 5 5 5M15 5l-5 5 5 5" />
+            </button>
+            <button type="button" className={btn} aria-label="หน้าก่อน" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+              <Icon d="M12 5l-5 5 5 5" />
+            </button>
+            <span className="px-2 tabular-nums text-foreground">
+              หน้า {fmt(page)} / {fmt(pageCount)}
+            </span>
+            <button type="button" className={btn} aria-label="หน้าถัดไป" disabled={page >= pageCount} onClick={() => goToPage(page + 1)}>
+              <Icon d="M8 5l5 5-5 5" />
+            </button>
+            <button type="button" className={btn} aria-label="หน้าสุดท้าย" disabled={page >= pageCount} onClick={() => goToPage(pageCount)}>
+              <Icon d="M5 5l5 5-5 5M10 5l5 5-5 5" />
+            </button>
+          </nav>
+        </div>
+      </div>
+
+      {detailMode === "modal" && renderDetail && (
+        <DetailModal open={selected !== null} onClose={() => setSelected(null)} title={selected && detailTitle ? detailTitle(selected) : "รายละเอียด"}>
+          {selected && renderDetail(selected)}
+        </DetailModal>
+      )}
+    </div>
+  );
+}

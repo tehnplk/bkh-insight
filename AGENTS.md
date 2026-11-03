@@ -23,6 +23,11 @@
 - Git:
   - ทุกคนรวมทั้งเจ้าของ repo ต้องพัฒนาบน branch ของตัวเอง ตั้งชื่อ `{dev_name}/{module}` (หรือ `{dev_name}/{เรื่องที่แก้}`) ห้าม commit หรือ push ตรงเข้า `main`
   - ก่อนเริ่มงานให้ pull `main` ล่าสุด แล้วแตก branch จาก `main`
+  - ทุกวันก่อนเริ่มเขียนโค้ด ทุกคนต้องดึง `main` ล่าสุดเข้า branch ของตัวเอง เพื่อลด conflict ตอนเปิด PR และให้เห็น shared component กับกฎใน AGENTS.md ล่าสุด:
+    - `git switch main` → `git pull` → `git switch {dev_name}/{module}` → `git merge main`
+    - ใช้ `merge` ห้ามใช้ `rebase` กับ branch ที่ push แล้ว เพราะต้อง force push
+    - ถ้ามี conflict ให้แจ้งผู้ใช้และแก้ร่วมกัน ห้ามเลือกทิ้งฝั่งของคนอื่นเอง
+    - หลัง merge ถ้า AGENTS.md เปลี่ยน ให้อ่านกฎใหม่ก่อนทำงานต่อ
   - ห้าม force push, rebase หรือ reset งานที่คนอื่น push แล้ว
   - commit และ push เฉพาะเมื่อผู้ใช้สั่ง
   - การส่งโค้ดเข้า `main` ต้องทำผ่าน Pull Request เสมอ ทุกคนรวมทั้งเจ้าของ repo แม้แต่การแก้เล็กๆ หรือแก้แค่เอกสาร:
@@ -46,13 +51,41 @@
 
 ### Shared component และ helper ที่มีแล้ว
 
-อ่านรายการนี้ก่อนค้นหรือสร้างเอง ทุก PR ที่เพิ่ม แก้ หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน
+อ่านรายการนี้ก่อนค้นหรือสร้าง component เอง (ขั้นแรกของกฎ "ก่อนสร้าง component ใหม่") ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน รายการจะได้ตรงกับโค้ดจริง ตัวอย่างใช้งานจริงดูที่ `src/app/tehnplk/components-demo/`
 
+- `AppShell` (`@/components/app-shell/app-shell`): main layout ทุกหน้า มี sidebar ย่อได้ด้วย Ctrl/⌘+B ค้นหาเมนูด้วย Ctrl/⌘+K, topbar มี breadcrumb และปุ่มสลับธีม ใช้ใน `src/app/layout.tsx` แล้ว หน้าใหม่ไม่ต้องทำ layout เอง (AppShell มี `<main>` และ padding ให้แล้ว หน้าไม่ต้องใส่ `<main>` ซ้ำ)
+- `navItems` (`@/components/app-shell/nav-items`): ต้องเพิ่มเมนูทุกครั้งที่สร้างหน้า `{dev_name}/{module}` หน้าเดี่ยวใช้ `{ label, href, icon }` ส่วนหมวดใช้ `{ label, icon, children: [...] }` ชื่อไอคอนเลือกจาก `@/components/app-shell/icons` ถ้าไม่มีให้เพิ่ม SVG ในไฟล์นั้น
+- `ThemeSwitch` (`@/components/app-shell/theme-switch`): ปุ่มสลับธีม สว่าง/มืด/ตามระบบ (อยู่ใน topbar ของ AppShell แล้ว)
+- design token ใน `src/app/globals.css` ใช้ผ่าน Tailwind เช่น `bg-surface`, `bg-surface-sunken`, `bg-hover`, `border-line`, `text-muted`, `bg-accent text-accent-fg`, `bg-accent-soft text-accent-text`, `ring-ring` และ `{danger|warning|success}` (`text-*`, `bg-*-soft`, `border-*-line`) ห้ามใช้สีตายตัว (`zinc-*`, `white`, `#hex`) ทุก token มีทั้งสองธีมอยู่แล้วจึงไม่ต้องเขียน `dark:` ถ้าจำเป็นต้องใช้ `dark:` จะอิง `data-theme` ไม่ใช่ `prefers-color-scheme`
+  - ขนาดตัวอักษรใน content ไม่เกิน 13px ยกเว้นหัวข้อ page/section ใช้ `text-title` (14px, semibold) ใช้เฉพาะ type scale ใน globals.css (`text-xs` 11px, `text-sm` 12px, `text-base` 13px, `text-title`; `text-lg` ขึ้นไปถูกปิดไว้) ห้ามกำหนดขนาดเอง (`text-[..px]`, `font-size`) ลำดับชั้นอื่นแยกด้วยน้ำหนักและสี
+  - DataGrid ใช้ token ของตัวเอง `text-grid-head` (13px) และ `text-grid-cell` (11px) ใน globals.css เป็นค่าทดลอง ปรับที่ token ที่เดียว
+  - ส่วนหัวของ page ต้องไม่ slop เพราะผู้ใช้ต้องรู้ทันทีว่าเป็นหน้าอะไรโดยไม่ต้องอ่านเพิ่ม:
+    - มีแค่หัวข้อสั้นๆ (คำนามบอกว่าเป็นหน้าอะไร เช่น "ผู้ป่วยนอกรายวัน", "ยาเบิกจ่ายตามแผนก") และปุ่ม action หรือ filter ถ้ามี
+    - ห้ามมีคำอธิบายใต้หัวข้อ ทั้งอธิบายข้อมูล ("แสดงรายการผู้ป่วยนอก...") และบอกวิธีใช้ ("คลิกที่แถวเพื่อดูรายละเอียด", "ค้นหาด้วยชื่อหรือ HN") ช่วงเวลาหรือแหล่งข้อมูลถ้าจำเป็นให้แสดงเป็นค่าใน filter หรือ control แทนประโยค
+    - ห้ามใส่ placeholder หรือข้อความแนะนำวิธีใช้ใน input ให้ใช้ aria-label และไอคอนแทน (kbd badge คีย์ลัด เช่น `Ctrl K` ใช้ได้)
+    - ห้ามคำทักทาย ("ยินดีต้อนรับ"), คำฟุ้งเฟ้อ ("ครบวงจร", "อย่างมีประสิทธิภาพ", "ข้อมูลเชิงลึก", "ทรงพลัง", "ยกระดับ", "ชาญฉลาด"), ประโยคเกริ่นที่ไม่มีข้อมูล, emoji และเครื่องหมายตกใจ
+    - ตรวจ copy ของหัวหน้าใหม่ด้วย skill `impeccable` (clarify) ทุกครั้ง
+- `DataGrid` (`@/components/data-grid/data-grid`): ตารางข้อมูลจาก API แบบ server-side ทั้ง sort, ค้นหา, แบ่งหน้า และปุ่มส่งออก Excel state อยู่ใน URL (`page`, `pageSize`, `sort`, `dir`, `q`) จึง refresh หรือแชร์ link ได้หน้าเดิม
+  - props: `endpoint`, `columns` (สร้างด้วย `gridColumnHelper<Row>()` ประกาศนอก component), `getRowId`, `renderDetail?(row)`, `detailMode?: "modal" | "expand"`, `detailTitle?(row)` (ช่องค้นหาไม่มี placeholder ใช้ `aria-label="ค้นหา"` กับไอคอนแว่นขยาย)
+  - ใช้ `useSearchParams` จึงต้องครอบด้วย `<Suspense>` และ `columns`/`renderDetail` เป็นฟังก์ชัน จึงต้องวางใน client component ของ module
+- `DetailModal` (`@/components/detail-modal/detail-modal`): modal จาก `<dialog>` ของ browser ปิดด้วย Esc หรือปุ่มปิด props: `open`, `onClose`, `title`, `children`
+- `parseGridQuery` (`@/lib/grid-query`): ใช้ใน route handler ที่ DataGrid เรียก สัญญา API:
+  - request: `GET ?page=1&pageSize=20&sort=<col>&dir=asc|desc&q=<text>[&format=xlsx]` ค่า `pageSize` สูงสุด `MAX_PAGE_SIZE` (100) และ `sort` ต้องอยู่ใน allowlist ที่ route ส่งให้ ค่าไม่ถูกต้องตอบ 400 `{ error }`
+  - response: `{ rows, total }` (`total` = จำนวนแถวทั้งหมดหลังค้นหา) ส่วน `format=xlsx` ส่งไฟล์ทุกแถวตาม `sort`/`q` ปัจจุบัน ไม่สน `page`
+  - ต่อ DB: `sort` ผ่าน allowlist แล้วจึงใช้เป็นชื่อคอลัมน์ได้ ส่วน `q` ต้องส่งเป็น bind parameter เสมอ และคอลัมน์ที่ค้นหาให้ route กำหนดเอง
+- `xlsxResponse` (`@/lib/xlsx`): `xlsxResponse(filename, columns, rows)` คืน `Response` ไฟล์ .xlsx (exceljs) สำหรับ `format=xlsx`
 - `@/lib/db`: เชื่อมต่อฐานข้อมูล 2 ฐานด้วย `mysql2` (server-only, pool แบบ lazy, env ตั้งใน `.env` ตาม `.env.example`)
   - `his`: ฐาน HIS ของโรงพยาบาล (production) **อ่านอย่างเดียว ห้ามเขียน his ไม่ว่ากรณีใด** ใช้ `hisQuery<T>(sql, params)` เท่านั้น ยอมแค่ statement เดียวที่ขึ้นต้นด้วย SELECT/WITH/SHOW/DESCRIBE/EXPLAIN และทุก connection ตั้ง `SET SESSION TRANSACTION READ ONLY` ห้ามสร้าง pool หรือ connection ไป his เองเพื่อเลี่ยงข้อนี้ และ DB user ของ his ต้องมีสิทธิ์ SELECT เท่านั้น
   - `insight`: ฐานของระบบเอง อ่านด้วย `insightQuery<T>(sql, params)` เขียนด้วย `insightExecute(sql, params)` (คืน `ResultSetHeader`)
-  - ส่งค่าผ่าน placeholder `?` ใน `params` เสมอ ห้ามต่อสตริง SQL วันที่คืนเป็น string เวลาไทย (`dateStrings`, `+07:00`)
-  - ตรวจการเชื่อมต่อได้ที่ `/api/tehnplk/db-health`
+  - `escapeLike(s)`: escape `%` `_` `\` สำหรับ `LIKE ?` ส่งค่าเป็น `%${escapeLike(q)}%`
+  - วันที่คืนเป็น string เวลาไทย (`dateStrings`, `+07:00`) ตรวจการเชื่อมต่อได้ที่ `/api/tehnplk/db-health`
+  - ป้องกัน SQL injection (repo นี้ไม่ใช้ Prisma หรือ ORM อื่น) การรีวิว PR ที่มี SQL ต้องตรวจข้อนี้ทุกครั้ง:
+    - เขียน SQL ตรงผ่าน `@/lib/db` เท่านั้น ห้ามสร้าง connection เอง และห้ามเปิด `multipleStatements`
+    - ทุกค่าที่มาจากผู้ใช้, URL, body หรือ DB อื่น ส่งเป็น bind parameter (`?`) ห้ามต่อ string หรือใช้ template literal ใส่ค่าลงใน SQL
+    - identifier (ชื่อคอลัมน์ ตาราง ทิศ sort) ส่งเป็น parameter ไม่ได้ ให้แปลงผ่าน allowlist (map ค่าที่รับมาไปเป็นชื่อจริงที่กำหนดในโค้ด) เท่านั้น เหมือน `parseGridQuery`
+    - `LIKE`: escape ด้วย `escapeLike` ก่อน แล้วส่งเป็น parameter
+    - `IN (...)`: สร้าง placeholder ตามจำนวนค่า (`IN (?, ?, ?)`) และห้ามส่ง list ว่าง
+    - `LIMIT`/`OFFSET`: validate เป็นจำนวนเต็มในช่วงที่กำหนดก่อน แล้วส่งเป็น parameter
 
 ## การแบ่งงานให้ subagent
 
