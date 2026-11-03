@@ -1,14 +1,14 @@
 import "server-only";
 import mysql from "mysql2/promise";
-import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import type { Pool as MysqlPool, RowDataPacket } from "mysql2/promise";
 import type { PoolConnection as CoreConnection, ExecuteValues } from "mysql2";
+import { Pool as PgPool, types } from "pg";
+import type { CustomTypesConfig } from "pg";
 
 type Db = "HIS" | "INSIGHT";
-type Params = ExecuteValues[]; // positional `?` placeholders
 
 // Cached on globalThis so dev HMR reuses pools instead of opening new ones on every reload.
-const cache = globalThis as typeof globalThis & { __dbPools?: Partial<Record<Db, Pool>> };
-const pools = (cache.__dbPools ??= {});
+const cache = globalThis as typeof globalThis & { __hisPool?: MysqlPool; __insightPool?: PgPool };
 
 function config(db: Db) {
   const keys = ["HOST", "PORT", "USER", "PASSWORD", "DATABASE"].map((k) => `${db}_${k}`);
@@ -19,30 +19,49 @@ function config(db: Db) {
   return { host, port: Number(port), user, password, database };
 }
 
-function pool(db: Db): Pool {
-  if (pools[db]) return pools[db];
+/** HIS = HOSxP on MySQL (production, read-only). */
+function hisPool(): MysqlPool {
+  if (cache.__hisPool) return cache.__hisPool;
   const p = mysql.createPool({
-    ...config(db),
+    ...config("HIS"),
     charset: "UTF8MB4_UNICODE_CI",
     timezone: "+07:00",
     dateStrings: true, // DATE/DATETIME come back as Thai-local strings, no UTC shift
     multipleStatements: false,
-    connectionLimit: db === "HIS" ? 3 : 10, // keep the production HIS lightly loaded
-    maxIdle: db === "HIS" ? 1 : 5,
+    connectionLimit: 3, // keep the production HIS lightly loaded
+    maxIdle: 1,
     idleTimeout: 60_000,
     queueLimit: 50,
     connectTimeout: 10_000,
     enableKeepAlive: true,
   });
-  if (db === "HIS") {
-    // Runs before any query on a new connection; a connection that cannot be made read-only is destroyed.
-    // The event hands over the core (callback) connection despite the promise typings.
-    p.on("connection", (c) => {
-      const conn = c as unknown as CoreConnection;
-      conn.query("SET SESSION TRANSACTION READ ONLY", (err) => err && conn.destroy());
-    });
-  }
-  return (pools[db] = p);
+  // Runs before any query on a new connection; a connection that cannot be made read-only is destroyed.
+  // The event hands over the core (callback) connection despite the promise typings.
+  p.on("connection", (c) => {
+    const conn = c as unknown as CoreConnection;
+    conn.query("SET SESSION TRANSACTION READ ONLY", (err) => err && conn.destroy());
+  });
+  return (cache.__hisPool = p);
+}
+
+// DATE/TIMESTAMP/TIMESTAMPTZ come back as the server's text (Thai time via the session timezone),
+// matching his. Scoped to the insight pool, so pg's global type parsers stay untouched.
+const DATE_TYPES = new Set<number>([types.builtins.DATE, types.builtins.TIMESTAMP, types.builtins.TIMESTAMPTZ]);
+const insightTypes: CustomTypesConfig = {
+  getTypeParser: (id, format) => (DATE_TYPES.has(id) ? (v: string) => v : types.getTypeParser(id, format)),
+};
+
+/** INSIGHT = this app's own PostgreSQL. */
+function insightPool(): PgPool {
+  return (cache.__insightPool ??= new PgPool({
+    ...config("INSIGHT"),
+    options: "-c timezone=Asia/Bangkok",
+    types: insightTypes,
+    max: 10,
+    idleTimeoutMillis: 60_000,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+  }));
 }
 
 // ponytail: this guard is only a backstop. The real protection is the HIS DB user having SELECT-only
@@ -58,24 +77,30 @@ export function assertReadOnlySql(sql: string): void {
   }
 }
 
-/** Escape % _ \ so user text matches literally: `LIKE ?` with `%${escapeLike(q)}%` as the param. */
+/**
+ * Escape % _ \ so user text matches literally. Works for both DBs: `\` is the default LIKE escape in
+ * MySQL and PostgreSQL. his: `LIKE ?`, insight: `LIKE $1`, with `%${escapeLike(q)}%` as the param.
+ */
 export const escapeLike = (s: string) => s.replace(/[\\%_]/g, "\\$&");
 
-/** Read from the hospital HIS (production, read-only). There is intentionally no write API for HIS. */
-export async function hisQuery<T = RowDataPacket>(sql: string, params: Params = []): Promise<T[]> {
+/** Read from the hospital HIS (production, read-only). Placeholders are `?`. There is intentionally no write API for HIS. */
+export async function hisQuery<T = RowDataPacket>(sql: string, params: ExecuteValues[] = []): Promise<T[]> {
   assertReadOnlySql(sql);
-  const [rows] = await pool("HIS").query<RowDataPacket[]>(sql, params);
+  const [rows] = await hisPool().query<RowDataPacket[]>(sql, params);
   return rows as T[];
 }
 
-/** Read from the app's own database. */
-export async function insightQuery<T = RowDataPacket>(sql: string, params: Params = []): Promise<T[]> {
-  const [rows] = await pool("INSIGHT").query<RowDataPacket[]>(sql, params);
+/** Read from the app's own database. Placeholders are `$1, $2, …` (PostgreSQL), not `?`. */
+export async function insightQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const { rows } = await insightPool().query(sql, params);
   return rows as T[];
 }
 
-/** INSERT/UPDATE/DELETE on the app's own database. */
-export async function insightExecute(sql: string, params: Params = []): Promise<ResultSetHeader> {
-  const [result] = await pool("INSIGHT").execute<ResultSetHeader>(sql, params);
-  return result;
+/**
+ * INSERT/UPDATE/DELETE on the app's own database. Placeholders are `$1, $2, …`.
+ * Need generated values back? Use `insightQuery` with `RETURNING`.
+ */
+export async function insightExecute(sql: string, params: unknown[] = []): Promise<{ rowCount: number }> {
+  const { rowCount } = await insightPool().query(sql, params);
+  return { rowCount: rowCount ?? 0 };
 }
