@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
-import type { Patient } from "@/app/api/tehnplk/components-demo/patients";
+import type { Patient } from "@/app/api/example/components-demo/patients";
 
 const STATUS_STYLE: Record<Patient["status"], string> = {
   รักษาอยู่: "bg-success-soft text-success border border-success-line",
@@ -80,7 +80,7 @@ export function PatientGrid() {
       </nav>
       <DataGrid<Patient>
         key={mode}
-        endpoint="/api/tehnplk/components-demo"
+        endpoint="/api/example/components-demo"
         columns={columns}
         getRowId={(p) => p.hn}
         detailMode={mode}

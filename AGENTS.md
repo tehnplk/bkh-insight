@@ -14,11 +14,11 @@
 
 ## ทำงานร่วมกันหลายคน
 
-โปรเจกต์นี้มีผู้พัฒนาหลายคน และแต่ละคนอาจใช้ AI agent คนละตัว ไฟล์นี้จึงเป็นกฎกลางที่ทุก agent ต้องอ่าน (`CLAUDE.md` แค่ import ไฟล์นี้)
+โปรเจกต์นี้มีผู้พัฒนาหลายคน และแต่ละคนอาจใช้ AI agent คนละตัว ไฟล์นี้จึงเป็นกฎกลางที่ทุก agent ต้องอ่าน (`CLAUDE.md` และ `GEMINI.md` แค่ import ไฟล์นี้ ห้ามเขียนกฎลงในสองไฟล์นั้น)
 
 - กฎของโปรเจกต์เขียนไว้ที่ไฟล์นี้ที่เดียว ห้ามใส่ path, ชื่อผู้ใช้ หรือการตั้งค่าที่มีเฉพาะในเครื่องตัวเอง (เช่น `~/.claude/...`, `C:\Users\...`)
 - ความชอบส่วนตัว เช่น ภาษาที่ตอบหรือสไตล์การทำงาน ให้เก็บใน config ส่วนตัว (`~/.claude/CLAUDE.md`, `CLAUDE.local.md`) ห้ามใส่ในไฟล์นี้
-- ไฟล์ที่ต้องใช้ร่วมกันต้อง commit: `AGENTS.md`, `CLAUDE.md`, `.claude/agents/`, `.claude/skills/`, `.claude/settings.json`
+- ไฟล์ที่ต้องใช้ร่วมกันต้อง commit: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/agents/`, `.claude/skills/`, `.claude/settings.json`
 - ห้าม commit `.env*` (ยกเว้น `.env.example`), `CLAUDE.local.md`, `.claude/settings.local.json`, credential และ artifact ของการทดสอบ ถ้าต้องเพิ่ม env ตัวใหม่ ให้เพิ่มชื่อตัวแปรใน `.env.example` ด้วย (ไม่ใส่ค่าจริง)
 - Git:
   - ทุกคนรวมทั้งเจ้าของ repo ต้องพัฒนาบน branch ของตัวเอง ตั้งชื่อ `{dev_name}/{module}` (หรือ `{dev_name}/{เรื่องที่แก้}`) ห้าม commit หรือ push ตรงเข้า `main`
@@ -28,6 +28,11 @@
     - ใช้ `merge` ห้ามใช้ `rebase` กับ branch ที่ push แล้ว เพราะต้อง force push
     - ถ้ามี conflict ให้แจ้งผู้ใช้และแก้ร่วมกัน ห้ามเลือกทิ้งฝั่งของคนอื่นเอง
     - หลัง merge ถ้า AGENTS.md เปลี่ยน ให้อ่านกฎใหม่ก่อนทำงานต่อ
+  - ถ้าคนเดียวทำงานหลายเครื่อง งานบนเครื่องอื่นจะอยู่บน branch ของตัวเองที่ push ไว้ ไม่ใช่บน `main` จึงต้องดึง branch ตัวเองก่อน merge `main`:
+    - เริ่มงาน: `git switch main` → `git pull` → `git switch {dev_name}/{module}` → `git pull` → `git merge main`
+    - ก่อนเลิกงานหรือย้ายเครื่อง: commit และ push branch ตัวเองทุกครั้ง แม้งานยังไม่เสร็จ (ข้อความขึ้นต้น `wip:`) agent ต้องเตือนผู้ใช้ให้สั่ง push เพราะ agent push เองไม่ได้
+    - ตั้ง `git config --global pull.rebase false` ทุกเครื่อง ถ้าสองเครื่องมี commit ที่ยังไม่ push ชนกัน `git pull` จะ merge ให้ ห้ามแก้ด้วย force push
+    - `.env` ไม่อยู่ใน git ต้องตั้งแยกทุกเครื่อง ส่วน `{dev_name}/handoff.md` ต้อง commit และ push ก่อน agent บนอีกเครื่องถึงจะอ่านได้
   - ห้าม force push, rebase หรือ reset งานที่คนอื่น push แล้ว
   - commit และ push เฉพาะเมื่อผู้ใช้สั่ง
   - การส่งโค้ดเข้า `main` ต้องทำผ่าน Pull Request เสมอ ทุกคนรวมทั้งเจ้าของ repo แม้แต่การแก้เล็กๆ หรือแก้แค่เอกสาร:
@@ -36,11 +41,12 @@
     - ถ้ามี PR ของ branch นั้นเปิดอยู่แล้ว ให้ push commit เพิ่มเข้า PR เดิม ไม่ต้องเปิด PR ใหม่
 - ถ้าเจอการเปลี่ยนแปลงที่ตัวเองไม่ได้ทำ (ไฟล์เปลี่ยน, branch ใหม่, migration ใหม่) ให้ถือว่าเป็นงานของคนอื่น ห้ามย้อนกลับหรือเขียนทับ ถ้าขัดกับงานที่ทำอยู่ ให้แจ้งผู้ใช้
 - ถ้าจะแก้ dependency (`package.json`, lockfile) หรือ config ที่ใช้ร่วมกัน (`next.config.ts`, `tsconfig.json`, ESLint) ให้แจ้งผู้ใช้ในสรุปงานทุกครั้ง เพราะกระทบทุกคน
-- page และ API ต้องวางใต้ path `{dev_name}/{module}` เสมอ แต่ละคนจะได้แก้แต่โฟลเดอร์ของตัวเองและไม่ชนกัน:
-  - page: `src/app/{dev_name}/{module}/page.tsx` เปิดที่ URL `/{dev_name}/{module}`
-  - API: `src/app/api/{dev_name}/{module}/route.ts` เรียกที่ `/api/{dev_name}/{module}`
-  - `{dev_name}` คือชื่อของผู้พัฒนาที่เป็นเจ้าของงาน `{module}` คือชื่อโมดูล ทั้งสองต้องเป็นตัวพิมพ์เล็กแบบ kebab-case เช่น `somchai/patient-visit`
-  - ถ้าไม่รู้ว่า `{dev_name}` คืออะไร ให้ถามผู้ใช้ ห้ามเดา และห้ามสร้างหรือแก้ไฟล์ใต้ `{dev_name}` ของคนอื่น เว้นแต่ผู้ใช้สั่ง
+- page และ API ต้องวางใต้ path `{module}/{task}` เสมอ จัดกลุ่มตามโมดูลของระบบ ไม่ใช่ตามคนเขียน URL จะได้สื่อความหมายกับผู้ใช้:
+  - page: `src/app/{module}/{task}/page.tsx` เปิดที่ URL `/{module}/{task}`
+  - API: `src/app/api/{module}/{task}/route.ts` เรียกที่ `/api/{module}/{task}`
+  - `{module}` คือชื่อโมดูลหรือกลุ่มงาน (เช่น `opd`, `ipd`, `pharmacy`) `{task}` คือชื่องานหรือรายงานในโมดูลนั้น ทั้งสองต้องเป็นตัวพิมพ์เล็กแบบ kebab-case เช่น `opd/daily-visit`
+  - ก่อนสร้างโมดูลใหม่ ให้ดูโมดูลที่มีอยู่ใน `src/app/` ก่อน ถ้างานเข้ากับโมดูลเดิมได้ให้ใช้โมดูลเดิม ถ้าไม่แน่ใจว่าอยู่โมดูลไหน ให้ถามผู้ใช้ ห้ามเดา
+  - ห้ามแก้ไฟล์ใต้ `{module}/{task}` ที่คนอื่นทำอยู่ (ดูจาก `git log`) เว้นแต่ผู้ใช้สั่ง
   - sub-route และไฟล์ที่ใช้เฉพาะโมดูล (component, hook, type) ให้วางไว้ใต้โฟลเดอร์ของโมดูลนั้น ของที่ใช้ร่วมกันให้วางใน `src/components/` หรือ `src/lib/`
 - ก่อนสร้าง component ใหม่ ต้องวิเคราะห์ shared component ที่มีอยู่ก่อนเสมอ เพื่อไม่ให้แต่ละคนสร้างของซ้ำกัน:
   - ค้นใน `src/components/` (shared component เก็บที่นี่ import ด้วย `@/components/...`) และค้นในโค้ดด้วยชื่อ หน้าที่ หรือ prop ที่คล้ายกัน
@@ -51,10 +57,10 @@
 
 ### Shared component และ helper ที่มีแล้ว
 
-อ่านรายการนี้ก่อนค้นหรือสร้าง component เอง (ขั้นแรกของกฎ "ก่อนสร้าง component ใหม่") ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน รายการจะได้ตรงกับโค้ดจริง ตัวอย่างใช้งานจริงดูที่ `src/app/tehnplk/components-demo/`
+อ่านรายการนี้ก่อนค้นหรือสร้าง component เอง (ขั้นแรกของกฎ "ก่อนสร้าง component ใหม่") ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน รายการจะได้ตรงกับโค้ดจริง ตัวอย่างใช้งานจริงดูที่ `src/app/example/components-demo/`
 
 - `AppShell` (`@/components/app-shell/app-shell`): main layout ทุกหน้า มี sidebar ย่อได้ด้วย Ctrl/⌘+B ค้นหาเมนูด้วย Ctrl/⌘+K, topbar มี breadcrumb และปุ่มสลับธีม ใช้ใน `src/app/layout.tsx` แล้ว หน้าใหม่ไม่ต้องทำ layout เอง (AppShell มี `<main>` และ padding ให้แล้ว หน้าไม่ต้องใส่ `<main>` ซ้ำ)
-- `navItems` (`@/components/app-shell/nav-items`): ต้องเพิ่มเมนูทุกครั้งที่สร้างหน้า `{dev_name}/{module}` หน้าเดี่ยวใช้ `{ label, href, icon }` ส่วนหมวดใช้ `{ label, icon, children: [...] }` ชื่อไอคอนเลือกจาก `@/components/app-shell/icons` ถ้าไม่มีให้เพิ่ม SVG ในไฟล์นั้น
+- `navItems` (`@/components/app-shell/nav-items`): ต้องเพิ่มเมนูทุกครั้งที่สร้างหน้า `{module}/{task}` หน้าเดี่ยวใช้ `{ label, href, icon }` ส่วนหมวดใช้ `{ label, icon, children: [...] }` ชื่อไอคอนเลือกจาก `@/components/app-shell/icons` ถ้าไม่มีให้เพิ่ม SVG ในไฟล์นั้น
 - `ThemeSwitch` (`@/components/app-shell/theme-switch`): ปุ่มสลับธีม สว่าง/มืด/ตามระบบ (อยู่ใน topbar ของ AppShell แล้ว)
 - design token ใน `src/app/globals.css` ใช้ผ่าน Tailwind เช่น `bg-surface`, `bg-surface-sunken`, `bg-hover`, `border-line`, `text-muted`, `bg-accent text-accent-fg`, `bg-accent-soft text-accent-text`, `ring-ring` และ `{danger|warning|success}` (`text-*`, `bg-*-soft`, `border-*-line`) ห้ามใช้สีตายตัว (`zinc-*`, `white`, `#hex`) ทุก token มีทั้งสองธีมอยู่แล้วจึงไม่ต้องเขียน `dark:` ถ้าจำเป็นต้องใช้ `dark:` จะอิง `data-theme` ไม่ใช่ `prefers-color-scheme`
   - ขนาดตัวอักษรใน content ไม่เกิน 13px ยกเว้นหัวข้อ page/section ใช้ `text-title` (14px, semibold) ใช้เฉพาะ type scale ใน globals.css (`text-xs` 11px, `text-sm` 12px, `text-base` 13px, `text-title`; `text-lg` ขึ้นไปถูกปิดไว้) ห้ามกำหนดขนาดเอง (`text-[..px]`, `font-size`) ลำดับชั้นอื่นแยกด้วยน้ำหนักและสี
@@ -78,7 +84,7 @@
   - `his`: ฐาน HIS ของโรงพยาบาล (production) **อ่านอย่างเดียว ห้ามเขียน his ไม่ว่ากรณีใด** ใช้ `hisQuery<T>(sql, params)` เท่านั้น ยอมแค่ statement เดียวที่ขึ้นต้นด้วย SELECT/WITH/SHOW/DESCRIBE/EXPLAIN และทุก connection ตั้ง `SET SESSION TRANSACTION READ ONLY` ห้ามสร้าง pool หรือ connection ไป his เองเพื่อเลี่ยงข้อนี้ และ DB user ของ his ต้องมีสิทธิ์ SELECT เท่านั้น
   - `insight`: ฐานของระบบเอง อ่านด้วย `insightQuery<T>(sql, params)` เขียนด้วย `insightExecute(sql, params)` (คืน `ResultSetHeader`)
   - `escapeLike(s)`: escape `%` `_` `\` สำหรับ `LIKE ?` ส่งค่าเป็น `%${escapeLike(q)}%`
-  - วันที่คืนเป็น string เวลาไทย (`dateStrings`, `+07:00`) ตรวจการเชื่อมต่อได้ที่ `/api/tehnplk/db-health`
+  - วันที่คืนเป็น string เวลาไทย (`dateStrings`, `+07:00`) ตรวจการเชื่อมต่อได้ที่ `/api/example/db-health`
   - ป้องกัน SQL injection (repo นี้ไม่ใช้ Prisma หรือ ORM อื่น) การรีวิว PR ที่มี SQL ต้องตรวจข้อนี้ทุกครั้ง:
     - เขียน SQL ตรงผ่าน `@/lib/db` เท่านั้น ห้ามสร้าง connection เอง และห้ามเปิด `multipleStatements`
     - ทุกค่าที่มาจากผู้ใช้, URL, body หรือ DB อื่น ส่งเป็น bind parameter (`?`) ห้ามต่อ string หรือใช้ template literal ใส่ค่าลงใน SQL
@@ -100,7 +106,7 @@
 - เมื่อ subagent ทำเสร็จ main สรุปผลให้ผู้ใช้ รวมถึงไฟล์ที่เปลี่ยนและผลการตรวจสอบ
 - เมื่อทำงาน dev เสร็จ (แก้ page หรือ API) ทุกคำสั่งของผู้ใช้ ต้องส่ง link ของ dev server ที่คลิกได้ให้ผู้ใช้ทดสอบเสมอ:
   - ถ้า dev server ยังไม่รัน ให้รัน `npm run dev` แบบ background แล้วเช็คด้วย `curl` ว่าหน้านั้นตอบ 200 ก่อนส่ง link
-  - ส่ง URL เต็มของหน้าที่แก้ เช่น `http://localhost:3000/{dev_name}/{module}` ถ้าแก้ API ให้ส่ง URL ของ API และหน้าที่เรียกใช้ API นั้นด้วย
+  - ส่ง URL เต็มของหน้าที่แก้ เช่น `http://localhost:3000/{module}/{task}` ถ้าแก้ API ให้ส่ง URL ของ API และหน้าที่เรียกใช้ API นั้นด้วย
   - ถ้าพอร์ตไม่ใช่ 3000 ให้ใช้พอร์ตจริงที่ `next dev` แสดง
 - เมื่อ context หรือ usage limit ใกล้เต็ม (เช่น ระบบเตือนว่า context ใกล้เต็ม หรือใกล้ถึง limit การใช้งาน) ให้หยุดงานที่ทำอยู่ แล้วเขียน `{dev_name}/handoff.md` ที่ root ของโปรเจกต์ทันที ด้วย skill `handoff`:
   - ถ้ามีไฟล์อยู่แล้ว ให้อัปเดตไฟล์เดิม อย่าสร้างไฟล์ใหม่
