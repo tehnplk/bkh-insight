@@ -64,6 +64,18 @@ const paths = {
     </>
   ),
   pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+  logout: (
+    <>
+      <path d="M14 4.5H7A1.5 1.5 0 0 0 5.5 6v12A1.5 1.5 0 0 0 7 19.5h7" />
+      <path d="M10.5 12h10M17 8.5l3.5 3.5-3.5 3.5" />
+    </>
+  ),
+  alert: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5v5.5M12 16.5v.01" />
+    </>
+  ),
   search: (
     <>
       <circle cx="11" cy="11" r="6.5" />

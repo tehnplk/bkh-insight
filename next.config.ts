@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   reactCompiler: true,
   agentRules: false,
+  // Bottom-left is taken by the sidebar's profile block.
+  devIndicators: { position: "bottom-right" },
   turbopack: {
     rules: {
       "*.css": {

@@ -101,7 +101,8 @@ function Tip({ children, always = false }: { children: ReactNode; always?: boole
 
 /* ---------- shell ---------- */
 
-export function AppShell({ children }: { children: ReactNode }) {
+// `account` is pinned to the bottom of the sidebar (rail and mobile drawer), below the nav.
+export function AppShell({ children, account }: { children: ReactNode; account?: ReactNode }) {
   const collapsed = useSyncExternalStore(subscribe, getCollapsed, () => false);
   const railId = useId();
   const drawerRef = useRef<HTMLDialogElement>(null);
@@ -147,6 +148,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             collapsed={collapsed}
             searchRef={searchRef}
             headerAction={<RailToggle collapsed={collapsed} controls={railId} />}
+            footer={account}
           />
         </aside>
 
@@ -200,6 +202,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Icon name="close" className="size-[18px]" />
               </button>
             }
+            footer={account}
           />
         </div>
       </dialog>
@@ -242,11 +245,12 @@ function RailToggle({ collapsed, controls }: { collapsed: boolean; controls: str
 type SidebarProps = {
   collapsed: boolean;
   headerAction: ReactNode;
+  footer?: ReactNode;
   onNavigate?: () => void;
   searchRef?: RefObject<HTMLInputElement | null>;
 };
 
-function Sidebar({ collapsed, headerAction, onNavigate, searchRef }: SidebarProps) {
+function Sidebar({ collapsed, headerAction, footer, onNavigate, searchRef }: SidebarProps) {
   const [query, setQuery] = useState("");
   const mod = useModKey();
 
@@ -307,6 +311,8 @@ function Sidebar({ collapsed, headerAction, onNavigate, searchRef }: SidebarProp
       <Suspense fallback={<NavList collapsed={collapsed} query={query} onNavigate={onNavigate} pathname={null} />}>
         <ActiveNavList collapsed={collapsed} query={query} onNavigate={onNavigate} />
       </Suspense>
+
+      {footer && <div className="shrink-0 border-t border-line p-2">{footer}</div>}
     </>
   );
 }
