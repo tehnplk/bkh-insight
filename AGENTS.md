@@ -44,6 +44,20 @@
   - ในสรุปงาน ให้บอกว่าค้นหาอะไรไปแล้ว และเลือกใช้ตัวเดิม ขยายตัวเดิม หรือสร้างใหม่ เพราะอะไร
 - เมื่อเพิ่มกฎใหม่ในไฟล์นี้ ให้เขียนสั้น ระบุเหตุผล และไม่ซ้ำกับกฎเดิม
 
+### Shared component และ helper ที่มีแล้ว
+
+อ่านรายการนี้ก่อนค้นหรือสร้าง component เอง (ขั้นแรกของกฎ "ก่อนสร้าง component ใหม่") ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน รายการจะได้ตรงกับโค้ดจริง ตัวอย่างใช้งานจริงดูที่ `src/app/tehnplk/components-demo/`
+
+- `DataGrid` (`@/components/data-grid/data-grid`): ตารางข้อมูลจาก API แบบ server-side ทั้ง sort, ค้นหา, แบ่งหน้า และปุ่มส่งออก Excel state อยู่ใน URL (`page`, `pageSize`, `sort`, `dir`, `q`) จึง refresh หรือแชร์ link ได้หน้าเดิม
+  - props: `endpoint`, `columns` (สร้างด้วย `gridColumnHelper<Row>()` ประกาศนอก component), `getRowId`, `renderDetail?(row)`, `detailMode?: "modal" | "expand"`, `detailTitle?(row)`, `searchPlaceholder?`
+  - ใช้ `useSearchParams` จึงต้องครอบด้วย `<Suspense>` และ `columns`/`renderDetail` เป็นฟังก์ชัน จึงต้องวางใน client component ของ module
+- `DetailModal` (`@/components/detail-modal/detail-modal`): modal จาก `<dialog>` ของ browser ปิดด้วย Esc หรือปุ่มปิด props: `open`, `onClose`, `title`, `children`
+- `parseGridQuery` (`@/lib/grid-query`): ใช้ใน route handler ที่ DataGrid เรียก สัญญา API:
+  - request: `GET ?page=1&pageSize=20&sort=<col>&dir=asc|desc&q=<text>[&format=xlsx]` ค่า `pageSize` สูงสุด `MAX_PAGE_SIZE` (100) และ `sort` ต้องอยู่ใน allowlist ที่ route ส่งให้ ค่าไม่ถูกต้องตอบ 400 `{ error }`
+  - response: `{ rows, total }` (`total` = จำนวนแถวทั้งหมดหลังค้นหา) ส่วน `format=xlsx` ส่งไฟล์ทุกแถวตาม `sort`/`q` ปัจจุบัน ไม่สน `page`
+  - ต่อ DB: `sort` ผ่าน allowlist แล้วจึงใช้เป็นชื่อคอลัมน์ได้ ส่วน `q` ต้องส่งเป็น bind parameter เสมอ และคอลัมน์ที่ค้นหาให้ route กำหนดเอง
+- `xlsxResponse` (`@/lib/xlsx`): `xlsxResponse(filename, columns, rows)` คืน `Response` ไฟล์ .xlsx (exceljs) สำหรับ `format=xlsx`
+
 ## การแบ่งงานให้ subagent
 
 กฎส่วนนี้ใช้กับ Claude Code ส่วน agent อื่นที่ไม่มี `sr`/`jr` ให้ข้ามได้
