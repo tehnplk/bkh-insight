@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
-import { Geist_Mono, IBM_Plex_Sans_Thai } from "next/font/google";
+import { Geist_Mono, Inter, Noto_Sans_Thai } from "next/font/google";
 import { AppShell } from "@/components/app-shell/app-shell";
+import { prefsInitScript } from "@/components/app-shell/ui-prefs";
 import "./globals.css";
 
-const plexThai = IBM_Plex_Sans_Thai({
-  variable: "--font-plex-thai",
-  subsets: ["thai", "latin"],
-  weight: ["400", "500", "600", "700"],
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+});
+
+const notoThai = Noto_Sans_Thai({
+  variable: "--font-noto-thai",
+  subsets: ["thai"],
 });
 
 const geistMono = Geist_Mono({
@@ -21,8 +26,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="th" className={`${plexThai.variable} ${geistMono.variable} antialiased`}>
-      <body className="min-h-dvh font-sans">
+    // data-theme / data-sidebar are set by the head script before paint, hence suppressHydrationWarning.
+    <html
+      lang="th"
+      suppressHydrationWarning
+      className={`${inter.variable} ${notoThai.variable} ${geistMono.variable} antialiased`}
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: prefsInitScript }} />
+      </head>
+      <body className="font-sans">
         <AppShell>{children}</AppShell>
       </body>
     </html>

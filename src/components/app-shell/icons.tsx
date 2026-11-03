@@ -50,13 +50,39 @@ const paths = {
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   chevron: <path d="m9 6 6 6-6 6" />,
-  sidebar: (
+  // Panel icons show what the toggle will do: close (collapse) or open (expand) the sidebar.
+  panelClose: (
     <>
-      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
-      <path d="M9.5 4.5v15" />
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9 4.5v15M15.5 9.5 13 12l2.5 2.5" />
+    </>
+  ),
+  panelOpen: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9 4.5v15M13 9.5l2.5 2.5-2.5 2.5" />
     </>
   ),
   pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 4.5 4.5" />
+    </>
+  ),
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />,
+  monitor: (
+    <>
+      <rect x="3" y="4.5" width="18" height="12" rx="1.5" />
+      <path d="M8.5 20h7M12 16.5V20" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof paths;
