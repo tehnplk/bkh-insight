@@ -13,6 +13,13 @@
 # testing
 /coverage
 
+# playwright
+.playwright-cli/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # next.js
 /.next/
 /out/
@@ -32,6 +39,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# personal agent config
+CLAUDE.local.md
+.claude/settings.local.json
 
 # vercel
 .vercel
