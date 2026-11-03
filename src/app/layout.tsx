@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter, Noto_Sans_Thai } from "next/font/google";
-import { AppShell } from "@/components/app-shell/app-shell";
 import { prefsInitScript } from "@/components/app-shell/ui-prefs";
 import "./globals.css";
 
@@ -35,9 +34,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: prefsInitScript }} />
       </head>
-      <body className="font-sans">
-        <AppShell>{children}</AppShell>
-      </body>
+      {/* AppShell lives in (app)/layout.tsx so /login renders without the sidebar. */}
+      <body className="font-sans">{children}</body>
     </html>
   );
 }

@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { auth } from "@/auth";
 import { hisQuery, insightQuery } from "@/lib/db";
 
 // Returns null on success, otherwise a safe message: the env-name error from db.ts or the driver
@@ -15,6 +16,8 @@ async function check(query: (sql: string) => Promise<unknown>): Promise<string |
 
 export async function GET() {
   await connection(); // run per request, not at build time
+  // Defense in depth: proxy.ts already gates /api/*, but a route that reads HIS checks the session itself.
+  if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const [his, insight] = await Promise.all([check((s) => hisQuery(s)), check((s) => insightQuery(s))]);
   return Response.json(
     {

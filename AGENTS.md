@@ -40,10 +40,10 @@
 - เจอการเปลี่ยนแปลงที่ตัวเองไม่ได้ทำ (ไฟล์เปลี่ยน, branch ใหม่, migration ใหม่) ให้ถือเป็นงานของคนอื่น ห้ามย้อนกลับหรือเขียนทับ ถ้าขัดกับงานที่ทำอยู่ให้แจ้งผู้ใช้
 - แก้ dependency (`package.json`, lockfile) หรือ config ที่ใช้ร่วมกัน (`next.config.ts`, `tsconfig.json`, ESLint) ต้องแจ้งผู้ใช้ในสรุปงานทุกครั้ง เพราะกระทบทุกคน
 - page และ API ต้องอยู่ใต้ `{module}/{task}` เสมอ จัดกลุ่มตามโมดูลของระบบ ไม่ใช่ตามคนเขียน URL จะได้สื่อความหมายกับผู้ใช้:
-  - page: `src/app/{module}/{task}/page.tsx` เปิดที่ `/{module}/{task}`
+  - page: `src/app/(app)/{module}/{task}/page.tsx` เปิดที่ `/{module}/{task}` (route group `(app)` ไม่อยู่ใน URL แต่ให้ layout ที่มี AppShell วางนอก `(app)` จะไม่มี sidebar เหมือน `/login`)
   - API: `src/app/api/{module}/{task}/route.ts` เรียกที่ `/api/{module}/{task}`
   - `{module}` คือโมดูลหรือกลุ่มงาน (เช่น `opd`, `ipd`, `pharmacy`) `{task}` คืองานหรือรายงานในโมดูลนั้น ทั้งสองเป็นตัวพิมพ์เล็กแบบ kebab-case เช่น `opd/daily-visit`
-  - ก่อนสร้างโมดูลใหม่ ให้ดูโมดูลที่มีใน `src/app/` ก่อน งานเข้ากับโมดูลเดิมได้ให้ใช้โมดูลเดิม ไม่แน่ใจว่าอยู่โมดูลไหนให้ถามผู้ใช้ ห้ามเดา
+  - ก่อนสร้างโมดูลใหม่ ให้ดูโมดูลที่มีใน `src/app/(app)/` ก่อน งานเข้ากับโมดูลเดิมได้ให้ใช้โมดูลเดิม ไม่แน่ใจว่าอยู่โมดูลไหนให้ถามผู้ใช้ ห้ามเดา
   - ห้ามแก้ไฟล์ใต้ `{module}/{task}` ที่คนอื่นทำอยู่ (ดูจาก `git log`) เว้นแต่ผู้ใช้สั่ง
   - sub-route และไฟล์เฉพาะโมดูล (component, hook, type) วางใต้โฟลเดอร์ของโมดูลนั้น ของที่ใช้ร่วมกันวางใน `src/components/` หรือ `src/lib/`
 - ก่อนสร้าง component ใหม่ ต้องวิเคราะห์ shared component ที่มีอยู่ก่อนเสมอ เพื่อไม่ให้แต่ละคนสร้างของซ้ำกัน:
@@ -51,7 +51,7 @@
   - มีตัวที่ใช้ได้ให้ใช้ตัวนั้น ขาดไปเล็กน้อยให้เพิ่ม prop หรือ variant ในตัวเดิมแทนการสร้างใหม่ และต้องไม่ทำให้จุดที่ใช้อยู่เดิมพัง
   - ไม่มีจริงๆ ค่อยสร้างใหม่ ใช้มากกว่าหนึ่งหน้าวางใน `src/components/` ใช้หน้าเดียววางไว้ข้างหน้านั้น
   - ในสรุปงานให้บอกว่าค้นอะไรไปแล้ว และเลือกใช้ตัวเดิม ขยายตัวเดิม หรือสร้างใหม่ เพราะอะไร
-- Migration ของฐาน `insight` (PostgreSQL) เท่านั้น ห้ามใช้กับ `his`: เขียนเป็นไฟล์ SQL ที่ `db/migrations/YYYYMMDDHHMM_ชื่อสั้น.sql` (prefix เป็นเวลา สองคนจะได้ไม่ชนเลขกัน) แล้วรันด้วย `node --env-file=.env scripts/migrate.mjs` (ข้ามไฟล์ที่รันแล้ว แต่ละไฟล์รันใน transaction เดียว):
+- Migration ของฐาน `insight` (PostgreSQL) เท่านั้น ห้ามใช้กับ `his`: เขียนเป็นไฟล์ SQL ที่ `db/migrations/YYYYMMDDHHMM_ชื่อสั้น.sql` (prefix เป็นเวลา สองคนจะได้ไม่ชนเลขกัน) แล้วรันด้วย `npm run db:migrate` (ข้ามไฟล์ที่รันแล้ว แต่ละไฟล์รันใน transaction เดียว):
   - ห้ามแก้ migration ที่ merge เข้า `main` แล้ว เพราะฐานที่รันไปแล้วจะไม่รันซ้ำและจะไม่ตรงกัน ให้เพิ่มไฟล์ใหม่แทน
   - PR เดียวเพิ่ม migration ได้หลายไฟล์
   - ทุก migration ต้องรันผ่านบนฐานเปล่าตั้งแต่ไฟล์แรก
@@ -59,9 +59,14 @@
 
 ### Shared component และ helper ที่มีแล้ว
 
-ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน ตัวอย่างใช้งานจริงดูที่ `src/app/example/components-demo/`
+ทุก PR ที่เพิ่ม แก้ prop หรือลบ shared component ใน `src/components/` หรือ helper ใน `src/lib/` ต้องอัปเดตรายการนี้ใน PR เดียวกัน ตัวอย่างใช้งานจริงดูที่ `src/app/(app)/example/components-demo/`
 
-- `AppShell` (`@/components/app-shell/app-shell`): main layout ทุกหน้า ใช้ใน `src/app/layout.tsx` แล้ว มี sidebar ย่อได้ด้วย Ctrl/⌘+B ค้นหาเมนูด้วย Ctrl/⌘+K, topbar มี breadcrumb และปุ่มสลับธีม หน้าใหม่ไม่ต้องทำ layout เอง และไม่ต้องใส่ `<main>` ซ้ำ (AppShell มี `<main>` และ padding ให้แล้ว)
+- `AppShell` (`@/components/app-shell/app-shell`): main layout ทุกหน้า ใช้ใน `src/app/(app)/layout.tsx` แล้ว มี sidebar ย่อได้ด้วย Ctrl/⌘+B ค้นหาเมนูด้วย Ctrl/⌘+K, topbar มี breadcrumb และปุ่มสลับธีม prop `account?` (ReactNode) ปักไว้ล่างสุดของ sidebar ซึ่ง layout ใส่ `UserMenu` ไว้แล้ว: avatar ตัวอักษรแรก + ชื่อ กดแล้วเปิดเมนูขึ้นด้านบน (sidebar ย่อเหลือ avatar และเมนูเปิดออกทางขวา) มีรายการออกจากระบบ ทำด้วย native popover (`ProfileMenu`, `@/components/app-shell/profile-menu`) หน้าใหม่ไม่ต้องทำ layout เอง และไม่ต้องใส่ `<main>` ซ้ำ (AppShell มี `<main>` และ padding ให้แล้ว)
+- Auth (`@/auth`, Auth.js v5 `next-auth`): session แบบ JWT ใน cookie (ยังไม่มี DB adapter) ต้องตั้ง `AUTH_SECRET` ใน `.env` อายุ 3 วันแบบต่ออายุตามการใช้งาน (`session.maxAge` ใน `src/auth.ts` ไม่ได้ใช้งานครบ 3 วันต้อง login ใหม่)
+  - การป้องกัน route อยู่ใน `src/proxy.ts` (Next 16 แทน `middleware.ts`) route ใหม่ทุกตัวต้อง login โดย default ไม่ต้องเพิ่มอะไร `matcher` ยกเว้นแค่ `/login`, `/api/auth/*` และไฟล์ static ไม่มี session: page redirect ไป `/login?callbackUrl=<path>` (path ใน origin เดียวกันเท่านั้น) ส่วน `/api/*` ตอบ 401 `{ error }` ห้ามเพิ่มทางยกเว้นใน matcher โดยไม่แจ้งผู้ใช้
+  - อ่าน session: `const session = await auth()` (`session?.user.name`) ใช้ได้ใน server component, route handler และ server action ใน server component อ่าน cookie ต้องอยู่ใน `<Suspense>` (cacheComponents) proxy ไม่ควรเป็นด่านเดียว (Next docs) route handler ที่อ่าน HIS และ server action ที่เขียนข้อมูลต้องเช็ค `auth()` เองซ้ำ ตอบ 401 ถ้าไม่มี (ดู `/api/example/db-health`)
+  - super user: Credentials provider จาก `AUTH_ADMIN_USER`/`AUTH_ADMIN_PASSWORD` เปิดเมื่อตั้งทั้งสองตัว ลบออกจาก `.env` = ปิด
+  - เพิ่ม SSO (OIDC เช่น Keycloak, Microsoft Entra, Google): push provider หนึ่งบรรทัดตรง comment `ponytail:` ใน `src/auth.ts` ตั้ง env `AUTH_<PROVIDER>_ID`/`_SECRET`/`_ISSUER` (Auth.js อ่านเอง) ลงทะเบียน callback `{origin}/api/auth/callback/<provider-id>` ที่ IdP แล้วเพิ่มปุ่ม `signIn("<provider-id>")` ในหน้า `/login`
 - `navItems` (`@/components/app-shell/nav-items`): ต้องเพิ่มเมนูทุกครั้งที่สร้างหน้า `{module}/{task}` หน้าเดี่ยวใช้ `{ label, href, icon }` หมวดใช้ `{ label, icon, children: [...] }` ชื่อไอคอนเลือกจาก `@/components/app-shell/icons` ถ้าไม่มีให้เพิ่ม SVG ในไฟล์นั้น
 - `ThemeSwitch` (`@/components/app-shell/theme-switch`): ปุ่มสลับธีม สว่าง/มืด/ตามระบบ (อยู่ใน topbar ของ AppShell แล้ว)
 - design token ใน `src/app/globals.css` ใช้ผ่าน Tailwind เช่น `bg-surface`, `bg-surface-sunken`, `bg-hover`, `border-line`, `text-muted`, `bg-accent text-accent-fg`, `bg-accent-soft text-accent-text`, `ring-ring` และ `{danger|warning|success}` (`text-*`, `bg-*-soft`, `border-*-line`) ห้ามใช้สีตายตัว (`zinc-*`, `white`, `#hex`) ทุก token มีทั้งสองธีมแล้วจึงไม่ต้องเขียน `dark:` ถ้าจำเป็นต้องใช้ `dark:` จะอิง `data-theme` ไม่ใช่ `prefers-color-scheme`
