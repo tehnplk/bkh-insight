@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   columnFilteringFeature,
@@ -42,6 +42,10 @@ export type DataGridProps<T extends RowData> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- แต่ละคอลัมน์มีชนิดค่าต่างกัน เหมือน helper.columns() ของ TanStack
   columns: ColumnDef<typeof features, T, any>[];
   getRowId: (row: T) => string;
+  /** ค่าที่ส่งไป endpoint เพิ่ม เช่น filter ของหน้า { vstdate: "2026-11-04" } ใช้ทั้งตอนโหลดและส่งออก Excel ค่าว่างไม่ส่ง */
+  params?: Record<string, string>;
+  /** control ของหน้า (เช่น วันที่ สิทธิ) วางในแถวเดียวกับช่องค้นหา ก่อนช่องค้นหา ใช้ h-9 ให้สูงเท่ากัน */
+  filters?: ReactNode;
   renderDetail?: (row: T) => ReactNode;
   detailMode?: "modal" | "expand";
   /** หัวข้อของ modal */
@@ -68,6 +72,8 @@ export function DataGrid<T extends RowData>({
   endpoint,
   columns,
   getRowId,
+  params,
+  filters,
   renderDetail,
   detailMode = "modal",
   detailTitle,
@@ -88,6 +94,7 @@ export function DataGrid<T extends RowData>({
     const v = sp.get(k);
     if (v) apiParams.set(k, v);
   }
+  for (const [k, v] of Object.entries(params ?? {})) if (v) apiParams.set(k, v);
   const apiQuery = apiParams.toString();
   apiParams.delete("page");
   apiParams.delete("pageSize");
@@ -168,6 +175,12 @@ export function DataGrid<T extends RowData>({
     e.preventDefault();
     table.setGlobalFilter(String(new FormData(e.currentTarget).get("q") ?? ""));
   }
+
+  // ช่องค้นหาเป็น uncontrolled: q ใน URL เปลี่ยนจากที่อื่น (back/forward, ปุ่มล้าง) ให้ตามค่า โดยไม่ remount จึงไม่เสียโฟกัส
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (searchRef.current && searchRef.current.value !== q) searchRef.current.value = q;
+  }, [q]);
 
   let body: ReactNode;
   if (error) {
@@ -256,15 +269,18 @@ export function DataGrid<T extends RowData>({
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 gap-2 sm:max-w-md">
+        {filters}
+        <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 basis-60 gap-2 sm:max-w-md">
           <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
             <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
             <input
-              key={q}
+              ref={searchRef}
               name="q"
               type="search"
               aria-label="ค้นหา"
               defaultValue={q}
+              // ค้นตอนกดค้นหาเท่านั้น แต่ล้างจนว่าง (ลบเอง, ปุ่ม ×, Esc) ให้ล้าง q ทันที เพราะไม่มีการ submit
+              onChange={(e) => !e.target.value && q && table.setGlobalFilter("")}
               maxLength={100}
               className="min-w-0 flex-1 bg-transparent outline-none"
             />
@@ -274,7 +290,7 @@ export function DataGrid<T extends RowData>({
             ค้นหา
           </button>
         </form>
-        <a href={exportHref} download className={`${btn} aria-disabled:pointer-events-none aria-disabled:opacity-40`} aria-disabled={!total || undefined}>
+        <a href={exportHref} download className={`${btn} ml-auto aria-disabled:pointer-events-none aria-disabled:opacity-40`} aria-disabled={!total || undefined}>
           <Icon d="M10 3v10M6 9l4 4 4-4M4 16h12" />
           ส่งออก Excel
         </a>

@@ -39,6 +39,8 @@ function hisPool(): MysqlPool {
   // The event hands over the core (callback) connection despite the promise typings.
   p.on("connection", (c) => {
     const conn = c as unknown as CoreConnection;
+    // Server init_connect forces SET NAMES tis620, which garbles UTF-8 params (Thai LIKE/= match nothing).
+    conn.query("SET NAMES utf8mb4", (err) => err && conn.destroy());
     conn.query("SET SESSION TRANSACTION READ ONLY", (err) => err && conn.destroy());
   });
   return (cache.__hisPool = p);
