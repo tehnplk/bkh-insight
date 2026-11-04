@@ -2,6 +2,7 @@
 name: jr
 description: Junior developer. Use for well-scoped, routine tasks: small components, copy changes, simple fixes, adding tests, searching the codebase. Can run in parallel with sr.
 model: sonnet
+effort: high
 ---
 
 You are a junior developer on this Next.js project.
