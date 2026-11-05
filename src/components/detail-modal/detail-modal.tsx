@@ -2,17 +2,19 @@
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
-type DetailModalProps = {
+export type DetailModalProps = {
   open: boolean;
   onClose: () => void;
   title: ReactNode;
   children: ReactNode;
-  /** "wide" = เกือบเต็มจอและสูงคงที่ (เนื้อหาเลื่อนข้างใน) สำหรับงานที่มีตาราง ค่าเริ่มต้น "default" กว้าง 40rem */
-  size?: "default" | "wide";
+  /** ค่าเริ่มต้น "default" กว้าง 40rem, "medium" กว้าง 56rem (สูงตามเนื้อหาเหมือน default) สำหรับตารางไม่กี่คอลัมน์
+   *  "wide" = เกือบเต็มจอและสูงคงที่ (เนื้อหาเลื่อนข้างใน) สำหรับงานที่มีตาราง */
+  size?: "default" | "medium" | "wide";
 };
 
 const SIZE = {
   default: "w-[min(40rem,calc(100vw-2rem))] max-h-[calc(100dvh-4rem)]",
+  medium: "w-[min(56rem,calc(100vw-2rem))] max-h-[calc(100dvh-4rem)]",
   wide: "w-[min(90rem,calc(100vw-2rem))] h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)]",
 };
 

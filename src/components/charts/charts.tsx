@@ -2,13 +2,16 @@
 
 import {
   useCallback,
+  useId,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
+  ArcElement,
   BarElement,
   CategoryScale,
   Chart as ChartJS,
@@ -21,12 +24,13 @@ import {
   type ChartOptions,
   type Plugin,
 } from "chart.js";
-import { Bar, Line } from "react-chartjs-2";
+import { Bar, Doughnut, Line } from "react-chartjs-2";
 
 // Line/Bar ของ react-chartjs-2 register controller ให้เอง ที่นี่ register เฉพาะ scale/element/plugin ที่ใช้
 ChartJS.register(
   CategoryScale,
   LinearScale,
+  ArcElement,
   BarElement,
   LineElement,
   PointElement,
@@ -306,6 +310,136 @@ export function TrendChart({
         <p aria-live="polite" className="sr-only">
           {current ? `${current.title} ${current.valueText}` : ""}
         </p>
+      </div>
+    </>
+  );
+}
+
+/* ---------- donut: สัดส่วนของทั้งหมด, ข้อความกลางวง, legend/ตารางเป็นของผู้เรียก ---------- */
+
+export type DonutSegment = {
+  label: string;
+  value: number;
+  /** ชื่อ token สี เช่น "--chart-1" ผูกกับ entity (ไม่ใช่อันดับ) กรองแล้วสีไม่เปลี่ยน */
+  color: string;
+  /** ข้อความใน tooltip และ screen reader */
+  valueText: string;
+};
+
+/**
+ * segment ค่า 0 ไม่วาด (สีของที่เหลือคงเดิมเพราะผูกกับ segment)
+ * canvas อ่านด้วย screen reader ไม่ได้ ผู้เรียกต้องแสดงค่าเป็น legend/ตารางข้างวงเสมอ
+ */
+export function DonutChart({
+  segments,
+  center,
+  ariaLabel,
+}: {
+  segments: DonutSegment[];
+  /** ข้อความกลางวง เช่น ยอดรวม + คำอธิบายสั้น */
+  center: ReactNode;
+  ariaLabel: string;
+}) {
+  const theme = useChartTheme();
+  const shown = useMemo(() => segments.filter((s) => s.value > 0), [segments]);
+  const { chartRef, active, onKeyDown, onBlur } = useKeyboardActive(shown.length);
+
+  const data = useMemo(() => {
+    const css = theme ? getComputedStyle(document.documentElement) : null;
+    const colors = shown.map((s) => css?.getPropertyValue(s.color).trim());
+    return {
+      labels: shown.map((s) => s.label),
+      datasets: [
+        {
+          data: shown.map((s) => s.value),
+          backgroundColor: colors,
+          hoverBackgroundColor: colors,
+          // ช่องว่าง 2px สีพื้นระหว่าง segment
+          borderColor: theme?.surface,
+          borderWidth: shown.length > 1 ? 2 : 0,
+          hoverOffset: 4,
+        },
+      ],
+    };
+  }, [shown, theme]);
+
+  const options = useMemo<ChartOptions<"doughnut">>(() => {
+    if (!theme) return {};
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      cutout: "72%",
+      layout: { padding: 4 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...tooltipStyle(theme),
+          callbacks: {
+            title: (it) => shown[it[0].dataIndex]?.label ?? "",
+            label: (it) => shown[it.dataIndex]?.valueText ?? "",
+          },
+        },
+      },
+    };
+  }, [theme, shown]);
+
+  const current = active !== null ? shown[active] : null;
+
+  return (
+    <div
+      tabIndex={0}
+      role="group"
+      aria-label={`${ariaLabel} ใช้ลูกศรเพื่ออ่านค่า`}
+      onKeyDown={onKeyDown}
+      onBlur={onBlur}
+      className={`relative mx-auto aspect-square w-full max-w-48 ${focusRing} rounded-full`}
+    >
+      {theme ? (
+        <Doughnut
+          key={theme.key}
+          ref={(c) => {
+            chartRef.current = (c as Chart | null | undefined) ?? null;
+          }}
+          data={data}
+          options={options}
+          role="img"
+          aria-label={`${ariaLabel}: ${shown.map((s) => `${s.label} ${s.valueText}`).join(", ")}`}
+          className="relative z-10" // tooltip (วาดใน canvas) ต้องอยู่เหนือข้อความกลางวง
+        />
+      ) : (
+        <div className="size-full animate-pulse rounded-full bg-surface-sunken" />
+      )}
+      <div className="pointer-events-none absolute inset-0 grid place-content-center text-center">{center}</div>
+      <p aria-live="polite" className="sr-only">
+        {current ? `${current.label} ${current.valueText}` : ""}
+      </p>
+    </div>
+  );
+}
+
+/* ---------- ปุ่มเปิด/ปิดตารางข้อมูลใต้กราฟ (canvas อ่านด้วย screen reader ไม่ได้) ---------- */
+
+/** children = <thead>/<tbody> ของตาราง ตารางมี caption จาก prop caption */
+export function DataTableToggle({ caption, children }: { caption: string; children: ReactNode }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((v) => !v)}
+        className="mt-2 rounded-md px-1.5 py-1 text-sm text-muted outline-none hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {open ? "ซ่อนตารางข้อมูล" : "แสดงตารางข้อมูล"}
+      </button>
+      <div id={id} hidden={!open} className="mt-2 overflow-x-auto rounded-md border border-line">
+        <table className="w-full border-collapse text-sm tabular-nums [&_td]:px-3 [&_td]:py-1.5 [&_td]:text-right [&_th]:px-3 [&_th]:py-1.5 [&_th]:whitespace-nowrap [&_thead]:bg-surface-sunken [&_thead_th]:font-medium [&_thead_th]:text-muted [&_tr]:border-t [&_tr]:border-line [&_tbody_th]:text-left [&_tbody_th]:font-normal">
+          <caption className="sr-only">{caption}</caption>
+          {children}
+        </table>
       </div>
     </>
   );

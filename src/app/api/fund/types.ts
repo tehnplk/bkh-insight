@@ -16,20 +16,27 @@ export type FundSummary = {
   pttypes: { pttype: string; pttype_name: string; visits: number; amount: number; categories: CategoryAmount[] }[];
 };
 
-/** GET /api/fund/opd-fund/summary?start&end  (funds เรียงตาม amount มากไปน้อย) */
+/** ตัวเลือกแบ่งกลุ่มของ MultiSelect (เฉพาะรหัสที่เปิดใช้) */
+export type CodeOptionGroup = { value: string; label: string; options: { value: string; label: string; hint?: string }[] };
+
+/** GET /api/fund/opd-fund/summary?start&end[&pttypes=<code,code>]  (funds เรียงตาม amount มากไปน้อย)
+ *  pttypes กรองทั้งจำนวน visit (ovst.pttype) และมูลค่า (opitemrece.pttype) รหัสผิดรูปแบบ -> 400 */
 export type FundSummaryResponse = {
   start: string;
   end: string;
   totals: { visits: number; patients: number; amount: number };
   categories: CategoryAmount[];
   funds: FundSummary[];
+  /** สิทธิที่เปิดใช้ทั้งหมด (รวมที่ไม่มีในช่วง) แบ่งตามกองทุน สำหรับตัวเลือกสิทธิ */
+  pttypeOptions: CodeOptionGroup[];
 };
 
 /**
- * GET /api/fund/opd-fund/visits?start&end[&fund=<FundCode>][&pttype=<code>][&income=<code>][&dep=<dep_code>]
+ * GET /api/fund/opd-fund/visits?start&end[&fund=<FundCode>][&pttype=<code>][&income=<code>][&dep=<dep_code>][&pttypes=<code,…>][&deps=<dep_code,…>]
  *   + DataGrid params (page, pageSize, sort, dir, q, format=xlsx) -> { rows: FundVisitRow[], total }
  * sort: vstdate, hn, full_name, pttype_name, dep_name, amount / q = HN หรือชื่อ
  * ส่ง income แล้ว amount = เฉพาะหมวดนั้น และแสดงเฉพาะ visit ที่มีหมวดนั้น
+ * pttypes/deps (หลายค่า คั่นด้วย ",") AND กับ pttype/dep ตัวเดียว
  */
 export type FundVisitRow = {
   vn: string;

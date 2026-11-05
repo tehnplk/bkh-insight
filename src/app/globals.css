@@ -116,7 +116,7 @@
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-success-line: var(--success-line);
-  /* Type scale: nothing above 13px except `text-title`. Only xs/sm/base/title exist (text-lg, text-2xl …
+  /* Type scale: nothing above 13px except `text-title` and `text-kpi`. Only xs/sm/base/title/kpi exist (text-lg, text-2xl …
      are not generated); headings step up by weight and color, not size. Line heights leave room for Thai vowels and tone marks. */
   --text-*: initial;
   --text-xs: 11px;
@@ -129,6 +129,9 @@
   --text-title: 14px;
   --text-title--line-height: 20px;
   --text-title--font-weight: 600;
+  /* KPI numbers on dashboards only: read at a glance from across the desk. Weight comes from the class. */
+  --text-kpi: 28px;
+  --text-kpi--line-height: 1.1;
   /* DataGrid font sizes (trial): header `text-grid-head`, data cells `text-grid-cell`.
      To revert: head 0.75rem / 1rem (= text-xs), cell 0.875rem / 1.25rem (= text-sm). */
   --text-grid-head: 13px;

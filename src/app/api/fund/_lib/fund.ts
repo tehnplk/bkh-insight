@@ -1,7 +1,7 @@
 import "server-only";
 import { auth } from "@/auth";
 import { hisQuery } from "@/lib/db";
-import type { CategoryAmount, FundCode } from "../types";
+import type { CategoryAmount, CodeOptionGroup, FundCode } from "../types";
 
 // กองทุน = pttype.hipdata_code (ว่าง/NULL = UNKNOWN)
 // มูลค่า = opitemrece.sum_price ของรายการ OPD: แถว IPD ใน opitemrece มี an และ vn เป็น NULL เสมอ จึงกรองด้วย vn IS NOT NULL
@@ -58,7 +58,8 @@ export function previousRange(r: DateRange): { start: string; end: string } {
 }
 
 export type Lookups = {
-  pttype: Map<string, { name: string; fund: FundCode }>;
+  /** active = pttype.isuse = 'Y' */
+  pttype: Map<string, { name: string; fund: FundCode; active: boolean }>;
   income: Map<string, string>;
   fundName: (code: FundCode) => string;
 };
@@ -67,15 +68,15 @@ export type Lookups = {
 // ชื่อกองทุนจาก nhso_inscl_code ถ้าไม่มี (เช่น NRH, PVT) ใช้รหัสแทน
 export async function loadLookups(): Promise<Lookups> {
   const [pt, inc, funds] = await Promise.all([
-    hisQuery<{ pttype: string; name: string | null; fund: string }>(
-      `SELECT t.pttype, t.name, ${fundSql("t")} AS fund FROM pttype t`,
+    hisQuery<{ pttype: string; name: string | null; fund: string; isuse: string | null }>(
+      `SELECT t.pttype, t.name, ${fundSql("t")} AS fund, t.isuse FROM pttype t`,
     ),
     hisQuery<{ income: string; name: string | null }>("SELECT income, name FROM income"),
     hisQuery<{ code: string; name: string | null }>("SELECT inscl_code AS code, inscl_name AS name FROM nhso_inscl_code"),
   ]);
   const names = new Map(funds.map((f) => [f.code, f.name ?? f.code]));
   return {
-    pttype: new Map(pt.map((p) => [p.pttype, { name: p.name ?? p.pttype, fund: p.fund }])),
+    pttype: new Map(pt.map((p) => [p.pttype, { name: p.name ?? p.pttype, fund: p.fund, active: p.isuse === "Y" }])),
     income: new Map(inc.map((i) => [i.income, i.name ?? i.income])),
     fundName: (code) => (code === UNKNOWN_FUND ? UNKNOWN_NAME : (names.get(code) ?? code)),
   };
@@ -105,4 +106,55 @@ export function fundPttypeFilter(lk: Lookups, fund: FundCode): { sql: string; pa
   const list = codes.map(() => "?").join(", ");
   // NOT IN ไม่จับ NULL จึงต้องรวม pttype ว่างเข้า UNKNOWN เอง (ovst.pttype เป็น NULL ได้)
   return { sql: unknown ? `(o.pttype IS NULL OR o.pttype NOT IN (${list}))` : `o.pttype IN (${list})`, params: codes };
+}
+
+const CODE = /^[A-Za-z0-9]{1,10}$/;
+const MAX_CODES = 200;
+
+/** รายการรหัสคั่นด้วย "," (pttypes, deps) ว่าง/ไม่ส่ง = null (ไม่กรอง) รหัสผิดรูปแบบหรือเกิน 200 ตัว = "invalid" */
+export function parseCodes(raw: string | null): string[] | "invalid" | null {
+  const codes = [...new Set((raw ?? "").split(",").map((c) => c.trim()).filter(Boolean))];
+  if (!codes.length) return null;
+  return codes.length > MAX_CODES || !codes.every((c) => CODE.test(c)) ? "invalid" : codes;
+}
+
+/** `col IN (?, ?, …)` ห้ามเรียกด้วย n = 0 */
+export const inList = (col: string, n: number) => `${col} IN (${Array(n).fill("?").join(", ")})`;
+
+/** เลือกครบทุกรหัสที่เป็นตัวเลือก (เฉพาะที่เปิดใช้) = ไม่กรอง (IN ไม่จับแถวที่รหัสเป็น NULL หรือรหัสที่ปิดใช้แล้ว) */
+export function effectiveCodes(codes: string[] | null, all: Iterable<string>): string[] | null {
+  if (!codes) return null;
+  const set = new Set(codes);
+  for (const c of all) if (!set.has(c)) return codes;
+  return null;
+}
+
+/** รหัสสิทธิที่เปิดใช้ = ชุดที่ใช้เทียบ "เลือกครบ" ของ effectiveCodes (ตรงกับตัวเลือกใน UI) */
+export const activePttypes = (lk: Lookups) => [...lk.pttype].filter(([, p]) => p.active).map(([c]) => c);
+
+const byCode = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+
+/** ตัวเลือกสิทธิที่เปิดใช้ แบ่งกลุ่มตามกองทุน (รูปแบบ groups ของ MultiSelect) กองทุนที่ไม่มีสิทธิเปิดใช้ไม่แสดง */
+export function pttypeOptionGroups(lk: Lookups): CodeOptionGroup[] {
+  const groups = new Map<string, CodeOptionGroup["options"]>();
+  for (const [code, p] of [...lk.pttype].sort(([a], [b]) => byCode(a, b))) {
+    if (!p.active) continue;
+    let g = groups.get(p.fund);
+    if (!g) groups.set(p.fund, (g = []));
+    g.push({ value: code, label: p.name, hint: code });
+  }
+  return [...groups]
+    .sort(([a], [b]) => (a === UNKNOWN_FUND ? 1 : b === UNKNOWN_FUND ? -1 : byCode(a, b)))
+    .map(([fund, options]) => ({ value: fund, label: lk.fundName(fund), options }));
+}
+
+/** แผนกทั้งหมด (kskdepartment ~100 แถว) + UNKNOWN = main_dep ว่าง/NULL ตัวเลือกใช้เฉพาะ active แต่ชื่อใช้ทั้งหมด (visit เก่าอาจอยู่แผนกที่ปิดใช้แล้ว) */
+export async function loadDepartments(): Promise<{ code: string; name: string; active: boolean }[]> {
+  const rows = await hisQuery<{ code: string; name: string | null; active: string | null }>(
+    "SELECT depcode AS code, department AS name, department_active AS active FROM kskdepartment ORDER BY department",
+  );
+  return [
+    ...rows.map((r) => ({ code: r.code, name: r.name ?? r.code, active: r.active === "Y" })),
+    { code: UNKNOWN_FUND, name: UNKNOWN_NAME, active: true },
+  ];
 }

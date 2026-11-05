@@ -8,7 +8,7 @@ import { useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { formatBaht, formatCompactBaht, formatCount, formatMillions } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate, parseIsoDate } from "@/lib/thai-date";
 import type { FundDashboardResponse } from "@/app/api/fund/types";
-import { RankedBarChart, TrendChart, type RankedItem, type TrendPoint } from "./charts";
+import { RankedBarChart, TrendChart, type RankedItem, type TrendPoint } from "@/components/charts/charts";
 
 const FUND_LIMIT = 8; // เกินนี้รวมเป็น "อื่นๆ"
 const CATEGORY_LIMIT = 8;

@@ -17,7 +17,7 @@ import {
   type RowData,
   type SortingState,
 } from "@tanstack/react-table";
-import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { DetailModal, type DetailModalProps } from "@/components/detail-modal/detail-modal";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
 const features = tableFeatures({
@@ -53,6 +53,8 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   detailMode?: "modal" | "expand";
   /** หัวข้อของ modal */
   detailTitle?: (row: T) => ReactNode;
+  /** ขนาดของ modal (detailMode="modal") ค่าเริ่มต้นเหมือน DetailModal */
+  detailSize?: DetailModalProps["size"];
   /** param อื่นใน URL ที่ส่งต่อให้ endpoint และไฟล์ Excel ด้วย (filter ของหน้า เช่น ["date"]) route ต้อง validate เอง
    *  ตัวที่เปลี่ยน filter ควรลบ page ออกจาก URL เพื่อกลับไปหน้าแรก */
   filterKeys?: readonly string[];
@@ -96,6 +98,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   renderDetail,
   detailMode = "modal",
   detailTitle,
+  detailSize,
   filterKeys = NO_KEYS,
   toolbar,
   liveSearch = false,
@@ -467,7 +470,12 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       </div>
 
       {detailMode === "modal" && renderDetail && (
-        <DetailModal open={selected !== null} onClose={() => setSelected(null)} title={selected && detailTitle ? detailTitle(selected) : "รายละเอียด"}>
+        <DetailModal
+          open={selected !== null}
+          onClose={() => setSelected(null)}
+          title={selected && detailTitle ? detailTitle(selected) : "รายละเอียด"}
+          size={detailSize}
+        >
           {selected && renderDetail(selected)}
         </DetailModal>
       )}
