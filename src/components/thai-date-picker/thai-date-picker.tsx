@@ -1,242 +1,219 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { Icon } from "@/components/app-shell/icons";
 
-const MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-const MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-const WEEKDAYS = [["อา", "อาทิตย์"], ["จ", "จันทร์"], ["อ", "อังคาร"], ["พ", "พุธ"], ["พฤ", "พฤหัสบดี"], ["ศ", "ศุกร์"], ["ส", "เสาร์"]];
+// ค่าเข้า/ออกเป็น ISO YYYY-MM-DD (ค.ศ.) เสมอ แสดงผลเป็น พ.ศ. ด้วย Intl ทุกการคำนวณใช้ UTC จึงไม่เลื่อนตาม timezone เครื่อง
+const UTC = { timeZone: "UTC" } as const;
+const fmtDisplay = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", { ...UTC, day: "2-digit", month: "2-digit", year: "numeric" });
+const fmtFull = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", { ...UTC, dateStyle: "full" });
+const MONTHS = Array.from({ length: 12 }, (_, m) =>
+  new Intl.DateTimeFormat("th-TH", { ...UTC, month: "long" }).format(new Date(Date.UTC(2000, m, 1))),
+);
+// 2000-01-02 เป็นวันอาทิตย์
+const WEEKDAYS = Array.from({ length: 7 }, (_, i) =>
+  new Intl.DateTimeFormat("th-TH", { ...UTC, weekday: "narrow" }).format(new Date(Date.UTC(2000, 0, 2 + i))),
+);
+const BE = 543;
 
-// วันที่เป็น ISO YYYY-MM-DD (ค.ศ.) เสมอ คำนวณแบบ UTC จึงไม่เลื่อนตาม timezone ของเครื่อง แปลงเป็น พ.ศ. ตอนแสดงผลเท่านั้น
-const parse = (iso: string) => iso.split("-").map(Number) as [number, number, number];
-const ymd = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
-const addDays = (iso: string, n: number) => {
-  const [y, m, d] = parse(iso);
-  return ymd(y, m, d + n);
+const parse = (iso: string) => new Date(`${iso}T00:00:00Z`);
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (s: string, n: number) => iso(new Date(parse(s).getTime() + n * 86_400_000));
+/** เลื่อนเดือน/ตั้งปี-เดือนใหม่ โดยวันไม่เกินวันสุดท้ายของเดือนนั้น (31 ม.ค. + 1 เดือน = 28/29 ก.พ.) */
+const setMonth = (s: string, y: number, m: number) => {
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return iso(new Date(Date.UTC(y, m, Math.min(parse(s).getUTCDate(), last))));
 };
-const addMonths = (iso: string, n: number) => {
-  const [y, m, d] = parse(iso);
-  const last = new Date(Date.UTC(y, m + n, 0)).getUTCDate();
-  return ymd(y, m + n, Math.min(d, last));
-};
-const weekday = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
-const noopSubscribe = () => () => {};
-const todayTh = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
+const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Bangkok" });
+const valid = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(parse(s).getTime());
 
-/** "4 พ.ย. 2569" หรือ long: "4 พฤศจิกายน 2569" */
-export function formatThaiDate(iso: string, long = false) {
-  const [y, m, d] = parse(iso);
-  return `${d} ${(long ? MONTHS : MONTHS_SHORT)[m - 1]} ${y + 543}`;
-}
-
-const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const iconBtn = `grid size-8 place-items-center rounded-md text-muted hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
-
-function Chevron({ dir }: { dir: "left" | "right" }) {
-  return (
-    <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={dir === "left" ? "M12 5l-5 5 5 5" : "M8 5l5 5-5 5"} />
-    </svg>
-  );
-}
+const navBtn =
+  "grid size-8 place-items-center rounded-md text-muted outline-none hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
+const selectCls = "h-8 rounded-md border border-line bg-surface px-1.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export type ThaiDatePickerProps = {
-  /** YYYY-MM-DD (ค.ศ.) */
+  /** ISO YYYY-MM-DD (ค.ศ.) */
   value: string;
-  onChange: (iso: string) => void;
-  /** วันแรกที่เลือกได้ YYYY-MM-DD เช่น วันเริ่มของช่วงวันที่ */
+  onChange: (value: string) => void;
+  "aria-label": string;
+  /** ISO YYYY-MM-DD วันแรก/วันสุดท้ายที่เลือกได้ */
   min?: string;
-  /** วันสุดท้ายที่เลือกได้ YYYY-MM-DD เช่น วันนี้ */
   max?: string;
-  /** แสดงปุ่มวันก่อน/ถัดไป (ค่าเริ่มต้น true) ปิดได้เมื่อใช้เป็นคู่ช่วงวันที่ */
-  stepper?: boolean;
-  /** ข้อความ label ที่แสดงหน้าปุ่ม และเป็นชื่อของปฏิทินสำหรับ screen reader */
-  label: string;
 };
 
-// ปุ่มแสดงวันที่ พ.ศ. + ปุ่มวันก่อน/ถัดไป และปฏิทินใน native popover (top layer, Esc/คลิกนอกกรอบปิดได้ และคืน focus ให้ปุ่ม)
-// ในปฏิทิน: ลูกศรเลื่อนวัน/สัปดาห์, Home/End ต้น/ท้ายสัปดาห์, PageUp/PageDown เดือน (กด Shift = ปี)
-export function ThaiDatePicker({ value, onChange, min, max, label, stepper = true }: ThaiDatePickerProps) {
+export function ThaiDatePicker({ value, onChange, "aria-label": label, min, max }: ThaiDatePickerProps) {
   const id = useId();
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
-  const moveFocus = useRef(false);
+  const gridRef = useRef<HTMLTableElement>(null);
+  const focusDay = useRef(false);
+  const current = valid(value) ? value : today();
+  const [cursor, setCursor] = useState(current);
   const [open, setOpen] = useState(false);
-  const [focus, setFocus] = useState(value);
-  // วันนี้ของเครื่องผู้ใช้อ่านหลัง hydrate เท่านั้น (server/ตอน hydrate = "") นาฬิกาเครื่องคลาดจาก server จะได้ไม่ทำให้ HTML ไม่ตรงกัน
-  const today = useSyncExternalStore(noopSubscribe, todayTh, () => "");
-  const clamp = (iso: string) => (max && iso > max ? max : min && iso < min ? min : iso);
-  const outOfRange = (iso: string) => (!!max && iso > max) || (!!min && iso < min);
+
+  const inRange = (s: string) => (!min || s >= min) && (!max || s <= max);
+  const clamp = (s: string) => (min && s < min ? min : max && s > max ? max : s);
 
   useEffect(() => {
     const pop = popRef.current;
-    const btn = btnRef.current;
-    if (!pop || !btn) return;
-    const before = (e: Event) => {
+    const trigger = triggerRef.current;
+    if (!pop || !trigger) return;
+    const place = (e: Event) => {
       if ((e as ToggleEvent).newState !== "open") return;
-      const r = btn.getBoundingClientRect();
+      const r = trigger.getBoundingClientRect();
+      pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
       pop.style.top = `${r.bottom + 4}px`;
-      // ยังไม่แสดงจึงวัดความกว้างไม่ได้ ใช้ค่า w-72 (288px) แล้วดันเข้าในจอบนหน้าจอแคบ
-      pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 288 - 8))}px`;
-      setFocus(value);
-      moveFocus.current = true;
     };
-    const toggle = (e: Event) => setOpen((e as ToggleEvent).newState === "open");
-    pop.addEventListener("beforetoggle", before);
-    pop.addEventListener("toggle", toggle);
+    const sync = (e: Event) => setOpen((e as ToggleEvent).newState === "open");
+    pop.addEventListener("beforetoggle", place);
+    pop.addEventListener("toggle", sync);
     return () => {
-      pop.removeEventListener("beforetoggle", before);
-      pop.removeEventListener("toggle", toggle);
+      pop.removeEventListener("beforetoggle", place);
+      pop.removeEventListener("toggle", sync);
     };
-  }, [value]);
+  }, []);
 
-  // ย้าย focus ตามวันที่เลือกเฉพาะตอนเปิดหรือกดปุ่มในตาราง ไม่แย่ง focus จากปุ่มเปลี่ยนเดือน
+  // โฟกัสวันที่ cursor หลังเปิดหรือเลื่อนด้วยคีย์บอร์ด (ปุ่มต้องมองเห็นแล้วจึงโฟกัสได้)
   useEffect(() => {
-    if (!open || !moveFocus.current) return;
-    moveFocus.current = false;
-    popRef.current?.querySelector<HTMLButtonElement>(`[data-iso="${focus}"]`)?.focus();
-  }, [open, focus]);
+    if (!focusDay.current || !open) return;
+    focusDay.current = false;
+    gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${cursor}"]`)?.focus();
+  }, [cursor, open]);
 
-  function pick(iso: string) {
-    onChange(iso);
+  function pick(s: string) {
+    if (!inRange(s)) return;
+    onChange(s);
     popRef.current?.hidePopover();
-    btnRef.current?.focus();
+    triggerRef.current?.focus();
   }
+
+  const cur = parse(cursor);
+  const y = cur.getUTCFullYear();
+  const m = cur.getUTCMonth();
+  const first = new Date(Date.UTC(y, m, 1));
+  const start = iso(new Date(first.getTime() - first.getUTCDay() * 86_400_000));
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const weeks = Math.ceil((first.getUTCDay() + daysInMonth) / 7);
+  const now = today();
+  const nowYear = parse(now).getUTCFullYear();
+  const minYear = min ? parse(min).getUTCFullYear() : Math.min(y, nowYear - 10);
+  const maxYear = max ? parse(max).getUTCFullYear() : Math.max(y, nowYear + 1);
+  const years = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
+  const prevMonth = setMonth(cursor, y, m - 1);
+  const nextMonth = setMonth(cursor, y, m + 1);
+  const noPrev = !!min && iso(new Date(Date.UTC(y, m, 0))) < min; // วันสุดท้ายของเดือนก่อนอยู่ก่อน min
+  const noNext = !!max && iso(new Date(Date.UTC(y, m + 1, 1))) > max; // วันแรกของเดือนถัดไปอยู่หลัง max
 
   function onGridKey(e: KeyboardEvent<HTMLTableElement>) {
-    const wd = weekday(focus);
-    const step: Record<string, () => string> = {
-      ArrowLeft: () => addDays(focus, -1),
-      ArrowRight: () => addDays(focus, 1),
-      ArrowUp: () => addDays(focus, -7),
-      ArrowDown: () => addDays(focus, 7),
-      Home: () => addDays(focus, -wd),
-      End: () => addDays(focus, 6 - wd),
-      PageUp: () => addMonths(focus, e.shiftKey ? -12 : -1),
-      PageDown: () => addMonths(focus, e.shiftKey ? 12 : 1),
-    };
-    if (!step[e.key]) return;
+    const dow = cur.getUTCDay();
+    const next = {
+      ArrowLeft: addDays(cursor, -1),
+      ArrowRight: addDays(cursor, 1),
+      ArrowUp: addDays(cursor, -7),
+      ArrowDown: addDays(cursor, 7),
+      Home: addDays(cursor, -dow),
+      End: addDays(cursor, 6 - dow),
+      PageUp: e.shiftKey ? setMonth(cursor, y - 1, m) : prevMonth,
+      PageDown: e.shiftKey ? setMonth(cursor, y + 1, m) : nextMonth,
+    }[e.key];
+    if (!next) return;
     e.preventDefault();
-    moveFocus.current = true;
-    setFocus(clamp(step[e.key]()));
+    focusDay.current = true;
+    setCursor(clamp(next));
   }
 
-  const [y, m] = parse(focus);
-  const first = ymd(y, m, 1);
-  const lead = weekday(first);
-  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const cells = [...Array<null>(lead).fill(null), ...Array.from({ length: days }, (_, i) => ymd(y, m, i + 1))];
-  const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, i) => cells.slice(i * 7, i * 7 + 7));
-  const nextMonthBlocked = !!max && addMonths(first, 1) > max;
-  const prevMonthBlocked = !!min && ymd(y, m, 0) < min;
-  const nextDayBlocked = !!max && value >= max;
-  const prevDayBlocked = !!min && value <= min;
-  const heading = `${MONTHS[m - 1]} ${y + 543}`;
-
   return (
-    <div className="flex items-center gap-2">
-      <span id={`${id}-label`} className="text-muted">
-        {label}
-      </span>
-      <div className="flex h-9 items-center rounded-md border border-line bg-surface">
-        {stepper && (
-          <button type="button" aria-label="วันก่อนหน้า" disabled={prevDayBlocked} className={`${iconBtn} ml-0.5`} onClick={() => onChange(clamp(addDays(value, -1)))}>
-            <Chevron dir="left" />
-          </button>
-        )}
-        <button
-          ref={btnRef}
-          type="button"
-          popoverTarget={`${id}-cal`}
-          aria-labelledby={`${id}-label ${id}-value`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-controls={`${id}-cal`}
-          className={`h-8 rounded-md px-2 ${stepper ? "" : "mx-0.5"} font-medium whitespace-nowrap tabular-nums hover:bg-hover ${open ? "bg-hover" : ""} ${focusRing}`}
-        >
-          <span aria-hidden="true">{formatThaiDate(value)}</span>
-          <span id={`${id}-value`} className="sr-only">
-            {formatThaiDate(value, true)}
-          </span>
-        </button>
-        {stepper && (
-          <button type="button" aria-label="วันถัดไป" disabled={nextDayBlocked} className={`${iconBtn} mr-0.5`} onClick={() => onChange(clamp(addDays(value, 1)))}>
-            <Chevron dir="right" />
-          </button>
-        )}
-      </div>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        popoverTarget={id}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={id}
+        aria-label={`${label} ${fmtFull.format(parse(current))}`}
+        onClick={() => {
+          // เปิดใหม่ทุกครั้งเริ่มที่วันที่เลือกอยู่
+          setCursor(current);
+          focusDay.current = true;
+        }}
+        className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-surface px-3 text-foreground tabular-nums outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {fmtDisplay.format(parse(current))}
+        <Icon name="calendar" className="size-4 text-muted" />
+      </button>
 
       <div
         ref={popRef}
-        id={`${id}-cal`}
+        id={id}
         popover="auto"
         role="dialog"
         aria-label={label}
         className="fixed inset-auto m-0 w-72 rounded-lg border border-line bg-surface p-3 text-sm text-foreground shadow-lg"
       >
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            aria-label="เดือนก่อนหน้า"
-            disabled={prevMonthBlocked}
-            className={iconBtn}
-            onClick={() => setFocus(clamp(addMonths(focus, -1)))}
-          >
-            <Chevron dir="left" />
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="เดือนก่อน" className={navBtn} disabled={noPrev} onClick={() => setCursor(clamp(prevMonth))}>
+            <Icon name="chevron" className="size-4 rotate-180" />
           </button>
-          <p aria-live="polite" className="font-semibold tabular-nums">
-            {heading}
-          </p>
-          <button
-            type="button"
-            aria-label="เดือนถัดไป"
-            disabled={nextMonthBlocked}
-            className={iconBtn}
-            onClick={() => setFocus(clamp(addMonths(focus, 1)))}
-          >
-            <Chevron dir="right" />
+          <select aria-label="เดือน" value={m} onChange={(e) => setCursor(clamp(setMonth(cursor, y, Number(e.target.value))))} className={`${selectCls} min-w-0 flex-1`}>
+            {MONTHS.map((name, i) => (
+              <option key={name} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select aria-label="ปี พ.ศ." value={y} onChange={(e) => setCursor(clamp(setMonth(cursor, Number(e.target.value), m)))} className={`${selectCls} tabular-nums`}>
+            {years.map((yr) => (
+              <option key={yr} value={yr}>
+                {yr + BE}
+              </option>
+            ))}
+          </select>
+          <button type="button" aria-label="เดือนถัดไป" className={navBtn} disabled={noNext} onClick={() => setCursor(clamp(nextMonth))}>
+            <Icon name="chevron" className="size-4" />
           </button>
         </div>
 
-        <table aria-label={heading} onKeyDown={onGridKey} className="mt-2 w-full border-collapse text-center tabular-nums">
+        <table ref={gridRef} role="grid" aria-label={`${MONTHS[m]} ${y + BE}`} onKeyDown={onGridKey} className="mt-2 w-full border-collapse text-center tabular-nums">
           <thead>
             <tr>
-              {WEEKDAYS.map(([short, full]) => (
-                <th key={short} abbr={full} scope="col" className="h-8 text-xs font-medium text-muted">
-                  {short}
+              {WEEKDAYS.map((d) => (
+                <th key={d} scope="col" className="h-7 text-xs font-medium text-muted">
+                  {d}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {weeks.map((week, i) => (
-              <tr key={i}>
-                {week.map((iso, j) =>
-                  iso ? (
-                    <td key={iso} className="p-0.5">
+            {Array.from({ length: weeks }, (_, w) => (
+              <tr key={w}>
+                {Array.from({ length: 7 }, (_, d) => {
+                  const day = addDays(start, w * 7 + d);
+                  const date = parse(day);
+                  const selected = day === current;
+                  const outside = date.getUTCMonth() !== m;
+                  return (
+                    <td key={day} className="p-0.5">
                       <button
                         type="button"
-                        data-iso={iso}
-                        tabIndex={iso === focus ? 0 : -1}
-                        disabled={outOfRange(iso)}
-                        aria-label={formatThaiDate(iso, true)}
-                        aria-pressed={iso === value}
-                        aria-current={iso === today ? "date" : undefined}
-                        onClick={() => pick(iso)}
-                        className={`grid size-8 w-full place-items-center rounded-md disabled:pointer-events-none disabled:opacity-35 ${focusRing} ${
-                          iso === value
+                        data-date={day}
+                        tabIndex={day === cursor ? 0 : -1}
+                        aria-label={fmtFull.format(date)}
+                        aria-pressed={selected}
+                        aria-current={day === now ? "date" : undefined}
+                        disabled={!inRange(day)}
+                        onClick={() => pick(day)}
+                        className={`size-8 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-30 ${
+                          selected
                             ? "bg-accent font-semibold text-accent-fg"
-                            : iso === today
-                              ? "font-semibold text-accent-text hover:bg-hover"
-                              : "hover:bg-hover"
+                            : `hover:bg-hover ${day === now ? "border border-accent-line font-semibold text-accent-text" : outside ? "text-muted" : ""}`
                         }`}
                       >
-                        {Number(iso.slice(8))}
+                        {date.getUTCDate()}
                       </button>
                     </td>
-                  ) : (
-                    <td key={`pad-${j}`} />
-                  ),
-                )}
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -245,14 +222,14 @@ export function ThaiDatePicker({ value, onChange, min, max, label, stepper = tru
         <div className="mt-2 flex justify-end border-t border-line pt-2">
           <button
             type="button"
-            disabled={!today || outOfRange(today) || value === today}
-            onClick={() => pick(today)}
-            className={`h-8 rounded-md px-3 font-medium text-accent-text hover:bg-hover disabled:pointer-events-none disabled:opacity-40 ${focusRing}`}
+            disabled={!inRange(now)}
+            onClick={() => pick(now)}
+            className="h-8 rounded-md px-3 font-medium text-accent-text outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
           >
             วันนี้
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

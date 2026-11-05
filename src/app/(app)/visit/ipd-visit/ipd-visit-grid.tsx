@@ -1,8 +1,8 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
-import { formatThaiDate, ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
+import { FilterDataGrid, gridColumnHelper } from "@/components/filter-data-grid/filter-data-grid";
+import { formatThaiDate, ThaiDateStepper } from "@/components/thai-date-stepper/thai-date-stepper";
 import { addDaysIso, isIsoDate, MAX_SPAN_DAYS } from "@/app/api/visit/opd-visit/opd-visit";
 import { isWardCode, type IpdVisit, type IpdVisitSummary, type WardOption } from "@/app/api/visit/ipd-visit/ipd-visit";
 import type { GridPage } from "@/lib/grid-query";
@@ -125,7 +125,7 @@ export function IpdVisitGrid({ wards, today }: { wards: WardOption[]; today: str
   }
 
   return (
-    <DataGrid<IpdVisit, IpdVisitPage>
+    <FilterDataGrid<IpdVisit, IpdVisitPage>
       endpoint="/api/visit/ipd-visit"
       filterKeys={FILTER_KEYS}
       liveSearch
@@ -133,8 +133,8 @@ export function IpdVisitGrid({ wards, today }: { wards: WardOption[]; today: str
       toolbar={
         <>
           <div role="group" aria-label="ช่วงวันที่รับเข้า" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <ThaiDatePicker label="รับตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
-            <ThaiDatePicker
+            <ThaiDateStepper label="รับตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
+            <ThaiDateStepper
               label="ถึง"
               value={to}
               min={from}
