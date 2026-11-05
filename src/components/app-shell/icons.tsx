@@ -71,6 +71,12 @@ const paths = {
     </>
   ),
   pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+  shield: (
+    <>
+      <path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
   stethoscope: (
     <>
       <path d="M6 3.5H5v5a4.5 4.5 0 0 0 9 0v-5h-1" />
