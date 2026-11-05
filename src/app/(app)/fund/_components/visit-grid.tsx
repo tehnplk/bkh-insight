@@ -31,6 +31,7 @@ export function VisitGrid({ extraParams, showDepartment }: { extraParams: Record
       getRowId={(r) => r.vn}
       renderDetail={renderDetail}
       detailTitle={detailTitle}
+      detailSize="medium"
     />
   );
 }

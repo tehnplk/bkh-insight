@@ -1,4 +1,4 @@
-// สำเนาจาก src/app/(app)/segmented.tsx (ของหน้าแรก) ถ้าใช้หลายโมดูลควรย้ายไป src/components/
+// ถ้าใช้หลายโมดูลควรย้ายไป src/components/
 "use client";
 
 type Option<T extends string> = { readonly value: T; readonly label: string };

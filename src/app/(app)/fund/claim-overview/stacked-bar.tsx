@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { Chart, ChartOptions, Plugin } from "chart.js";
 import { Bar } from "react-chartjs-2";
-import { focusRing, tooltipStyle, truncate, useChartTheme, useKeyboardActive } from "../dashboard/charts";
+import { focusRing, tooltipStyle, truncate, useChartTheme, useKeyboardActive } from "@/components/charts/charts";
 
 /** สีเป็นชื่อ CSS variable ของ token เช่น "--accent" อ่านค่าจริงตามธีม */
 export type StackSeries = { label: string; color: string; values: number[] };

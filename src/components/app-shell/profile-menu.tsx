@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { clearPersistedFilters } from "@/lib/persisted-filter";
 import { Icon } from "./icons";
 import { adminSection } from "./nav-items";
 
@@ -119,7 +120,7 @@ export function ProfileMenu({ name, admin = false, signOut }: { name: string; ad
             <div role="separator" className="my-1 h-px bg-line" />
           </>
         )}
-        <form action={signOut}>
+        <form action={signOut} onSubmit={clearPersistedFilters}>
           <button type="submit" role="menuitem" tabIndex={-1} className={itemClass}>
             <Icon name="logout" className="size-4 shrink-0 text-muted" />
             ออกจากระบบ

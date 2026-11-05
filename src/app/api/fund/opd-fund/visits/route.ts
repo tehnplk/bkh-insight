@@ -4,7 +4,8 @@ import { parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { xlsxResponse } from "@/lib/xlsx";
 import type { FundVisitRow } from "../../types";
 import {
-  FULL_NAME_SQL, OPI_BY_DATE, depNameSql, depSql, badRequest, fundPttypeFilter, fundSql, isAuthed, loadLookups, parseRange, round2, unauthorized,
+  FULL_NAME_SQL, OPI_BY_DATE, activePttypes, depNameSql, depSql, badRequest, effectiveCodes, fundPttypeFilter, fundSql, inList, isAuthed,
+  loadDepartments, loadLookups, parseCodes, parseRange, round2, unauthorized,
 } from "../../_lib/fund";
 
 // allowlist: ค่าที่ client ส่งมา -> alias ใน SELECT ด้านล่าง
@@ -40,14 +41,30 @@ export async function GET(request: NextRequest) {
   for (const [k, v] of Object.entries(filters)) {
     if (v !== null && !CODE.test(v)) return badRequest(`${k} ไม่ถูกต้อง`);
   }
+  // หลายค่าจากตัวเลือกของหน้า AND กับ pttype/dep ตัวเดียว (chip ใน modal)
+  const rawPttypes = parseCodes(params.get("pttypes"));
+  const rawDeps = parseCodes(params.get("deps"));
+  if (rawPttypes === "invalid") return badRequest("pttypes ไม่ถูกต้อง");
+  if (rawDeps === "invalid") return badRequest("deps ไม่ถูกต้อง");
+  const [lk, allDeps] = await Promise.all([
+    filters.fund || rawPttypes ? loadLookups() : null,
+    rawDeps ? loadDepartments() : null,
+  ]);
+  // "เลือกครบ" เทียบกับตัวเลือกที่เปิดใช้ ชุดเดียวกับ summary ยอดจึงตรงกัน
+  const pttypes = lk && effectiveCodes(rawPttypes, activePttypes(lk));
+  const deps = allDeps && effectiveCodes(rawDeps, allDeps.filter((d) => d.active).map((d) => d.code));
 
   // ยอดต่อ visit จากรายการ OPD (vn IS NOT NULL) ตามกองทุน/สิทธิ/หมวดของรายการนั้น (opitemrece.pttype)
   let itemWhere = "o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL";
   const itemParams: string[] = [start, end];
-  if (filters.fund) {
-    const f = fundPttypeFilter(await loadLookups(), filters.fund);
+  if (filters.fund && lk) {
+    const f = fundPttypeFilter(lk, filters.fund);
     itemWhere += ` AND ${f.sql}`;
     itemParams.push(...f.params);
+  }
+  if (pttypes) {
+    itemWhere += ` AND ${inList("o.pttype", pttypes.length)}`;
+    itemParams.push(...pttypes);
   }
   if (filters.pttype) {
     itemWhere += " AND o.pttype = ?";
@@ -67,7 +84,7 @@ export async function GET(request: NextRequest) {
   const whereParams: string[] = [start, end];
   if (filters.income) {
     where += " AND a.vn IS NOT NULL";
-  } else if (filters.fund || filters.pttype) {
+  } else if (filters.fund || filters.pttype || pttypes) {
     const own: string[] = [];
     if (filters.fund) {
       own.push(`${fundSql("t")} = ?`);
@@ -77,11 +94,19 @@ export async function GET(request: NextRequest) {
       own.push("v.pttype = ?");
       whereParams.push(filters.pttype);
     }
+    if (pttypes) {
+      own.push(inList("v.pttype", pttypes.length));
+      whereParams.push(...pttypes);
+    }
     where += ` AND (a.vn IS NOT NULL OR (${own.join(" AND ")}))`;
   }
   if (filters.dep) {
     where += ` AND ${depSql("v")} = ?`;
     whereParams.push(filters.dep);
+  }
+  if (deps) {
+    where += ` AND ${inList(depSql("v"), deps.length)}`;
+    whereParams.push(...deps);
   }
   if (q) {
     const like = `%${escapeLike(q)}%`;

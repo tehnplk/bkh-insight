@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
 import type { FundSummary, FundSummaryResponse } from "../../types";
 import {
-  OPI_BY_DATE, add, badRequest, categoryList, fundOf, fundSql, int, isAuthed, loadLookups, parseRange, pttypeName, round2, unauthorized,
+  OPI_BY_DATE, activePttypes, add, badRequest, categoryList, effectiveCodes, fundOf, fundSql, inList, int, isAuthed, loadLookups, parseCodes, parseRange,
+  pttypeName, pttypeOptionGroups, round2, unauthorized,
 } from "../../_lib/fund";
 
 export async function GET(request: NextRequest) {
@@ -11,24 +12,32 @@ export async function GET(request: NextRequest) {
   const parsed = parseRange(request.nextUrl.searchParams);
   if (!parsed.ok) return badRequest(parsed.error);
   const { start, end } = parsed.range;
+  const rawPttypes = parseCodes(request.nextUrl.searchParams.get("pttypes"));
+  if (rawPttypes === "invalid") return badRequest("pttypes ไม่ถูกต้อง");
 
-  const [lk, visitRows, patientRows, itemRows] = await Promise.all([
-    loadLookups(),
+  const lk = await loadLookups();
+  // pttypes = สิทธิที่เลือก (หลายตัว) กรองทั้ง visit (ovst.pttype) และมูลค่า (opitemrece.pttype)
+  const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
+  const vFilter = pttypes ? ` AND ${inList("v.pttype", pttypes.length)}` : "";
+  const oFilter = pttypes ? ` AND ${inList("o.pttype", pttypes.length)}` : "";
+  const params = [start, end, ...(pttypes ?? [])];
+
+  const [visitRows, patientRows, itemRows] = await Promise.all([
     hisQuery<{ pttype: string | null; visits: number }>(
-      "SELECT v.pttype, COUNT(*) AS visits FROM ovst v WHERE v.vstdate BETWEEN ? AND ? GROUP BY v.pttype",
-      [start, end],
+      `SELECT v.pttype, COUNT(*) AS visits FROM ovst v WHERE v.vstdate BETWEEN ? AND ?${vFilter} GROUP BY v.pttype`,
+      params,
     ),
     // ROLLUP แถว fund = NULL คือจำนวนคนไม่ซ้ำทั้งช่วง (คนเดียวอาจอยู่หลายกองทุน จึงรวมจากรายกองทุนไม่ได้)
     hisQuery<{ fund: string | null; patients: number }>(
       `SELECT ${fundSql("t")} AS fund, COUNT(DISTINCT v.hn) AS patients
        FROM ovst v LEFT JOIN pttype t ON t.pttype = v.pttype
-       WHERE v.vstdate BETWEEN ? AND ? GROUP BY fund WITH ROLLUP`,
-      [start, end],
+       WHERE v.vstdate BETWEEN ? AND ?${vFilter} GROUP BY fund WITH ROLLUP`,
+      params,
     ),
     hisQuery<{ pttype: string; income: string; amount: number }>(
       `SELECT o.pttype, o.income, SUM(o.sum_price) AS amount FROM ${OPI_BY_DATE}
-       WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL GROUP BY o.pttype, o.income`,
-      [start, end],
+       WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL${oFilter} GROUP BY o.pttype, o.income`,
+      params,
     ),
   ]);
 
@@ -88,6 +97,7 @@ export async function GET(request: NextRequest) {
     },
     categories: categoryList(lk, allCategories),
     funds: list,
+    pttypeOptions: pttypeOptionGroups(lk),
   };
   return Response.json(body);
 }

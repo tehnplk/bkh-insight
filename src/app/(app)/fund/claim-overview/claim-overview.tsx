@@ -6,7 +6,7 @@ import { useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { formatBaht, formatCompactBaht, formatCount, formatMillions } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate, parseIsoDate } from "@/lib/thai-date";
-import { RankedBarChart, type RankedItem } from "../dashboard/charts";
+import { RankedBarChart, type RankedItem } from "@/components/charts/charts";
 import { FilterChip, Money, Notice, Panel, btn, focusRing, formatPct, num, pct, useJson, useUrlParams } from "../_components/ui";
 import { VisitItems } from "../_components/visit-items";
 import type { ClaimOverviewResponse, ClaimStatus, ClaimTotals, PendingRow } from "@/app/api/fund/types";
