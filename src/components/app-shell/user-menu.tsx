@@ -9,9 +9,11 @@ export async function UserMenu() {
   return (
     <ProfileMenu
       name={session.user.name}
+      admin={session.user.role === "admin"}
       signOut={async () => {
         "use server";
-        await signOut({ redirectTo: "/login" });
+        // logged_out=1 stops /login from starting SSO again while the IdP session is still alive.
+        await signOut({ redirectTo: "/login?logged_out=1" });
       }}
     />
   );

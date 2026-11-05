@@ -1,18 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Icon } from "./icons";
+import { adminSection } from "./nav-items";
 
 // Thai leading vowels (เ แ โ ใ ไ) are written before the consonant; skip them so "เอก" gives "อ", not "เ".
 const initial = (name: string) => ([...name.trim()].find((c) => !/[เแโใไ]/.test(c)) ?? "?").toUpperCase();
 
 const items = (menu: HTMLElement | null) => [...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
 
+const itemClass =
+  "flex h-8 w-full items-center gap-2.5 rounded-md px-3 text-sm outline-none hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring";
+
 // Sidebar footer: avatar + name; opens a menu upward (expanded) or as a flyout to the right (collapsed rail).
 // Native popover gives top layer (escapes the rail's overflow clipping), click-outside and Esc to close.
-export function ProfileMenu({ name, signOut }: { name: string; signOut: () => Promise<void> }) {
+// `admin` adds the admin pages (adminSection) above sign-out; access is still enforced by proxy.ts and the admin layout.
+export function ProfileMenu({ name, admin = false, signOut }: { name: string; admin?: boolean; signOut: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
+  const adminId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -95,13 +102,25 @@ export function ProfileMenu({ name, signOut }: { name: string; signOut: () => Pr
       >
         {/* The name is hidden on the collapsed rail, so the flyout repeats it as a heading. */}
         <p className="hidden truncate px-3 pt-1.5 pb-1 text-xs font-semibold text-muted collapsed:block">{name}</p>
+        {admin && (
+          <>
+            <div role="group" aria-labelledby={adminId}>
+              <p id={adminId} className="px-3 pt-1.5 pb-1 text-xs font-semibold text-muted">
+                {adminSection.label}
+              </p>
+              {adminSection.children.map((link) => (
+                // Client navigation keeps the shell mounted, so close the popover by hand.
+                <Link key={link.href} href={link.href} role="menuitem" tabIndex={-1} onClick={() => menuRef.current?.hidePopover()} className={itemClass}>
+                  <Icon name={adminSection.icon} className="size-4 shrink-0 text-muted" />
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+            <div role="separator" className="my-1 h-px bg-line" />
+          </>
+        )}
         <form action={signOut}>
-          <button
-            type="submit"
-            role="menuitem"
-            tabIndex={-1}
-            className="flex h-8 w-full items-center gap-2.5 rounded-md px-3 text-sm outline-none hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
-          >
+          <button type="submit" role="menuitem" tabIndex={-1} className={itemClass}>
             <Icon name="logout" className="size-4 shrink-0 text-muted" />
             ออกจากระบบ
           </button>
