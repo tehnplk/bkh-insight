@@ -78,7 +78,7 @@ export function OpdDepartment() {
 
   return (
     <div className="flex flex-col gap-8" aria-busy={loading}>
-      <Panel title="แผนก">{summary}</Panel>
+      <section aria-label="แผนก">{summary}</section>
 
       {/* modal เปิดอยู่ไม่ render ส่วนนี้ เพราะ DataGrid เก็บ page/q/sort ใน URL สอง grid ในหน้าเดียวจะใช้ state ร่วมกัน */}
       {!dep && data && data.departments.length > 0 && (

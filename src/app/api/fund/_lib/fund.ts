@@ -9,7 +9,8 @@ import type { CategoryAmount, FundCode } from "../types";
 
 export const UNKNOWN_FUND = "UNKNOWN";
 export const UNKNOWN_NAME = "ไม่ระบุ";
-const MAX_RANGE_DAYS = 30;
+// ต้องตรงกับ MAX_RANGE_DAYS ใน DateRangeFilter (import จากไฟล์ "use client" ไม่ได้ เพราะฝั่ง server จะได้ client reference ไม่ใช่ตัวเลข)
+const MAX_RANGE_DAYS = 31;
 export const DAY_MS = 86_400_000;
 
 /** SQL ของรหัสกองทุนจาก alias ของตาราง pttype */
@@ -40,7 +41,7 @@ export const isoDate = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 export type DateRange = { start: string; end: string; startMs: number; endMs: number; days: number };
 
-/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน 30 วัน (นับรวมวันแรกและวันสุดท้าย) */
+/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน MAX_RANGE_DAYS (31) วัน (นับรวมวันแรกและวันสุดท้าย) */
 export function parseRange(params: URLSearchParams): { ok: true; range: DateRange } | { ok: false; error: string } {
   const startMs = toUtc(params.get("start"));
   const endMs = toUtc(params.get("end"));

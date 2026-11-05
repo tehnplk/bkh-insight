@@ -29,6 +29,7 @@ export function formatThaiDate(iso: string, long = false) {
 }
 
 const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const selectCls = `h-8 rounded-md border border-line bg-surface px-1.5 font-semibold text-foreground tabular-nums hover:bg-hover ${focusRing}`;
 const iconBtn = `grid size-8 place-items-center rounded-md text-muted hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
 
 function Chevron({ dir }: { dir: "left" | "right" }) {
@@ -131,6 +132,14 @@ export function ThaiDateStepper({ value, onChange, min, max, label, stepper = tr
   const nextDayBlocked = !!max && value >= max;
   const prevDayBlocked = !!min && value <= min;
   const heading = `${MONTHS[m - 1]} ${y + 543}`;
+  // ปีให้เลือก: ตาม min/max ถ้ามี ไม่มีให้ย้อน 10 ปี (พอสำหรับรายงานย้อนหลัง) ถึงปีหน้า (ปีงบประมาณถัดไปเริ่ม ต.ค.) และมีปีที่แสดงอยู่เสมอ
+  const refYear = parse(today || value)[0];
+  const fromYear = Math.min(y, min ? parse(min)[0] : refYear - 10);
+  const toYear = Math.max(y, max ? parse(max)[0] : refYear + 1);
+  const monthBlocked = (month: number) => {
+    const ym = ymd(y, month, 1).slice(0, 7);
+    return (!!max && ym > max.slice(0, 7)) || (!!min && ym < min.slice(0, 7));
+  };
 
   return (
     <div className="flex items-center gap-2">
@@ -173,7 +182,7 @@ export function ThaiDateStepper({ value, onChange, min, max, label, stepper = tr
         aria-label={label}
         className="fixed inset-auto m-0 w-72 rounded-lg border border-line bg-surface p-3 text-sm text-foreground shadow-lg"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-1">
           <button
             type="button"
             aria-label="เดือนก่อนหน้า"
@@ -183,9 +192,23 @@ export function ThaiDateStepper({ value, onChange, min, max, label, stepper = tr
           >
             <Chevron dir="left" />
           </button>
-          <p aria-live="polite" className="font-semibold tabular-nums">
-            {heading}
-          </p>
+          {/* เปลี่ยนแค่เดือนที่แสดง ยังไม่เลือกวัน */}
+          <div className="flex gap-1">
+            <select aria-label="เดือน" value={m} onChange={(e) => setFocus(clamp(addMonths(focus, Number(e.target.value) - m)))} className={selectCls}>
+              {MONTHS.map((name, i) => (
+                <option key={name} value={i + 1} disabled={monthBlocked(i + 1)}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <select aria-label="ปี พ.ศ." value={y} onChange={(e) => setFocus(clamp(addMonths(focus, (Number(e.target.value) - y) * 12)))} className={selectCls}>
+              {Array.from({ length: toYear - fromYear + 1 }, (_, i) => fromYear + i).map((year) => (
+                <option key={year} value={year}>
+                  {year + 543}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
             aria-label="เดือนถัดไป"
@@ -197,6 +220,9 @@ export function ThaiDateStepper({ value, onChange, min, max, label, stepper = tr
           </button>
         </div>
 
+        <p aria-live="polite" className="sr-only">
+          {heading}
+        </p>
         <table aria-label={heading} onKeyDown={onGridKey} className="mt-2 w-full border-collapse text-center tabular-nums">
           <thead>
             <tr>

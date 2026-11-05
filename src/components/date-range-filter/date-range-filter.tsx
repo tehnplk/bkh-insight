@@ -8,8 +8,8 @@ import { todayIso } from "@/lib/thai-date";
 // ไม่มีค่า = วันนี้ถึงวันนี้ ตามเวลาไทย (ตรงกับ preset "วันนี้" ซึ่งเป็นตัวแรก)
 // ใช้ useSearchParams ทั้งคู่ ผู้ใช้ต้องครอบ DateRangeFilter และ component ที่เรียก useDateRange ด้วย <Suspense>
 
-/** ช่วงยาวสุดที่เลือกได้ (วัน รวมวันแรกและวันสุดท้าย) API ของโมดูล fund ตอบ 400 ถ้าเกิน แก้ที่นี่ที่เดียว */
-export const MAX_RANGE_DAYS = 30;
+/** ช่วงยาวสุดที่เลือกได้ (วัน รวมวันแรกและวันสุดท้าย) 31 = เลือกได้เต็มเดือน ต้องตรงกับ MAX_RANGE_DAYS ใน src/app/api/fund/_lib/fund.ts (API ตอบ 400 ถ้าเกิน) */
+export const MAX_RANGE_DAYS = 31;
 const SPAN = MAX_RANGE_DAYS - 1;
 
 // คำนวณบน UTC ล้วน ไม่เลื่อนตาม timezone ของเครื่อง
@@ -34,15 +34,13 @@ function clampRange(start: string, end: string, keep: "start" | "end", today: st
 }
 
 function presets(today: string) {
-  const list = [
+  return [
     { id: "today", label: "วันนี้", start: today, end: today },
     { id: "7d", label: "7 วันล่าสุด", start: addDays(today, -6), end: today },
-    { id: "30d", label: `${MAX_RANGE_DAYS} วันล่าสุด`, start: addDays(today, -SPAN), end: today },
+    { id: "30d", label: "30 วันล่าสุด", start: addDays(today, -29), end: today },
+    // ต้นเดือนถึงวันนี้ยาวไม่เกิน 31 วันเสมอ
+    { id: "month", label: "เดือนนี้", start: `${today.slice(0, 8)}01`, end: today },
   ];
-  // "เดือนนี้" เฉพาะวันที่ต้นเดือนถึงวันนี้ไม่เกินขีดจำกัด (วันที่ 31 จะยาวเกิน)
-  const month = `${today.slice(0, 8)}01`;
-  if (daysBetween(month, today) <= SPAN) list.push({ id: "month", label: "เดือนนี้", start: month, end: today });
-  return list;
 }
 
 /** ช่วงวันที่จาก URL (start, end) ที่ปรับให้ถูกต้องแล้ว (ค่าผิดรูปแบบใช้ค่าเริ่มต้น, end < start หรือยาวเกิน MAX_RANGE_DAYS ถูกตัด) */
