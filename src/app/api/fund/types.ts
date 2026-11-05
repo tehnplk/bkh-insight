@@ -100,3 +100,46 @@ export type DepartmentSummaryResponse = {
   categories: CategoryAmount[];
   departments: DepartmentSummary[];
 };
+
+// ภาพรวมการเคลม: สถานะต่อ visit (ovst) closed = ปิดสิทธิแล้ว, authen_only = มี authen (PP) แต่ยังไม่ปิด, none = ไม่มีทั้งคู่
+// มูลค่า = ยอดรวม opitemrece ทั้ง visit กองทุน/แผนกอิงสิทธิหลัก (ovst.pttype) และแผนกหลัก (ovst.main_dep)
+
+export type ClaimStatus = "closed" | "authen_only" | "none";
+export type StatusAmounts = { visits: number; amount: number };
+export type ClaimTotals = { visits: number; amount: number; closed: StatusAmounts; authen_only: StatusAmounts; none: StatusAmounts };
+
+/** GET /api/fund/claim-overview?start&end */
+export type ClaimOverviewResponse = {
+  start: string;
+  end: string;
+  totals: ClaimTotals;
+  /** ช่วงยาวเท่ากันที่อยู่ก่อน start ทันที ไม่มี visit เลย = null */
+  previous: ClaimTotals | null;
+  /** เรียงตาม amount มากไปน้อย */
+  by_fund: ({ fund_code: string; fund_name: string; prev_visits: number; prev_amount: number } & ClaimTotals)[];
+  /** เรียงตาม amount มากไปน้อย main_dep ว่าง = "UNKNOWN"/"ไม่ระบุ" */
+  by_department: ({ dep_code: string; dep_name: string } & ClaimTotals)[];
+  /** ทุกวันในช่วง เติม 0 วันที่ไม่มีข้อมูล */
+  daily: ({ date: string } & ClaimTotals)[];
+};
+
+/**
+ * GET /api/fund/claim-overview/pending?start&end[&status=pending|authen_only|none][&fund][&dep]
+ *   + DataGrid params (sort: amount (ค่าเริ่มต้น desc), vstdate, hn, full_name, dep_name; q = HN/ชื่อ; format=xlsx)
+ *   -> { rows: PendingRow[], total }  status ค่าเริ่มต้น pending = authen_only + none
+ */
+export type PendingRow = {
+  vn: string;
+  vstdate: string;
+  hn: string;
+  full_name: string;
+  pttype_name: string;
+  fund_code: string;
+  fund_name: string;
+  dep_name: string;
+  authen_code: string | null;
+  /** มีค่าเฉพาะ status = closed */
+  close_code: string | null;
+  status: ClaimStatus;
+  amount: number;
+};

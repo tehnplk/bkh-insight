@@ -27,6 +27,7 @@ export const navItems: NavItem[] = [
       { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
+      { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
     ],
   },
   {

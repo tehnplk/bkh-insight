@@ -36,7 +36,7 @@ ChartJS.register(
 
 /* ---------- สีและฟอนต์จาก design token (อ่านตอน runtime, เปลี่ยนตาม data-theme) ---------- */
 
-type ChartTheme = {
+export type ChartTheme = {
   key: string;
   fg: string;
   muted: string;
@@ -59,7 +59,7 @@ const getThemeKey = () => document.documentElement.dataset.theme ?? "light";
 const getServerThemeKey = () => null;
 
 /** null ระหว่าง SSR / ก่อน hydrate (ยังอ่าน CSS ไม่ได้) */
-function useChartTheme(): ChartTheme | null {
+export function useChartTheme(): ChartTheme | null {
   const key = useSyncExternalStore(
     subscribeTheme,
     getThemeKey,
@@ -89,7 +89,7 @@ function withAlpha(hex: string, alpha: number) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`;
 }
 
-const tooltipStyle = (t: ChartTheme) => ({
+export const tooltipStyle = (t: ChartTheme) => ({
   backgroundColor: t.surface,
   borderColor: t.line,
   borderWidth: 1,
@@ -104,7 +104,7 @@ const tooltipStyle = (t: ChartTheme) => ({
 
 /* ---------- keyboard: ลูกศรเลื่อนจุดที่เลือก แสดง tooltip เดียวกับ hover ---------- */
 
-function useKeyboardActive(count: number, onEnter?: (i: number) => void) {
+export function useKeyboardActive(count: number, onEnter?: (i: number) => void) {
   const chartRef = useRef<Chart | null>(null);
   const [active, setActive] = useState<number | null>(null);
 
@@ -117,7 +117,8 @@ function useKeyboardActive(count: number, onEnter?: (i: number) => void) {
       chart.tooltip?.setActiveElements([], { x: 0, y: 0 });
     } else {
       const el = chart.getDatasetMeta(0).data[i];
-      const els = [{ datasetIndex: 0, index: i }];
+      // ทุก dataset ที่ index นี้ (กราฟซ้อน) tooltip จึงแสดงครบเหมือน hover
+      const els = chart.data.datasets.map((_, datasetIndex) => ({ datasetIndex, index: i }));
       chart.setActiveElements(els);
       chart.tooltip?.setActiveElements(els, { x: el?.x ?? 0, y: el?.y ?? 0 });
     }
@@ -149,7 +150,7 @@ function useKeyboardActive(count: number, onEnter?: (i: number) => void) {
   return { chartRef, active, onKeyDown, onBlur: () => show(null) };
 }
 
-const focusRing =
+export const focusRing =
   "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /* ---------- แนวโน้มรายวัน: เส้น + area wash, crosshair ---------- */
@@ -320,7 +321,7 @@ export type RankedItem = {
   href?: string;
 };
 
-const truncate = (s: string, n: number) =>
+export const truncate = (s: string, n: number) =>
   s.length > n ? `${s.slice(0, n - 1)}…` : s;
 
 export function RankedBarChart({

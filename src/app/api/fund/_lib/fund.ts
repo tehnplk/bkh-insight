@@ -101,5 +101,7 @@ export function fundPttypeFilter(lk: Lookups, fund: FundCode): { sql: string; pa
   const unknown = fund === UNKNOWN_FUND;
   const codes = [...lk.pttype].filter(([, p]) => (unknown ? p.fund !== UNKNOWN_FUND : p.fund === fund)).map(([c]) => c);
   if (!codes.length) return { sql: unknown ? "1 = 1" : "1 = 0", params: [] };
-  return { sql: `o.pttype ${unknown ? "NOT IN" : "IN"} (${codes.map(() => "?").join(", ")})`, params: codes };
+  const list = codes.map(() => "?").join(", ");
+  // NOT IN ไม่จับ NULL จึงต้องรวม pttype ว่างเข้า UNKNOWN เอง (ovst.pttype เป็น NULL ได้)
+  return { sql: unknown ? `(o.pttype IS NULL OR o.pttype NOT IN (${list}))` : `o.pttype IN (${list})`, params: codes };
 }
