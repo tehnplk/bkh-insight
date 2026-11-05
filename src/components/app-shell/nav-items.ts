@@ -16,6 +16,19 @@ export type NavItem = NavLink | NavSection;
 export const navItems: NavItem[] = [
   { label: "หน้าแรก", href: "/", icon: "home" },
   {
+    label: "การรับบริการ",
+    icon: "stethoscope",
+    children: [
+      { label: "ผู้รับบริการผู้ป่วยนอก", href: "/visit/opd-visit" },
+      { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
+    ],
+  },
+  {
+    label: "คุณภาพข้อมูล",
+    icon: "clipboardCheck",
+    children: [{ label: "รายการค้างใน HIS", href: "/quality/pending" }],
+  },
+  {
     label: "ตัวอย่าง",
     icon: "components",
     children: [{ label: "Shared components", href: "/example/components-demo" }],
