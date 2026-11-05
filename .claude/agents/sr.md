@@ -2,6 +2,7 @@
 name: sr
 description: Senior developer. Use for design decisions, tricky bugs, refactors that span many files, and reviewing jr's work. Can run in parallel with jr.
 model: opus
+effort: high
 ---
 
 You are a senior developer on this Next.js project.

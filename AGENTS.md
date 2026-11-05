@@ -9,14 +9,12 @@
   - Codex: `codex plugin marketplace add DietrichGebert/ponytail` แล้ว `codex plugin add ponytail@ponytail` จากนั้นเปิด `/hooks` trust hook ทั้งสองตัว แล้วเริ่ม thread ใหม่
   - agent อื่น: ดู INSTALL.md ใน repo
   - ตรวจด้วย `/ponytail` (ถ้าโหมดปิดอยู่จะเปิดให้ ถ้าเปิดอยู่จะบอกระดับปัจจุบัน)
-- ทุกครั้งที่เขียนหรือแก้โค้ด ต้องเปิด `impeccable` และ `ponytail` ก่อนเสมอ (Claude Code ใช้ Skill tool เรียก `impeccable` และ `ponytail:ponytail`) แล้วทำตามคำแนะนำของทั้งสอง ponytail ต้องอยู่ระดับ `full` ห้ามลดระดับเว้นแต่ผู้ใช้สั่ง ถ้า Claude Code มอบงานให้ subagent (เฉพาะ Claude Code เท่านั้นที่ spawn ได้) ต้องระบุใน prompt ให้เปิดทั้งสองก่อนเขียนโค้ด
+- ทุกครั้งที่เขียนหรือแก้โค้ด ต้องเปิด `impeccable` และ `ponytail` ก่อนเสมอ (Claude Code ใช้ Skill tool เรียก `impeccable` และ `ponytail:ponytail`) แล้วทำตามคำแนะนำของทั้งสอง ponytail ต้องอยู่ระดับ `full` ห้ามลดระดับเว้นแต่ผู้ใช้สั่ง ถ้า Claude Code มอบงานให้ subagent ต้องระบุใน prompt ให้เปิดทั้งสองก่อนเขียนโค้ด
 - ก่อนใช้ API ของ library หรือ framework (Next.js, Auth.js, TanStack, pg ฯลฯ) ต้องค้น docs ล่าสุดด้วย Context7 ก่อน เพราะความรู้ของโมเดลอาจเก่ากว่าเวอร์ชันที่ติดตั้ง สำหรับ Next.js ให้ดู `node_modules/next/dist/docs/` ด้วย agent ที่ไม่มี Context7 ให้ใช้ docs ทางการของ library นั้นแทน
 
 ## ทำงานร่วมกันหลายคน
 
-โปรเจกต์นี้มีผู้พัฒนาหลายคนซึ่งอาจใช้ AI agent คนละตัว ไฟล์นี้จึงเป็นกฎกลางที่ทุก agent ต้องอ่าน
-
-- กฎของโปรเจกต์เขียนที่ไฟล์นี้ที่เดียว (`CLAUDE.md` และ `GEMINI.md` แค่ import ไฟล์นี้ ห้ามเขียนกฎลงในสองไฟล์นั้น) ห้ามใส่ path, ชื่อผู้ใช้ หรือการตั้งค่าเฉพาะเครื่องตัวเอง (เช่น `~/.claude/...`, `C:\Users\...`) และห้ามใส่ความชอบส่วนตัว เช่น ภาษาที่ตอบหรือสไตล์การทำงาน ให้เก็บใน config ส่วนตัว (`~/.claude/CLAUDE.md`, `CLAUDE.local.md`)
+- ไฟล์นี้เป็นกฎกลางที่ทุก agent ต้องอ่าน เพราะผู้พัฒนาหลายคนอาจใช้ AI agent คนละตัว กฎของโปรเจกต์เขียนที่ไฟล์นี้ที่เดียว (`CLAUDE.md` และ `GEMINI.md` แค่ import ไฟล์นี้ ห้ามเขียนกฎลงในสองไฟล์นั้น) ห้ามใส่ path, ชื่อผู้ใช้ หรือการตั้งค่าเฉพาะเครื่องตัวเอง (เช่น `~/.claude/...`, `C:\Users\...`) และห้ามใส่ความชอบส่วนตัว เช่น ภาษาที่ตอบหรือสไตล์การทำงาน ให้เก็บใน config ส่วนตัว (`~/.claude/CLAUDE.md`, `CLAUDE.local.md`)
 - ต้อง commit ไฟล์ที่ใช้ร่วมกัน: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/agents/`, `.claude/skills/`, `.claude/settings.json`
 - ห้าม commit `.env*` (ยกเว้น `.env.example`), `CLAUDE.local.md`, `.claude/settings.local.json`, credential และ artifact ของการทดสอบ env ตัวใหม่ให้เพิ่มชื่อตัวแปรใน `.env.example` ด้วย (ไม่ใส่ค่าจริง)
 - Git:
@@ -79,7 +77,7 @@
     - ห้ามคำทักทาย ("ยินดีต้อนรับ"), คำฟุ้งเฟ้อ ("ครบวงจร", "อย่างมีประสิทธิภาพ", "ข้อมูลเชิงลึก", "ทรงพลัง", "ยกระดับ", "ชาญฉลาด"), ประโยคเกริ่นที่ไม่มีข้อมูล, emoji และเครื่องหมายตกใจ
     - ตรวจ copy ของส่วนหัวหน้าใหม่ด้วย skill `impeccable` (clarify) ทุกครั้ง
 - `DataGrid` (`@/components/data-grid/data-grid`): ตารางข้อมูลจาก API แบบ server-side ทั้ง sort, ค้นหา, แบ่งหน้า และปุ่มส่งออก Excel state อยู่ใน URL (`page`, `pageSize`, `sort`, `dir`, `q`) จึง refresh หรือแชร์ link ได้หน้าเดิม
-  - props: `endpoint`, `columns` (สร้างด้วย `gridColumnHelper<Row>()` ประกาศนอก component), `getRowId`, `renderDetail?(row)`, `detailMode?: "modal" | "expand"`, `detailTitle?(row)`, `filterKeys?` (ชื่อ param อื่นใน URL ที่ส่งต่อให้ API และไฟล์ Excel เช่น `["from", "to"]` route ต้อง validate เอง ดู `/visit/opd-visit`), `toolbar?` (ReactNode เช่น ตัวเลือกวันที่ แสดงชิดซ้ายหน้าช่องค้นหาในแถวเดียวกัน และขึ้นบรรทัดใหม่เองบนจอแคบ ไม่ต้องวาง filter แยกเหนือตาราง), `liveSearch?` (ค้นหาระหว่างพิมพ์ หน่วง 300ms ไม่มีปุ่มค้นหา ข้อความสั้นกว่า 2 ตัวอักษรยังไม่ยิง request เว้นแต่กด Enter, Esc หรือลบจนว่างคือล้าง ใช้เมื่อ endpoint รับโหลดได้ เพราะยิงหนึ่ง request ต่อการหยุดพิมพ์ ดู `/visit/opd-visit`), `renderSummary?(data)` (แถบสรุประหว่าง toolbar กับตาราง รับ response ทั้งก้อน เช่นผลรวมของทุกแถวที่ตรง filter ให้ route ส่ง field เพิ่มจาก `{ rows, total }` แล้วระบุชนิดเป็น type param ตัวที่สอง `DataGrid<Row, GridPage<Row> & { summary: ... }>` ระหว่างโหลดแสดงค่าเดิมแบบจาง ดู `/visit/opd-visit`), `exportPlacement?: "toolbar" | "summary"` (ตำแหน่งปุ่มส่งออก Excel ค่าเริ่มต้น `"toolbar"` ชิดขวาแถวช่องค้นหา ส่วน `"summary"` ชิดขวาในแถบสรุป ใช้ได้เมื่อมี `renderSummary` ไม่มีจะกลับไปอยู่ toolbar ดู `/visit/opd-visit`) (ช่องค้นหาไม่มี placeholder ใช้ `aria-label="ค้นหา"` กับไอคอนแว่นขยาย)
+  - props: `endpoint`, `columns` (สร้างด้วย `gridColumnHelper<Row>()` ประกาศนอก component), `getRowId`, `renderDetail?(row)`, `detailMode?: "modal" | "expand"`, `detailTitle?(row)`, `filterKeys?` (ชื่อ param อื่นใน URL ที่ส่งต่อให้ API และไฟล์ Excel เช่น `["from", "to"]` route ต้อง validate เอง ดู `/visit/opd-visit`), `toolbar?` (ReactNode เช่น ตัวเลือกวันที่ แสดงชิดซ้ายหน้าช่องค้นหาในแถวเดียวกัน และขึ้นบรรทัดใหม่เองบนจอแคบ ไม่ต้องวาง filter แยกเหนือตาราง), `params?` (`Record<string, string>` ค่าที่ส่งไป endpoint เพิ่มทั้งตอนโหลดและส่งออก Excel เมื่อค่า filter ไม่ได้อยู่ใน URL ตรงๆ ค่าว่างไม่ส่ง route ต้อง validate เอง), `filters?` (ReactNode แสดงตำแหน่งเดียวกับ `toolbar` ต่อท้าย ใช้ตัวใดตัวหนึ่งก็ได้), `liveSearch?` (ค้นหาระหว่างพิมพ์ หน่วง 300ms ไม่มีปุ่มค้นหา ข้อความสั้นกว่า 2 ตัวอักษรยังไม่ยิง request เว้นแต่กด Enter, Esc หรือลบจนว่างคือล้าง ใช้เมื่อ endpoint รับโหลดได้ เพราะยิงหนึ่ง request ต่อการหยุดพิมพ์ ดู `/visit/opd-visit`), `renderSummary?(data)` (แถบสรุประหว่าง toolbar กับตาราง รับ response ทั้งก้อน เช่นผลรวมของทุกแถวที่ตรง filter ให้ route ส่ง field เพิ่มจาก `{ rows, total }` แล้วระบุชนิดเป็น type param ตัวที่สอง `DataGrid<Row, GridPage<Row> & { summary: ... }>` ระหว่างโหลดแสดงค่าเดิมแบบจาง ดู `/visit/opd-visit`), `exportPlacement?: "toolbar" | "summary"` (ตำแหน่งปุ่มส่งออก Excel ค่าเริ่มต้น `"toolbar"` ชิดขวาแถวช่องค้นหา ส่วน `"summary"` ชิดขวาในแถบสรุป ใช้ได้เมื่อมี `renderSummary` ไม่มีจะกลับไปอยู่ toolbar ดู `/visit/opd-visit`) (ช่องค้นหาไม่มี placeholder ใช้ `aria-label="ค้นหา"` กับไอคอนแว่นขยาย ลบจนว่างคือล้างการค้นหาทันทีทั้งสองโหมด)
   - ใช้ `useSearchParams` จึงต้องครอบด้วย `<Suspense>` และ `columns`/`renderDetail`/`renderSummary` เป็นฟังก์ชัน จึงต้องวางใน client component ของ module
 - `StackedBarChart` (`@/components/stacked-bar-chart/stacked-bar-chart`): กราฟแท่งซ้อนหรือแท่งเรียงกลุ่มด้วย chart.js (client) กว้างตาม container แท่งเยอะเกินจอเลื่อนแนวนอน legend เป็น HTML, tooltip รวมทุก series + ยอดรวม และปุ่มเปิดตารางข้อมูล (canvas อ่านด้วย screen reader ไม่ได้) สีอ่านจาก token ตอนวาดและวาดใหม่เมื่อสลับธีม props: `label` (aria-label/caption), `categoryHeader`, `categories: { key, label, title }[]` (`label` แกน x, `title` หัว tooltip/แถวตาราง), `series: { key, label, color, short?, note? }[]` (ล่างขึ้นบน หรือซ้ายไปขวาเมื่อไม่ซ้อน, `color` เป็น token เช่น `"var(--chart-1)"`), `values[category][series]`, `format(n)`, `integer?`, `hrefFor?(c, s)` (คลิก segment และ link ในตาราง), `stacked?` (ค่าเริ่มต้น `true` ส่ง `false` = แท่งแยกแต่ละ series วางเรียงกันในแต่ละ category แกน y อิงค่าสูงสุดรายแท่ง และความกว้างขั้นต่ำต่อ category เพิ่มตามจำนวน series), `height?` (ความสูงพื้นที่กราฟ px ค่าเริ่มต้น 260) ฟังก์ชันเป็น prop จึงต้องเรียกจาก client component ดูหน้าแรก `/?tab=trend`
   - สีของกราฟ: token `--chart-1` ถึง `--chart-7` (categorical ผ่านการตรวจ CVD ตามลำดับ ใช้ตามลำดับ ห้ามวนสี) และ `--chart-other` (สีกลางของ "อื่นๆ") ผูกสีกับ entity ไม่ใช่อันดับ กรองแล้วสีต้องไม่เปลี่ยน
@@ -93,7 +91,7 @@
   - ต่อ DB: `sort` ผ่าน allowlist แล้วจึงใช้เป็นชื่อคอลัมน์ได้ ส่วน `q` ต้องส่งเป็น bind parameter เสมอ และคอลัมน์ที่ค้นหาให้ route กำหนดเอง
 - `xlsxResponse` (`@/lib/xlsx`): `xlsxResponse(filename, columns, rows)` คืน `Response` ไฟล์ .xlsx (exceljs) สำหรับ `format=xlsx`
 - `@/lib/db`: เชื่อมต่อฐานข้อมูล 2 ฐาน (server-only, pool แบบ lazy, env ตั้งใน `.env` ตาม `.env.example`)
-  - `his`: HOSxP บน MySQL (`mysql2`) ฐาน production ของโรงพยาบาล **อ่านอย่างเดียว ห้ามเขียน his ไม่ว่ากรณีใด** ใช้ `hisQuery<T>(sql, params)` เท่านั้น ยอมแค่ statement เดียวที่ขึ้นต้นด้วย SELECT/WITH/SHOW/DESCRIBE/EXPLAIN และทุก connection ตั้ง `SET SESSION TRANSACTION READ ONLY` กับ `SET NAMES utf8mb4` (server มี `init_connect` บังคับ tis620 ทำให้ค้นด้วยภาษาไทยไม่เจอ) ห้ามสร้าง pool หรือ connection ไป his เองเพื่อเลี่ยงข้อนี้ และ DB user ของ his ต้องมีสิทธิ์ SELECT เท่านั้น
+  - `his`: HOSxP บน MySQL (`mysql2`) ฐาน production ของโรงพยาบาล **อ่านอย่างเดียว ห้ามรันคำสั่งเขียนทุกชนิดไม่ว่ากรณีใดหรือผ่านเครื่องมือใด** ใช้ `hisQuery<T>(sql, params)` เท่านั้น ยอมแค่ statement เดียวที่ขึ้นต้นด้วย SELECT/WITH/SHOW/DESCRIBE/EXPLAIN และทุก connection ตั้ง `SET SESSION TRANSACTION READ ONLY` กับ `SET NAMES utf8mb4` (server มี `init_connect` บังคับ tis620 ทำให้ค้นด้วยภาษาไทยไม่เจอ) ห้ามสร้าง pool หรือ connection ไป his เองเพื่อเลี่ยงข้อนี้ และ DB user ของ his ต้องมีสิทธิ์ SELECT เท่านั้น
   - `insight`: ฐานของระบบเองบน PostgreSQL (`pg`) อ่านด้วย `insightQuery<T>(sql, params)` (คืน `rows`) เขียนด้วย `insightExecute(sql, params)` (คืน `{ rowCount }`) ต้องการค่าที่สร้างใหม่ (เช่น id) ให้ใช้ `insightQuery` กับ `RETURNING`
   - placeholder: his ใช้ `?` ส่วน insight ใช้ `$1, $2, …` (ไม่มีตัวแปลง `?` เป็น `$n`)
   - JOIN ข้าม his กับ insight ทำไม่ได้ เพราะอยู่คนละ engine ให้ query แยกแต่ละฐานแล้วรวมผลในโค้ด
@@ -114,8 +112,10 @@
 - งานที่ต้องลงมือ (แก้โค้ด, รันคำสั่ง, ตรวจฐานข้อมูล, ค้นหาในโค้ดเพื่อทำงานต่อ) ต้อง spawn subagent ที่เหมาะสมเสมอ main ไม่ลงมือเอง ส่วนการปรึกษา ถาม-ตอบ หรือวางแผน main ทำเองโดยไม่ spawn
   - `sr`: งานออกแบบ บั๊กที่ยังไม่รู้สาเหตุ refactor หลายไฟล์ และรีวิวงานของ `jr`
   - `jr`: งานที่ขอบเขตชัด งานประจำ แก้เล็ก เพิ่ม test ค้นหาในโค้ด
+  - `prove-query`: พิสูจน์ว่า SQL ถูกต้องและเหมาะสม (ถูกต้อง เร็วพอ ปลอดภัย ดึงเท่าที่ใช้) กับฐานจริง (his/insight) ผ่าน `db-cli --skill` เท่านั้น อ่านอย่างเดียว ไม่แก้ไฟล์ ส่งผลเป็นบล็อกกลับให้ main
   - ข้อยกเว้น: `commit`, `push`, เปิด PR และ `merge` main รันเองหลังผู้ใช้สั่ง ไม่ส่งให้ subagent subagent แก้และตรวจผลเท่านั้น เพราะ subagent ไม่ทำตามคำสั่งที่ agent อื่นส่งต่อมา (ถูกต้องแล้ว เพราะคำสั่ง git ต้องมาจากผู้ใช้)
 - งานที่แยกส่วนได้และไม่แตะไฟล์เดียวกัน ให้ spawn `sr` และ `jr` พร้อมกัน แต่ละตัวต้องได้ขอบเขตไฟล์ที่ชัดเจน
+- งานที่มี SQL ใหม่หรือแก้ SQL ให้ main เรียก `prove-query` ก่อน แล้วคัดลอกบล็อกผลที่ `สถานะ: ผ่าน` ไปใส่ prompt ของ `jr`/`sr` ที่เขียนโค้ด เพราะ subagent ส่งผลได้แค่กลับหา main และ SQL ที่ใส่ในโค้ดต้องผ่านฐานจริงก่อน ถ้า `ไม่ผ่าน` main แก้ปัญหาตามที่ขอแล้วเรียกซ้ำ
 - subagent ทำเสร็จแล้ว main สรุปผลให้ผู้ใช้ รวมถึงไฟล์ที่เปลี่ยนและผลการตรวจสอบ
 - ทำงาน dev เสร็จ (แก้ page หรือ API) ทุกคำสั่งของผู้ใช้ ต้องส่ง link ของ dev server ที่คลิกได้ให้ผู้ใช้ทดสอบเสมอ:
   - dev server ยังไม่รัน ให้รัน `npm run dev` แบบ background แล้วเช็คด้วย `curl` ว่าหน้านั้นตอบ 200 ก่อนส่ง link
@@ -152,6 +152,8 @@
 
 งานฐานข้อมูลต้องตรวจกับฐานจริงด้วย [db-cli](https://github.com/tehnplk/db-cli) ก่อนสรุปว่าผ่าน (รองรับทั้ง MySQL และ PostgreSQL)
 
+ใน Claude Code งาน prove ให้ส่ง `prove-query` ทำ agent อื่นที่ไม่มี subagent ทำตามวิธีด้านล่างเอง
+
 ### ติดตั้ง CLI
 
 ```bash
@@ -163,21 +165,21 @@ db-cli -v
 
 ### วิธีใช้
 
-- ก่อนใช้งานให้อ่าน options ด้วย `db-cli --skill` (ตัวย่อ `-s`) และใช้พารามิเตอร์ตัวย่อ: `-g` engine, `-H` host, `-P` port, `-u` user, `-d` database, `-e` SQL, `-o` output ส่วน password ไม่ใช้ `-p` ให้ใช้ `DB_PASSWORD` แทน เพื่อไม่เปิดเผยรหัสผ่านในคำสั่ง
 - ต้องระบุในรายงานทุกครั้งว่าตรวจฐานไหน และใช้ `-g` ให้ตรง engine: `his` (env `HIS_*`, MySQL `-g my`) หรือ `insight` (env `INSIGHT_*`, PostgreSQL `-g pg`)
-- CLI ไม่โหลด `.env` และไม่แปลงชื่อตัวแปรให้ ต้องอ่านค่าจริงจาก `.env` ของฐานที่จะตรวจ: `HIS_HOST`, `HIS_PORT`, `HIS_USER`, `HIS_PASSWORD`, `HIS_DATABASE` (หรือ `INSIGHT_*` ชุดเดียวกัน) แล้วตั้งใน process เป็น `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` ตามลำดับ ห้ามใช้ค่า `USER` จาก environment ของระบบแทนผู้ใช้ฐานข้อมูล
-- ตรวจการเชื่อมต่อและชื่อฐานข้อมูล:
+- CLI ไม่โหลด `.env` และไม่แปลงชื่อตัวแปรให้ (ไม่ระบุ `-H` จะต่อ `localhost`) ต้องอ่านค่าจริงจาก `.env` ของฐานที่จะตรวจ แล้วส่งผ่าน flag ตัวย่อ `-H` host, `-P` port, `-u` user, `-d` database, `-e` SQL (ผลลงไฟล์ใช้ `-o`) ส่วน password ไม่ใช้ `-p` (รหัสผ่านจะโผล่ในคำสั่ง) ให้นำหน้าคำสั่งด้วย `DB_PASSWORD='...'` ในบรรทัดเดียวกัน (ใส่ `'...'` เสมอเพราะรหัสผ่านมีอักขระพิเศษได้) ห้ามใช้ค่า `USER` จาก environment ของระบบแทนผู้ใช้ฐานข้อมูล
+- รูปแบบเรียกใช้ (แทน `<...>` ด้วยค่าจาก `.env` ตามชื่อตัวแปร) ตรวจการเชื่อมต่อและชื่อฐานข้อมูล:
 
 ```bash
-# his (MySQL)
-db-cli -g my -e "SELECT 1 AS connection_ok, DATABASE() AS database_name;"
-# insight (PostgreSQL)
-db-cli -g pg -e "SELECT 1 AS connection_ok, current_database() AS database_name;"
+# his (MySQL): HIS_HOST HIS_PORT HIS_USER HIS_PASSWORD HIS_DATABASE
+DB_PASSWORD='<HIS_PASSWORD>' db-cli -g my -H <HIS_HOST> -P <HIS_PORT> -u <HIS_USER> -d <HIS_DATABASE> -e "SELECT 1 AS connection_ok, DATABASE() AS database_name;"
+# insight (PostgreSQL): INSIGHT_HOST INSIGHT_PORT INSIGHT_USER INSIGHT_PASSWORD INSIGHT_DATABASE
+DB_PASSWORD='<INSIGHT_PASSWORD>' db-cli -g pg -H <INSIGHT_HOST> -P <INSIGHT_PORT> -u <INSIGHT_USER> -d <INSIGHT_DATABASE> -e "SELECT 1 AS connection_ok, current_database() AS database_name;"
 ```
 
+- ผลสำเร็จเป็นตาราง `col|col` คั่นด้วย `|` ส่วน error ขึ้น `error|<ข้อความ>` (เช่น `connect ETIMEDOUT` = เครื่องนี้ต่อ host ไม่ถึง ให้เช็คเครือข่ายหรือ VPN ก่อน ไม่ใช่ flag ผิด) ใช้ `-e` ได้ครั้งเดียวต่อคำสั่ง db-cli เป็น read-only โดย default (ไม่ใส่ `-w` ห้ามใส่เองตามข้อห้ามด้านล่าง) และจะปิดค่าคอลัมน์ส่วนบุคคล (`*cid`, `*lname`, `*tel` ฯลฯ) เป็น MD5 กับปฏิเสธ `SELECT *` บน `patient`/`person` ให้ระบุคอลัมน์
 - ตรวจ schema หรือ query ที่เกี่ยวข้องกับงาน แล้วรายงาน SQL และผลตรวจจริง: his ใช้ `SHOW TABLES`, `SHOW COLUMNS FROM ...` ส่วน insight ใช้ `information_schema.tables` / `information_schema.columns` และทั้งสองใช้ `SELECT ... LIMIT ...` ได้
 
 ### ข้อห้าม
 
-- ห้ามใช้ `db-cli` รัน `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `CREATE` และคำสั่งอื่น ๆ ที่มีผลเปลี่ยนแปลงข้อมูล
-- ฐาน `his` เป็น production ห้ามรันคำสั่งเขียนทุกชนิดไม่ว่าผ่านเครื่องมือใด
+- ห้ามเขียน script หรือโค้ดชั่วคราว (เช่น ไฟล์ `.js`/`.ts`/`.py`, `node -e`, `tsx`, เรียก `@/lib/db` นอกแอป) เพื่อดูหรือ query ข้อมูลในฐาน ต้องการ proof ของ query ให้ใช้ `db-cli` เท่านั้น เพราะ script เลี่ยงข้อห้ามคำสั่งเขียนได้ และ SQL กับผลจริงต้องรายงานจากคำสั่งที่ตรวจซ้ำได้
+- ห้ามใช้ `db-cli` รัน `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `CREATE` และคำสั่งอื่น ๆ ที่มีผลเปลี่ยนแปลงข้อมูล (ฐาน `his` ดูข้อห้ามเขียนใน `@/lib/db` ด้านบน)

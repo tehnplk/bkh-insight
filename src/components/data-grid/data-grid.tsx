@@ -43,6 +43,10 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- แต่ละคอลัมน์มีชนิดค่าต่างกัน เหมือน helper.columns() ของ TanStack
   columns: ColumnDef<typeof features, T, any>[];
   getRowId: (row: T) => string;
+  /** ค่าที่ส่งไป endpoint เพิ่ม เช่น filter ของหน้า { vstdate: "2026-11-04" } ใช้ทั้งตอนโหลดและส่งออก Excel ค่าว่างไม่ส่ง */
+  params?: Record<string, string>;
+  /** control ของหน้า (เช่น วันที่ สิทธิ) วางในแถวเดียวกับช่องค้นหา ก่อนช่องค้นหา ใช้ h-9 ให้สูงเท่ากัน */
+  filters?: ReactNode;
   renderDetail?: (row: T) => ReactNode;
   detailMode?: "modal" | "expand";
   /** หัวข้อของ modal */
@@ -85,6 +89,8 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   endpoint,
   columns,
   getRowId,
+  params,
+  filters,
   renderDetail,
   detailMode = "modal",
   detailTitle,
@@ -110,6 +116,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     const v = sp.get(k);
     if (v) apiParams.set(k, v);
   }
+  for (const [k, v] of Object.entries(params ?? {})) if (v) apiParams.set(k, v);
   const apiQuery = apiParams.toString();
   apiParams.delete("page");
   apiParams.delete("pageSize");
@@ -179,11 +186,11 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
 
   function onSearchInput(value: string) {
     setText(value);
-    if (!liveSearch) return;
     clearTimeout(timer.current);
     const v = value.trim();
+    // ลบจนว่าง (พิมพ์ลบ, ปุ่ม ×) ล้างการค้นหาทันทีทั้งสองโหมด เพราะโหมดปกติจะไม่มีการกดค้นหาตามมา
     if (!v) commitSearch("");
-    else if (v.length >= LIVE_MIN_CHARS) timer.current = setTimeout(() => commitSearch(v), SEARCH_DEBOUNCE_MS);
+    else if (liveSearch && v.length >= LIVE_MIN_CHARS) timer.current = setTimeout(() => commitSearch(v), SEARCH_DEBOUNCE_MS);
   }
 
   function onSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -338,6 +345,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           {toolbar}
+          {filters}
           <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 basis-60 gap-2 sm:max-w-md">
             <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
               <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
