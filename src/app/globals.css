@@ -40,6 +40,19 @@
   --success: #157a3b;
   --success-soft: #ecfbf1;
   --success-line: #b4ebc6;
+
+  /* Chart series: categorical, fixed order, one slot per entity (never re-assigned by rank).
+     Validated on --surface with the dataviz palette validator: adjacent CVD dE >= 9.1, normal-vision >= 19.6.
+     Slots 3-5 are under 3:1 on white, so every chart also ships a table view.
+     --chart-other is the neutral fold for everything past slot 7, not a ninth hue. */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-other: #a9b2ab;
 }
 
 [data-theme="dark"] {
@@ -68,6 +81,16 @@
   --success: #7fdca0;
   --success-soft: #12281a;
   --success-line: #22502f;
+
+  /* Same hues stepped for the dark surface: adjacent CVD dE >= 8.4, all >= 3:1. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-other: #56625a;
 }
 
 @theme inline {

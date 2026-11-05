@@ -25,6 +25,7 @@ export function VisitGrid({ extraParams, showDepartment }: { extraParams: Record
     <DataGrid<FundVisitRow>
       endpoint="/api/fund/opd-fund/visits"
       params={extraParams}
+      liveSearch
       columns={showDepartment ? columnsWithDep : columns}
       getRowId={(r) => r.vn}
       renderDetail={renderDetail}

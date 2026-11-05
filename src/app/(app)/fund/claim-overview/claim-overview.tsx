@@ -422,6 +422,7 @@ export function ClaimOverview() {
         <DataGrid<PendingRow>
           endpoint="/api/fund/claim-overview/pending"
           params={params}
+          liveSearch
           filters={<StatusFilter value={status} onChange={(v) => set({ status: v || null })} />}
           columns={columns}
           getRowId={(r) => r.vn}

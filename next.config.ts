@@ -8,9 +8,10 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Bottom-left is taken by the sidebar's profile block.
   devIndicators: { position: "bottom-right" },
-  // Hostnames (comma-separated, no scheme/port) other LAN machines use to open the dev server.
-  // Per machine, so it lives in .env rather than here.
-  allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS?.split(",").map((h) => h.trim()).filter(Boolean),
+  // Dev only: let LAN machines that open http://<ip>:3000 load HMR/dev assets. Per machine via .env.
+  allowedDevOrigins: process.env.DEV_ALLOWED_ORIGINS?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
   turbopack: {
     rules: {
       "*.css": {

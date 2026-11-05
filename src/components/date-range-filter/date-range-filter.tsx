@@ -99,10 +99,8 @@ export function DateRangeFilter() {
           </option>
         )}
       </select>
-      <span aria-hidden="true">ตั้งแต่</span>
-      <ThaiDatePicker aria-label="ตั้งแต่" value={start} onChange={(v) => apply(v, end, "start")} />
-      <span aria-hidden="true">ถึง</span>
-      <ThaiDatePicker aria-label="ถึง" value={end} onChange={(v) => apply(start, v, "end")} />
+      <ThaiDatePicker label="ตั้งแต่" stepper={false} value={start} onChange={(v) => apply(v, end, "start")} />
+      <ThaiDatePicker label="ถึง" stepper={false} value={end} onChange={(v) => apply(start, v, "end")} />
     </div>
   );
 }

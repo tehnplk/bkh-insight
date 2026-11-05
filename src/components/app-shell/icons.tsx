@@ -71,6 +71,13 @@ const paths = {
     </>
   ),
   pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+  stethoscope: (
+    <>
+      <path d="M6 3.5H5v5a4.5 4.5 0 0 0 9 0v-5h-1" />
+      <path d="M9.5 13v1.5a5 5 0 0 0 10 0V12" />
+      <circle cx="19.5" cy="10" r="2" />
+    </>
+  ),
   calendar: (
     <>
       <rect x="3.5" y="5" width="17" height="15" rx="1.5" />
@@ -87,6 +94,13 @@ const paths = {
     <>
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7.5v5.5M12 16.5v.01" />
+    </>
+  ),
+  clipboardCheck: (
+    <>
+      <path d="M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15" />
+      <rect x="9" y="3" width="6" height="3" rx="1" />
+      <path d="m9 13.5 2 2 4-4" />
     </>
   ),
   search: (
