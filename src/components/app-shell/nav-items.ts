@@ -39,11 +39,6 @@ export const navItems: NavItem[] = [
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
     ],
   },
-  {
-    label: "ตัวอย่าง",
-    icon: "components",
-    children: [{ label: "Shared components", href: "/example/components-demo" }],
-  },
 ];
 
 // Admin pages: shown in the profile menu to role "admin" only (not in the sidebar or its search), and used by the
