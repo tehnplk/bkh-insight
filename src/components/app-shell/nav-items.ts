@@ -25,11 +25,6 @@ export const navItems: NavItem[] = [
     ],
   },
   {
-    label: "คุณภาพข้อมูล",
-    icon: "clipboardCheck",
-    children: [{ label: "รายการค้างใน HIS", href: "/quality/pending" }],
-  },
-  {
     label: "กองทุน",
     icon: "wallet",
     children: [

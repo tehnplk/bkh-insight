@@ -102,13 +102,6 @@ const paths = {
       <path d="M12 7.5v5.5M12 16.5v.01" />
     </>
   ),
-  clipboardCheck: (
-    <>
-      <path d="M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15" />
-      <rect x="9" y="3" width="6" height="3" rx="1" />
-      <path d="m9 13.5 2 2 4-4" />
-    </>
-  ),
   search: (
     <>
       <circle cx="11" cy="11" r="6.5" />
