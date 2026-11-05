@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "border-accent-on-rounded",
+        "value": "*",
+        "files": [
+          "src/app/(app)/home-tabs.tsx"
+        ],
+        "createdAt": "2026-11-04T04:56:32.511Z",
+        "reason": "main agent: L60 is a standard tab underline (border-b-2 on the active tab); the rounding is only focus-visible:rounded-t-md for the focus ring, not a rounded card"
+      }
+    ]
+  }
+}

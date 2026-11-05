@@ -1,26 +1,34 @@
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { auth } from "@/auth";
-import { hisQuery } from "@/lib/db";
-import { OpdVisitGrid, type PttypeOption } from "./opd-visit-grid";
+import { Clock } from "@/components/clock/clock";
+import { todayTh } from "@/app/api/visit/opd-visit/opd-visit";
+import { loadPttypeOptions } from "@/app/api/visit/opd-visit/pttype-options";
+import { OpdVisitGrid } from "./opd-visit-grid";
 
-export const metadata = { title: "ผู้ป่วยนอกรายวัน" };
+export const metadata = { title: "ผู้รับบริการผู้ป่วยนอก" };
 
-// รายการสิทธิสำหรับตัวกรอง อ่าน his ฝั่ง server จึงเช็ค session เองซ้ำ
-async function OpdVisit() {
-  const pttypes = (await auth())
-    ? await hisQuery<PttypeOption>("SELECT pttype, name FROM pttype WHERE isuse = 'Y' ORDER BY pttype")
-    : [];
-  return <OpdVisitGrid pttypes={pttypes} />;
+async function Grid() {
+  await connection(); // อ่าน HIS ตอน request ไม่ใช่ตอน build
+  // proxy.ts กั้นหน้าแล้ว แต่ส่วนที่อ่าน HIS เช็ค session เองซ้ำ
+  if (!(await auth())) redirect("/login?callbackUrl=/visit/opd-visit");
+  const { pttypes, groups } = await loadPttypeOptions();
+  // today มาจาก server (เวลาไทยตอน request) ห้ามอ่านนาฬิกาเครื่องผู้ใช้ตอน render: นาฬิกาเครื่องคลาดหรือข้ามเที่ยงคืน = max/href ไม่ตรงกับ HTML จาก server (hydration mismatch)
+  return <OpdVisitGrid pttypes={pttypes} groups={groups} today={todayTh()} />;
 }
 
 export default function Page() {
   return (
     <div className="max-w-6xl">
-      <h1 className="text-title text-balance">ผู้ป่วยนอกรายวัน</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h1 className="text-title text-balance">ผู้รับบริการผู้ป่วยนอก</h1>
+        <Clock />
+      </div>
       <div className="mt-6">
-        {/* อ่าน cookie และ useSearchParams ต้องอยู่ใต้ Suspense */}
+        {/* useSearchParams, cookie และ HIS ต้องอยู่ใต้ Suspense */}
         <Suspense fallback={<p className="text-sm text-muted">กำลังโหลด…</p>}>
-          <OpdVisit />
+          <Grid />
         </Suspense>
       </div>
     </div>
