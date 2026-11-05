@@ -324,6 +324,28 @@ export type RankedItem = {
 export const truncate = (s: string, n: number) =>
   s.length > n ? `${s.slice(0, n - 1)}…` : s;
 
+/**
+ * ข้อความที่ปลายแท่ง (สีตัวอักษรเป็น text token ไม่ใช่สีแท่ง) อ่านจาก options.plugins.valueLabels
+ * ไม่ใช่ closure เพราะ react-chartjs-2 รับ prop `plugins` ครั้งเดียวตอนสร้างกราฟ แต่ส่ง options ใหม่ทุกครั้ง
+ * (closure ทำให้ป้ายค้างค่าของช่วงวันที่แรก ขณะที่แท่งและ tooltip เปลี่ยนตามข้อมูลใหม่)
+ */
+const valueLabels: Plugin<"bar"> = {
+  id: "valueLabels",
+  afterDatasetsDraw(chart, _args, opts: { texts?: string[]; font?: string; color?: string }) {
+    if (!opts.texts) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    if (opts.font) ctx.font = opts.font;
+    if (opts.color) ctx.fillStyle = opts.color;
+    ctx.textBaseline = "middle";
+    chart.getDatasetMeta(0).data.forEach((bar, i) => {
+      const { x, y } = bar.getProps(["x", "y"], true) as { x: number; y: number };
+      ctx.fillText(opts.texts?.[i] ?? "", x + 6, y);
+    });
+    ctx.restore();
+  },
+};
+
 export function RankedBarChart({
   items,
   ariaLabel,
@@ -378,30 +400,6 @@ export function RankedBarChart({
     );
   }, [items, theme]);
 
-  // ค่า + สัดส่วนที่ปลายแท่ง (สีตัวอักษรเป็น text token ไม่ใช่สีแท่ง)
-  const valueLabels = useMemo<Plugin<"bar">>(
-    () => ({
-      id: "valueLabels",
-      afterDatasetsDraw(chart) {
-        if (!theme) return;
-        const ctx = chart.ctx;
-        ctx.save();
-        ctx.font = `500 11px ${theme.font}`;
-        ctx.fillStyle = theme.fg;
-        ctx.textBaseline = "middle";
-        chart.getDatasetMeta(0).data.forEach((bar, i) => {
-          const { x, y } = bar.getProps(["x", "y"], true) as {
-            x: number;
-            y: number;
-          };
-          ctx.fillText(items[i]?.valueText ?? "", x + 6, y);
-        });
-        ctx.restore();
-      },
-    }),
-    [items, theme],
-  );
-
   const options = useMemo<ChartOptions<"bar">>(() => {
     if (!theme) return {};
     return {
@@ -440,6 +438,11 @@ export function RankedBarChart({
       },
       plugins: {
         legend: { display: false },
+        valueLabels: {
+          texts: items.map((i) => i.valueText),
+          font: `500 11px ${theme.font}`,
+          color: theme.fg,
+        },
         tooltip: {
           ...tooltipStyle(theme),
           callbacks: {
@@ -447,7 +450,7 @@ export function RankedBarChart({
             label: (it) => items[it.dataIndex]?.tooltip ?? "",
           },
         },
-      },
+      } as ChartOptions<"bar">["plugins"],
     };
   }, [theme, items, select, labelSpace]);
 
