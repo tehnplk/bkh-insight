@@ -27,8 +27,9 @@ const safeEqual = (a: string, b: string) => timingSafeEqual(sha256(a), sha256(b)
 
 const providers: Provider[] = [];
 
-// Super user from .env. Off unless both vars are set, so an empty password can never match.
+// Super user from .env, signs in at /super/login. Off unless both vars are set, so an empty password can never match.
 const { AUTH_ADMIN_USER: adminUser, AUTH_ADMIN_PASSWORD: adminPassword } = process.env;
+export const superUserEnabled = Boolean(adminUser && adminPassword);
 if (adminUser && adminPassword) {
   providers.push(
     Credentials({
@@ -46,7 +47,8 @@ if (adminUser && adminPassword) {
 // SSO: PLK Health ID (OIDC). The IdP only accepts its registered {origin}/auth/callback, not the Auth.js default
 // /api/auth/callback/plkhealth, so AUTH_PLKHEALTH_REDIRECT_URI replaces redirect_uri in both requests that carry it
 // (they must match), and src/app/auth/callback/route.ts hands the response on to Auth.js.
-// More IdPs plug in the same way: push one provider, set its env, add a signIn("<id>") button on /login.
+// /login starts this sign-in by itself (proxy.ts -> /login/sso). More IdPs plug in the same way: push one provider and
+// set its env.
 const str = (v: unknown) => (typeof v === "string" && v ? v : null);
 const {
   AUTH_PLKHEALTH_ISSUER: plkIssuer,
