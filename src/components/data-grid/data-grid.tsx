@@ -29,6 +29,8 @@ const features = tableFeatures({
   expandedRowModel: createExpandedRowModel(),
   /** className ใส่ให้ทั้ง th และ td เช่น "text-right" สำหรับตัวเลข */
   columnMeta: metaHelper<{ className?: string }>(),
+  /** cell เรียก info.table.options.meta?.reload() ให้โหลดหน้าปัจจุบันใหม่ เช่น หลังปุ่มในแถวแก้ข้อมูล */
+  tableMeta: metaHelper<{ reload: () => void }>(),
 });
 
 /** ใช้สร้าง columns ให้ DataGrid: const col = gridColumnHelper<Row>(); col.columns([col.accessor("hn", { header: "HN" })]) */
@@ -162,6 +164,7 @@ export function DataGrid<T extends RowData>({
       setParams({ q: String(v ?? "").trim() || null, page: null });
     },
     getRowCanExpand: () => detailMode === "expand" && !!renderDetail,
+    meta: { reload: () => setReload((n) => n + 1) },
   });
 
   const pageCount = Math.max(1, table.getPageCount());

@@ -41,6 +41,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# production host credentials
+PROD_HOST.md
+
 # personal agent config
 CLAUDE.local.md
 .claude/settings.local.json

@@ -8,6 +8,10 @@ export type LoginState = { error: string; username: string } | null;
 // Only same-site paths ("/x", not "//host" or "/\host"), so callbackUrl cannot become an open redirect.
 const safePath = (v: FormDataEntryValue | null) => (typeof v === "string" && /^\/(?![/\\])/.test(v) ? v : "/");
 
+export async function ssoLogin(form: FormData) {
+  await signIn("plkhealth", { redirectTo: safePath(form.get("callbackUrl")) });
+}
+
 export async function login(_prev: LoginState, form: FormData): Promise<LoginState> {
   const username = String(form.get("username") ?? "");
   try {

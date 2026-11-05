@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  use,
   type FocusEvent,
   type ReactNode,
   type RefObject,
@@ -102,7 +103,8 @@ function Tip({ children, always = false }: { children: ReactNode; always?: boole
 /* ---------- shell ---------- */
 
 // `account` is pinned to the bottom of the sidebar (rail and mobile drawer), below the nav.
-export function AppShell({ children, account }: { children: ReactNode; account?: ReactNode }) {
+// `isAdmin` (a promise from the server, read with use()) shows nav items marked adminOnly; without it they stay hidden.
+export function AppShell({ children, account, isAdmin }: { children: ReactNode; account?: ReactNode; isAdmin?: Promise<boolean> }) {
   const collapsed = useSyncExternalStore(subscribe, getCollapsed, () => false);
   const railId = useId();
   const drawerRef = useRef<HTMLDialogElement>(null);
@@ -149,6 +151,7 @@ export function AppShell({ children, account }: { children: ReactNode; account?:
             searchRef={searchRef}
             headerAction={<RailToggle collapsed={collapsed} controls={railId} />}
             footer={account}
+            isAdmin={isAdmin}
           />
         </aside>
 
@@ -203,6 +206,7 @@ export function AppShell({ children, account }: { children: ReactNode; account?:
               </button>
             }
             footer={account}
+            isAdmin={isAdmin}
           />
         </div>
       </dialog>
@@ -248,9 +252,10 @@ type SidebarProps = {
   footer?: ReactNode;
   onNavigate?: () => void;
   searchRef?: RefObject<HTMLInputElement | null>;
+  isAdmin?: Promise<boolean>;
 };
 
-function Sidebar({ collapsed, headerAction, footer, onNavigate, searchRef }: SidebarProps) {
+function Sidebar({ collapsed, headerAction, footer, onNavigate, searchRef, isAdmin }: SidebarProps) {
   const [query, setQuery] = useState("");
   const mod = useModKey();
 
@@ -308,8 +313,8 @@ function Sidebar({ collapsed, headerAction, footer, onNavigate, searchRef }: Sid
         )}
       </div>
 
-      <Suspense fallback={<NavList collapsed={collapsed} query={query} onNavigate={onNavigate} pathname={null} />}>
-        <ActiveNavList collapsed={collapsed} query={query} onNavigate={onNavigate} />
+      <Suspense fallback={<NavList collapsed={collapsed} query={query} onNavigate={onNavigate} pathname={null} admin={false} />}>
+        <ActiveNavList collapsed={collapsed} query={query} onNavigate={onNavigate} isAdmin={isAdmin} />
       </Suspense>
 
       {footer && <div className="shrink-0 border-t border-line p-2">{footer}</div>}
@@ -319,16 +324,19 @@ function Sidebar({ collapsed, headerAction, footer, onNavigate, searchRef }: Sid
 
 type NavProps = { collapsed: boolean; query: string; onNavigate?: () => void };
 
-// usePathname may suspend under cacheComponents on routes with unknown dynamic params,
-// so the active-state read sits in its own Suspense boundary.
-function ActiveNavList(props: NavProps) {
-  return <NavList {...props} pathname={usePathname()} />;
+// usePathname may suspend under cacheComponents on routes with unknown dynamic params, and isAdmin waits for the
+// session, so both reads sit in their own Suspense boundary. The fallback shows the non-admin menu.
+function ActiveNavList({ isAdmin, ...props }: NavProps & { isAdmin?: Promise<boolean> }) {
+  const admin = isAdmin ? use(isAdmin) : false;
+  return <NavList {...props} pathname={usePathname()} admin={admin} />;
 }
 
-function filterItems(query: string): NavItem[] {
+// Hidden items are dropped before the search filter, so menu search (Ctrl/⌘+K) never lists them either.
+function filterItems(query: string, admin: boolean): NavItem[] {
+  const visible = admin ? navItems : navItems.filter((item) => !item.adminOnly);
   const q = query.trim().toLowerCase();
-  if (!q) return navItems;
-  return navItems.flatMap((item) => {
+  if (!q) return visible;
+  return visible.flatMap((item) => {
     if (item.label.toLowerCase().includes(q)) return [item];
     if (!("children" in item)) return [];
     const children = item.children.filter((c) => c.label.toLowerCase().includes(q));
@@ -336,8 +344,8 @@ function filterItems(query: string): NavItem[] {
   });
 }
 
-function NavList({ collapsed, query, onNavigate, pathname }: NavProps & { pathname: string | null }) {
-  const items = filterItems(query);
+function NavList({ collapsed, query, onNavigate, pathname, admin }: NavProps & { pathname: string | null; admin: boolean }) {
+  const items = filterItems(query, admin);
   return (
     <nav aria-label="เมนูหลัก" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-6">
       {items.length === 0 ? (

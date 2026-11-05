@@ -64,6 +64,12 @@ const paths = {
     </>
   ),
   pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+  shield: (
+    <>
+      <path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
   calendar: (
     <>
       <rect x="3.5" y="5" width="17" height="15" rx="1.5" />
