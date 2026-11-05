@@ -1,8 +1,8 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
-import { formatThaiDate, ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
+import { FilterDataGrid, gridColumnHelper } from "@/components/filter-data-grid/filter-data-grid";
+import { formatThaiDate, ThaiDateStepper } from "@/components/thai-date-stepper/thai-date-stepper";
 import { addDaysIso, isIsoDate } from "@/app/api/visit/opd-visit/opd-visit";
 import {
   DAY_OPTIONS,
@@ -120,7 +120,7 @@ export function PendingGrid({ today }: { today: string }) {
     : [...DAY_OPTIONS, days].sort((a, b) => a - b);
 
   return (
-    <DataGrid<PendingRow, PendingPage>
+    <FilterDataGrid<PendingRow, PendingPage>
       // คนละหมวดคนละคอลัมน์ เริ่ม grid ใหม่ทั้งตัว
       key={kind}
       endpoint="/api/quality/pending"
@@ -144,8 +144,8 @@ export function PendingGrid({ today }: { today: string }) {
             </label>
           ) : (
             <div role="group" aria-label="ช่วงวันที่จำหน่าย" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <ThaiDatePicker label="จำหน่ายตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
-              <ThaiDatePicker
+              <ThaiDateStepper label="จำหน่ายตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
+              <ThaiDateStepper
                 label="ถึง"
                 value={to}
                 min={from}

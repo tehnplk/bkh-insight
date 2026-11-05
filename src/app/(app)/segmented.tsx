@@ -2,7 +2,7 @@
 
 type Option<T extends string> = { readonly value: T; readonly label: string };
 
-/** ปุ่มเลือกหนึ่งค่าแบบแบ่งช่อง (role=group + aria-pressed) ความสูงเท่า ThaiDatePicker/MultiSelect */
+/** ปุ่มเลือกหนึ่งค่าแบบแบ่งช่อง (role=group + aria-pressed) ความสูงเท่า ThaiDateStepper/MultiSelect */
 export function Segmented<T extends string>({
   label,
   options,
