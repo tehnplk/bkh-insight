@@ -11,7 +11,8 @@ export async function UserMenu() {
       name={session.user.name}
       signOut={async () => {
         "use server";
-        await signOut({ redirectTo: "/login" });
+        // logged_out=1 stops /login from starting SSO again while the IdP session is still alive.
+        await signOut({ redirectTo: "/login?logged_out=1" });
       }}
     />
   );

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { auth, plkhealthEnabled } from "@/auth";
 
 // /admin and /api/admin, whole path segments only (/administrator is not admin).
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/;
@@ -10,6 +10,11 @@ const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/;
 // The admin layout and each admin route handler check again; the proxy is not the only gate.
 export const proxy = auth((req) => {
   const { pathname, search } = req.nextUrl;
+  // Only reached without ?error= / ?logged_out= (see matcher): go straight to SSO, keeping callbackUrl.
+  // With either param /login renders its message and a retry button, so a failed or just-ended sign-in cannot loop.
+  if (pathname === "/login") {
+    return plkhealthEnabled ? NextResponse.redirect(new URL(`/login/sso${search}`, req.nextUrl)) : undefined;
+  }
   const isApi = pathname.startsWith("/api/");
   if (req.auth) {
     if (!ADMIN_PATH.test(pathname) || req.auth.user.role === "admin") return;
@@ -25,9 +30,17 @@ export const proxy = auth((req) => {
 });
 
 export const config = {
-  // Public: the login page, the SSO redirect_uri (/auth/callback, forwards to Auth.js), Auth.js endpoints, build assets
-  // and static files. New routes are protected by default.
+  // Public: the login pages (/login, /login/sso which starts SSO, /super/login for the super user), the SSO redirect_uri
+  // (/auth/callback, forwards to Auth.js), Auth.js endpoints, build assets and static files. New routes are protected
+  // by default. The second entry sends a bare /login (no error, not logged out) through the proxy for auto-SSO.
   matcher: [
-    "/((?!login$|auth/callback$|api/auth/|_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!login$|login/sso$|super/login$|auth/callback$|api/auth/|_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    {
+      source: "/login",
+      missing: [
+        { type: "query", key: "error" },
+        { type: "query", key: "logged_out" },
+      ],
+    },
   ],
 };

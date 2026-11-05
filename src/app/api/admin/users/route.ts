@@ -25,15 +25,15 @@ const WHERE = `WHERE ($1::text IS NULL OR fname ILIKE $1 OR lname ILIKE $1 OR pr
        OR EXISTS (SELECT 1 FROM jsonb_array_elements(organizations) x WHERE x->>'org_name' ILIKE $1))`;
 
 // proxy.ts covers a missing session too, but admin routes check both themselves.
-async function adminName() {
+async function adminSession() {
   const session = await auth();
   if (!session) return { error: Response.json({ error: "unauthorized" }, { status: 401 }) };
   if (session.user.role !== "admin") return { error: Response.json({ error: "forbidden" }, { status: 403 }) };
-  return { name: session.user.name ?? "admin" };
+  return { name: session.user.name ?? "admin", userId: session.user.userId };
 }
 
 export async function GET(request: NextRequest) {
-  const { error } = await adminName();
+  const { error } = await adminSession();
   if (error) return error;
 
   const parsed = parseGridQuery(request.nextUrl.searchParams, SORTABLE);
@@ -48,13 +48,15 @@ ${WHERE}
 ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
 
   if (format === "xlsx") {
-    const rows = (await insightQuery<AdminUser>(select, [like])).map((r) => ({
+    const rows = (await insightQuery<AdminUser>(select, [like])).map((r, i) => ({
       ...r,
+      no: i + 1,
       org_names: r.organizations.map((o) => o.org_name).filter(Boolean).join(", "),
     }));
     return xlsxResponse<(typeof rows)[number]>("users.xlsx", [
+      { key: "no", header: "ลำดับ", width: 8 },
       { key: "id", header: "id", width: 8 },
-      { key: "provider_id", header: "provider_id", width: 38 },
+      { key: "provider_id", header: "Provider ID", width: 38 },
       { key: "pname", header: "คำนำหน้า", width: 12 },
       { key: "fname", header: "ชื่อ", width: 20 },
       { key: "lname", header: "นามสกุล", width: 20 },
@@ -77,16 +79,40 @@ ${WHERE}`, [like]),
 }
 
 const ID = /^[1-9]\d{0,17}$/; // positive, fits bigint
+const ROLES = ["user", "admin"]; // same as the users_role_check constraint
 
-// Approve or unapprove one user. Body: { id: "12", approve: true }. Logged with the admin's name from the session.
+// One change per request, logged with the admin's name from the session (never from the body):
+//   { id: "12", approve: true | false }  or  { id: "12", role: "user" | "admin" }
+// A role change takes effect at that user's next sign-in (the role lives in their JWT).
 export async function POST(request: Request) {
-  const { error, name } = await adminName();
+  const { error, name, userId } = await adminSession();
   if (error) return error;
 
   const body = await request.json().catch(() => null);
   const id = body?.id;
-  const approve = body?.approve;
   if (typeof id !== "string" || !ID.test(id)) return Response.json({ error: "id ต้องเป็นจำนวนเต็มบวก" }, { status: 400 });
+  if (("approve" in body) === ("role" in body)) {
+    return Response.json({ error: "ส่ง approve หรือ role อย่างใดอย่างหนึ่ง" }, { status: 400 });
+  }
+
+  if ("role" in body) {
+    const role = body.role;
+    if (!ROLES.includes(role)) return Response.json({ error: "role ต้องเป็น user หรือ admin" }, { status: 400 });
+    // The super user has no users row (userId undefined), so this never blocks them.
+    if (userId === id) return Response.json({ error: "เปลี่ยน role ของตัวเองไม่ได้" }, { status: 400 });
+    const [row] = await insightQuery<{ id: string; role: string }>(
+      `UPDATE users
+SET role = $2::text,
+    log = log || jsonb_build_array(jsonb_build_object('at', now(), 'action', 'set_role', 'role', $2::text, 'by', $3::text))
+WHERE id = $1
+RETURNING id, role`,
+      [id, role, name],
+    );
+    if (!row) return Response.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
+    return Response.json(row);
+  }
+
+  const approve = body.approve;
   if (typeof approve !== "boolean") return Response.json({ error: "approve ต้องเป็น true หรือ false" }, { status: 400 });
 
   const [row] = await insightQuery<{ id: string; is_approve: boolean }>(
