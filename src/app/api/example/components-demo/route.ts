@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       { key: "hn", header: "HN", width: 12 },
       { key: "name", header: "ชื่อ-สกุล", width: 24 },
       { key: "sex", header: "เพศ", width: 8 },
-      { key: "age", header: "อายุ", width: 8 },
+      { key: "age", header: "อายุ", width: 8, type: "count" },
       { key: "ward", header: "หอผู้ป่วย", width: 18 },
       { key: "admitDate", header: "วันที่รับไว้", width: 14 },
       { key: "diagnosis", header: "การวินิจฉัย", width: 32 },
