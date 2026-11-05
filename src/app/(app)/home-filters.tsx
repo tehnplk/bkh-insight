@@ -3,7 +3,7 @@
 import { useId } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { MultiSelect, type MultiSelectGroup } from "@/components/multi-select/multi-select";
-import { ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
+import { ThaiDateStepper } from "@/components/thai-date-stepper/thai-date-stepper";
 import { addDaysIso, isIsoDate, MAX_SPAN_DAYS } from "@/app/api/visit/opd-visit/opd-visit";
 import {
   addMonthsIso,
@@ -74,8 +74,8 @@ export function HomeFilters({ from, to, pttypes, pttypeGroups, by, today }: Prop
         <MonthRange from={from} to={to} today={today} onChange={navigate} />
       ) : (
         <div role="group" aria-label="ช่วงวันที่รับบริการ" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <ThaiDatePicker label="ตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
-          <ThaiDatePicker
+          <ThaiDateStepper label="ตั้งแต่" value={from} max={today} stepper={false} onChange={setFrom} />
+          <ThaiDateStepper
             label="ถึง"
             value={to}
             min={from}
