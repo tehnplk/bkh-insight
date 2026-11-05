@@ -21,6 +21,15 @@ export const navItems: NavItem[] = [
     children: [{ label: "ผู้ป่วยนอกรายวัน", href: "/visit/opd-visit" }],
   },
   {
+    label: "กองทุน",
+    icon: "wallet",
+    children: [
+      { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
+      { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
+      { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
+    ],
+  },
+  {
     label: "ตัวอย่าง",
     icon: "components",
     children: [{ label: "Shared components", href: "/example/components-demo" }],
