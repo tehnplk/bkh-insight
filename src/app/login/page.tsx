@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { plkhealthEnabled } from "@/auth";
 import { Icon } from "@/components/app-shell/icons";
 import { LoginForm } from "./login-form";
 
@@ -17,7 +18,7 @@ export default function LoginPage() {
         </div>
         <div className="rounded-xl border border-line bg-surface p-6 max-sm:p-5">
           <h1 className="mb-5 text-title">เข้าสู่ระบบ</h1>
-          <LoginForm />
+          <LoginForm sso={plkhealthEnabled} />
         </div>
       </div>
     </main>

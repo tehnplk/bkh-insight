@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState, type FormEvent, type KeyboardEve
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   columnFilteringFeature,
+  createColumnHelper,
   createExpandedRowModel,
   globalFilteringFeature,
   metaHelper,
@@ -16,11 +17,9 @@ import {
   type RowData,
   type SortingState,
 } from "@tanstack/react-table";
-import { gridColumnHelper } from "@/components/data-grid/data-grid";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
-// ชุดเดียวกับใน data-grid.tsx (ไฟล์นั้นไม่ export) ต้องตรงกัน columns ที่สร้างจาก gridColumnHelper จึงใช้ที่นี่ได้
 const features = tableFeatures({
   columnFilteringFeature,
   globalFilteringFeature,
@@ -32,8 +31,9 @@ const features = tableFeatures({
   columnMeta: metaHelper<{ className?: string }>(),
 });
 
-/** ตัวเดียวกับของ DataGrid: const col = gridColumnHelper<Row>(); col.columns([col.accessor("hn", { header: "HN" })]) */
-export { gridColumnHelper };
+/** ใช้สร้าง columns ให้ FilterDataGrid (features คนละชุดกับ DataGrid ใช้ helper สลับกันไม่ได้):
+ *  const col = gridColumnHelper<Row>(); col.columns([col.accessor("hn", { header: "HN" })]) */
+export const gridColumnHelper = <T extends RowData>() => createColumnHelper<typeof features, T>();
 
 /** R = ชนิดของ response ทั้งก้อน ใช้เมื่อ endpoint ส่ง field เพิ่มจาก { rows, total } (เช่น summary) ให้ renderSummary */
 export type FilterDataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>> = {
