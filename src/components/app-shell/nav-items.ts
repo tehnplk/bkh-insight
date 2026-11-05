@@ -29,6 +29,16 @@ export const navItems: NavItem[] = [
     children: [{ label: "รายการค้างใน HIS", href: "/quality/pending" }],
   },
   {
+    label: "กองทุน",
+    icon: "wallet",
+    children: [
+      { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
+      { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
+      { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
+      { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
+    ],
+  },
+  {
     label: "ตัวอย่าง",
     icon: "components",
     children: [{ label: "Shared components", href: "/example/components-demo" }],
