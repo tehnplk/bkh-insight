@@ -19,7 +19,8 @@ const columnsWithDep = col.columns([date, hn, name, dep, pttype, amount]);
 const renderDetail = (row: FundVisitRow) => <VisitItems vn={row.vn} />;
 const detailTitle = (row: FundVisitRow) => `${row.full_name} · HN ${row.hn}`;
 
-/** รายการ visit จาก /api/fund/opd-fund/visits (filter ส่งผ่าน params ของ DataGrid) กดแถวเปิด modal รายการค่าใช้จ่าย */
+/** รายการ visit จาก /api/fund/opd-fund/visits (filter ส่งผ่าน params ของ DataGrid) กดแถวเปิดรายการค่าใช้จ่าย
+ *  ใน modal ของกองทุนก็เปิด modal ซ้อนชั้นบน (DetailModal รองรับ dialog ซ้อน) */
 export function VisitGrid({ extraParams, showDepartment }: { extraParams: Record<string, string>; showDepartment?: boolean }) {
   return (
     <DataGrid<FundVisitRow>
@@ -29,7 +30,6 @@ export function VisitGrid({ extraParams, showDepartment }: { extraParams: Record
       columns={showDepartment ? columnsWithDep : columns}
       getRowId={(r) => r.vn}
       renderDetail={renderDetail}
-      detailMode="modal"
       detailTitle={detailTitle}
     />
   );

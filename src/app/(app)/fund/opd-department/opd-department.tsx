@@ -2,14 +2,16 @@
 
 import type { ReactNode } from "react";
 import { useDateRange } from "@/components/date-range-filter/date-range-filter";
-import { formatThaiDate } from "@/lib/thai-date";
+import { DetailModal } from "@/components/detail-modal/detail-modal";
 import type { DepartmentSummary, DepartmentSummaryResponse } from "@/app/api/fund/types";
 import { CategoryList } from "../_components/category-list";
+import { ScopeDetail, rangeText } from "../_components/scope-detail";
 import { SummaryTable, type SummaryRow } from "../_components/summary-table";
 import { FilterChip, Notice, Panel, Skeleton, btn, useJson, useUrlParams } from "../_components/ui";
 import { VisitGrid } from "../_components/visit-grid";
 
-const PARAMS = ["dep", "fund", "income"] as const;
+// q = ช่องค้นหาของ DataGrid ล้างตอนเปิด/ปิด modal ให้ grid ใน modal เริ่มใหม่ (page ล้างใน set อยู่แล้ว)
+const PARAMS = ["dep", "fund", "income", "q"] as const;
 
 const toRows = (deps: DepartmentSummary[]): SummaryRow[] =>
   deps.map((d) => ({
@@ -23,29 +25,19 @@ const toRows = (deps: DepartmentSummary[]): SummaryRow[] =>
 
 export function OpdDepartment() {
   const { start, end } = useDateRange();
-  const { dep, fund, income, set } = useUrlParams(PARAMS);
+  const { dep, fund, income, q, set } = useUrlParams(PARAMS);
   const { loading, data, error, retry } = useJson<DepartmentSummaryResponse>(`/api/fund/opd-department/summary?${new URLSearchParams({ start, end })}`);
 
   const selected = data?.departments.find((d) => d.dep_code === dep);
-  const selectedFund = selected?.funds.find((f) => f.fund_code === fund);
-  const fundName = selectedFund?.fund_name ?? fund;
-  // หมวดค่าใช้จ่ายตามขอบเขตที่เลือก: กองทุนในแผนก > แผนก > ทุกแผนก
-  const categories = selectedFund?.categories ?? selected?.categories ?? data?.categories ?? [];
-  const categoryScope = selected ? (selectedFund ? `${selected.dep_name} · ${fundName}` : selected.dep_name) : "ทุกแผนก";
 
-  // เปลี่ยนกองทุนแล้วหมวดที่เลือกไว้ไม่มีในขอบเขตใหม่ ให้ล้างหมวดด้วย
+  // เลือกกองทุน (จากตารางหรือใน modal) หมวดที่เลือกไว้ไม่มีในขอบเขตใหม่ให้ล้าง เปลี่ยนแผนก = เปิด modal ใหม่ ล้างคำค้น
   function selectFund(depCode: string, code: string) {
     const d = data?.departments.find((x) => x.dep_code === depCode);
     const scope = (code ? d?.funds.find((f) => f.fund_code === code)?.categories : d?.categories) ?? [];
     const keepIncome = income && scope.some((c) => c.income_code === income);
-    set({ dep: depCode, fund: code, income: keepIncome ? income : null });
+    set({ dep: depCode, fund: code, income: keepIncome ? income : null, q: depCode === dep ? q : null });
   }
-  const incomeName = categories.find((c) => c.income_code === income)?.income_name ?? income;
-
-  const extraParams: Record<string, string> = { start, end };
-  if (dep) extraParams.dep = dep;
-  if (fund) extraParams.fund = fund;
-  if (income) extraParams.income = income;
+  const close = () => set({ dep: null, fund: null, income: null, q: null });
 
   let summary: ReactNode;
   if (error) {
@@ -55,7 +47,7 @@ export function OpdDepartment() {
   } else if (!data) {
     summary = <Skeleton />;
   } else if (data.departments.length === 0) {
-    summary = <Notice title="ไม่มีการรับบริการในช่วงนี้" detail={`${formatThaiDate(start)} – ${formatThaiDate(end)}`} />;
+    summary = <Notice title="ไม่มีการรับบริการในช่วงนี้" detail={rangeText(start, end)} />;
   } else {
     summary = (
       <SummaryTable
@@ -67,36 +59,97 @@ export function OpdDepartment() {
         hideRowCode
         selected={dep}
         selectedChild={fund}
-        onSelect={(code) => set({ dep: code, fund: null, income: null })}
+        onSelect={(code) => (code ? selectFund(code, "") : close())}
         onSelectChild={selectFund}
       />
     );
+  }
+
+  let detail: ReactNode;
+  if (selected) {
+    detail = <DepartmentDetail dep={selected} fund={fund} income={income} start={start} end={end} onFund={(code) => selectFund(selected.dep_code, code)} onIncome={(code) => set({ income: code })} />;
+  } else if (error) {
+    detail = <Notice title="โหลดข้อมูลไม่สำเร็จ" detail={error} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />;
+  } else if (!data) {
+    detail = <Skeleton rows={8} />;
+  } else {
+    detail = <Notice title="ไม่พบแผนกนี้ในช่วงวันที่ที่เลือก" detail={rangeText(start, end)} />;
   }
 
   return (
     <div className="flex flex-col gap-8" aria-busy={loading}>
       <Panel title="แผนก">{summary}</Panel>
 
-      {data && data.departments.length > 0 && (
-        <Panel title={`หมวดค่าใช้จ่าย (บาท) · ${categoryScope}`}>
-          <CategoryList categories={categories} income={income} onIncome={(code) => set({ income: code })} />
-        </Panel>
+      {/* modal เปิดอยู่ไม่ render ส่วนนี้ เพราะ DataGrid เก็บ page/q/sort ใน URL สอง grid ในหน้าเดียวจะใช้ state ร่วมกัน */}
+      {!dep && data && data.departments.length > 0 && (
+        <>
+          <Panel title="หมวดค่าใช้จ่าย (บาท) · ทุกแผนก">
+            <CategoryList categories={data.categories} income={income} onIncome={(code) => set({ income: code })} />
+          </Panel>
+          <Panel
+            title="รายการรับบริการ"
+            aside={income && <FilterChip label={data.categories.find((c) => c.income_code === income)?.income_name ?? income} onRemove={() => set({ income: null })} />}
+          >
+            <VisitGrid extraParams={income ? { start, end, income } : { start, end }} showDepartment />
+          </Panel>
+        </>
       )}
 
-      <Panel
-        title="รายการรับบริการ"
-        aside={
-          (dep || fund || income) && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {dep && <FilterChip label={selected?.dep_name ?? dep} onRemove={() => set({ dep: null, fund: null, income: null })} />}
-              {fund && <FilterChip label={fundName} onRemove={() => set({ fund: null })} />}
-              {income && <FilterChip label={incomeName} onRemove={() => set({ income: null })} />}
-            </div>
-          )
+      <DetailModal
+        open={!!dep}
+        onClose={close}
+        size="wide"
+        title={
+          <>
+            {selected?.dep_name ?? dep}{" "}
+            <span className="ml-1 font-normal whitespace-nowrap text-muted">{rangeText(start, end)}</span>
+          </>
         }
       >
-        <VisitGrid extraParams={extraParams} showDepartment />
-      </Panel>
+        {detail}
+      </DetailModal>
     </div>
+  );
+}
+
+type DepartmentDetailProps = {
+  dep: DepartmentSummary;
+  fund: string;
+  income: string;
+  start: string;
+  end: string;
+  onFund: (code: string) => void;
+  onIncome: (code: string) => void;
+};
+
+// grid ใน modal ไม่มีคอลัมน์แผนก เพราะทุกแถวเป็นแผนกเดียวกัน
+function DepartmentDetail({ dep, fund, income, start, end, onFund, onIncome }: DepartmentDetailProps) {
+  const f = dep.funds.find((x) => x.fund_code === fund);
+
+  const params: Record<string, string> = { start, end, dep: dep.dep_code };
+  if (f) params.fund = f.fund_code;
+  if (income) params.income = income;
+
+  return (
+    <ScopeDetail
+      visits={f?.visits ?? dep.visits}
+      patients={f ? undefined : dep.patients}
+      amount={f?.amount ?? dep.amount}
+      chipsLabel="กองทุน"
+      chips={dep.funds.map((x) => ({
+        code: x.fund_code,
+        label: (
+          <>
+            {x.fund_name} {x.fund_code !== "UNKNOWN" && <span className="text-xs opacity-70">{x.fund_code}</span>}
+          </>
+        ),
+      }))}
+      chip={f?.fund_code ?? ""}
+      onChip={onFund}
+      categories={f?.categories ?? dep.categories}
+      income={income}
+      onIncome={onIncome}
+      gridParams={params}
+    />
   );
 }

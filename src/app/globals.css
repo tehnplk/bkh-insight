@@ -168,3 +168,15 @@ body {
 ::selection {
   background: color-mix(in oklab, var(--accent) 35%, transparent);
 }
+
+/* Tailwind v4 preflight gives buttons cursor: default; restore the hand on everything clickable (snippet from the v4 upgrade guide, extended). Disabled keeps default. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary,
+  select:not(:disabled),
+  input:is([type="checkbox"], [type="radio"]):not(:disabled),
+  label:has(> input:is([type="checkbox"], [type="radio"]):not(:disabled)) {
+    cursor: pointer;
+  }
+}

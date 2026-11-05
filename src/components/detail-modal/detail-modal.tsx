@@ -7,10 +7,17 @@ type DetailModalProps = {
   onClose: () => void;
   title: ReactNode;
   children: ReactNode;
+  /** "wide" = เกือบเต็มจอและสูงคงที่ (เนื้อหาเลื่อนข้างใน) สำหรับงานที่มีตาราง ค่าเริ่มต้น "default" กว้าง 40rem */
+  size?: "default" | "wide";
+};
+
+const SIZE = {
+  default: "w-[min(40rem,calc(100vw-2rem))] max-h-[calc(100dvh-4rem)]",
+  wide: "w-[min(90rem,calc(100vw-2rem))] h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)]",
 };
 
 // <dialog> ของ browser: showModal() ทำให้ส่วนอื่น inert, Esc ปิดได้ และคืน focus ให้ปุ่มที่เปิดเมื่อปิด
-export function DetailModal({ open, onClose, title, children }: DetailModalProps) {
+export function DetailModal({ open, onClose, title, children, size = "default" }: DetailModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -25,8 +32,9 @@ export function DetailModal({ open, onClose, title, children }: DetailModalProps
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      onClose={onClose}
-      className="m-auto w-[min(40rem,calc(100vw-2rem))] max-h-[calc(100dvh-4rem)] rounded-xl bg-surface p-0 text-foreground shadow-[0_24px_48px_-12px_rgb(0_0_0/0.35)] backdrop:bg-black/40"
+      // React ส่ง close ของ dialog ที่ซ้อนข้างใน (เช่น DataGrid ใน modal) ขึ้นมาถึงตัวนอกด้วย จึงปิดเฉพาะเมื่อเป็น dialog นี้เอง
+      onClose={(e) => e.target === e.currentTarget && onClose()}
+      className={`m-auto ${SIZE[size]} rounded-xl bg-surface p-0 text-foreground shadow-[0_24px_48px_-12px_rgb(0_0_0/0.35)] backdrop:bg-black/40`}
     >
       {open && (
         <div className="flex max-h-[inherit] flex-col">
@@ -45,7 +53,8 @@ export function DetailModal({ open, onClose, title, children }: DetailModalProps
               </svg>
             </button>
           </header>
-          <div className="overflow-y-auto px-6 py-5">{children}</div>
+          {/* relative: ให้ element absolute ข้างใน (เช่น sr-only) อยู่ใน scroller ไม่ดัน dialog ให้เลื่อนซ้อนอีกชั้น */}
+          <div className="relative overflow-y-auto px-6 py-5">{children}</div>
         </div>
       )}
     </dialog>
