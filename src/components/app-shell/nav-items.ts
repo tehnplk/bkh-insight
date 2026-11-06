@@ -24,6 +24,7 @@ export const navItems: NavItem[] = [
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
+      { label: "คนไข้เข้าเกณฑ์ DM Type-2", href: "/fund/dm-remission" },
     ],
   },
   {
