@@ -87,15 +87,16 @@ if (plkhealthEnabled) {
 // sign-in and stays in the DB only (email can hold a ThaiD citizen ID), never in the JWT or session.
 // job_position and organizations mirror the profile, so they are overwritten on every sign-in too.
 const UPSERT_USER = `
-INSERT INTO users (provider_id, pname, fname, lname, profile, job_position, organizations)
-VALUES ($1, $2, coalesce($3, ''), coalesce($4, ''), $5::jsonb, $6, $7::jsonb)
+INSERT INTO users (provider_id, pname, fname, lname, profile, job_position, organizations, login_count)
+VALUES ($1, $2, coalesce($3, ''), coalesce($4, ''), $5::jsonb, $6, $7::jsonb, 1)
 ON CONFLICT (provider_id) DO UPDATE
   SET pname = coalesce($2, users.pname),
       fname = coalesce($3, users.fname),
       lname = coalesce($4, users.lname),
       profile = $5::jsonb,
       job_position = $6,
-      organizations = $7::jsonb
+      organizations = $7::jsonb,
+      login_count = users.login_count + 1
 RETURNING id, role, permission, is_approve`;
 
 // users.organizations: [{ org_code, org_name, job_position }], never null. Several orgs come in profile.organizations[];

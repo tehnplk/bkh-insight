@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useTransition } from "react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { formatCount } from "@/lib/number-format";
 import type { AdminUser, Organization } from "@/app/api/admin/users/route";
 
 const col = gridColumnHelper<AdminUser>();
@@ -45,6 +46,11 @@ const columns = col.columns([
       ) : (
         <span className="rounded border border-warning-line bg-warning-soft px-1.5 py-0.5 whitespace-nowrap text-warning">รออนุมัติ</span>
       ),
+  }),
+  col.accessor("login_count", {
+    header: "จำนวนครั้งที่เข้าใช้งาน",
+    cell: (info) => formatCount(info.getValue()),
+    meta: { className: "text-right tabular-nums" },
   }),
   col.display({
     id: "action",
