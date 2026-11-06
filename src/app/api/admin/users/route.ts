@@ -14,11 +14,12 @@ export type AdminUser = {
   is_approve: boolean;
   job_position: string | null;
   organizations: Organization[]; // set at sign-in from the SSO profile (src/auth.ts)
+  login_count: number; // +1 per SSO sign-in (src/auth.ts), counted from 0 when the column was added
 };
 export type Organization = { org_code: string | null; org_name: string | null; job_position: string | null };
 
 // Sort keys from DataGrid are column names; anything else is rejected by parseGridQuery. Never organizations.
-const SORTABLE = ["id", "provider_id", "fname", "lname", "role", "is_approve", "job_position"] as const;
+const SORTABLE = ["id", "provider_id", "fname", "lname", "role", "is_approve", "job_position", "login_count"] as const;
 
 // Shared by the list and count queries so they cannot drift apart. $1 = search (null or a LIKE pattern).
 const WHERE = `WHERE ($1::text IS NULL OR fname ILIKE $1 OR lname ILIKE $1 OR provider_id ILIKE $1
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
   const like = q ? `%${escapeLike(q)}%` : null;
   // sort is from the allowlist, so it is safe as an identifier.
-  const select = `SELECT id, provider_id, pname, fname, lname, role, is_approve, job_position, organizations
+  const select = `SELECT id, provider_id, pname, fname, lname, role, is_approve, job_position, organizations, login_count
 FROM users
 ${WHERE}
 ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
@@ -64,6 +65,7 @@ ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
       { key: "org_names", header: "หน่วยบริการ", width: 36 },
       { key: "role", header: "role", width: 10 },
       { key: "is_approve", header: "อนุมัติ", width: 10 },
+      { key: "login_count", header: "จำนวนครั้งที่เข้าใช้งาน", width: 18, type: "count" },
     ], rows);
   }
 
