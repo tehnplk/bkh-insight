@@ -15,23 +15,23 @@ export type NavSection = { label: string; icon: IconName; children: NavSubLink[]
 export type NavItem = NavLink | NavSection;
 
 export const navItems: NavItem[] = [
-  { label: "หน้าแรก", href: "/", icon: "home" },
+  { label: "ภาพรวม", href: "/", icon: "home" },
   {
-    label: "การรับบริการ",
-    icon: "stethoscope",
-    children: [
-      { label: "ผู้รับบริการผู้ป่วยนอก", href: "/visit/opd-visit" },
-      { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
-    ],
-  },
-  {
-    label: "กองทุน",
+    label: "จัดเก็บรายได้",
     icon: "wallet",
     children: [
       { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
+    ],
+  },
+  {
+    label: "ตรวจสอบข้อมูล",
+    icon: "stethoscope",
+    children: [
+      { label: "ผู้รับบริการผู้ป่วยนอก", href: "/visit/opd-visit" },
+      { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
     ],
   },
 ];
