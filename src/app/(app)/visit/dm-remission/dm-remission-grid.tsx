@@ -5,7 +5,7 @@ import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/da
 import type { GridPage } from "@/lib/grid-query";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import type { DmRemissionRow, DmRemissionSummary } from "@/app/api/fund/dm-remission/remission";
+import type { DmRemissionRow, DmRemissionSummary } from "@/app/api/visit/dm-remission/remission";
 
 type Page = GridPage<DmRemissionRow> & { summary: DmRemissionSummary };
 
@@ -47,7 +47,7 @@ export function DmRemissionGrid() {
   const { start, end } = useDateRange();
   return (
     <DataGrid<DmRemissionRow, Page>
-      endpoint="/api/fund/dm-remission"
+      endpoint="/api/visit/dm-remission"
       params={{ start, end }}
       toolbar={<DateRangeFilter />}
       columns={columns}

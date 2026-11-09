@@ -1,4 +1,4 @@
-// รัน: node --test src/app/api/fund/dm-remission/remission.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
+// รัน: node --test src/app/api/visit/dm-remission/remission.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ageAt, hasCandidatePair, normalizeResults, remissionEvents } from "./remission.ts";

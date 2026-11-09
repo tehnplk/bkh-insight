@@ -1,16 +1,16 @@
 import { Suspense } from "react";
-import { DmRemissionGrid } from "./dm-remission-grid";
+import { UcDebtorGrid } from "./uc-debtor-grid";
 
-export const metadata = { title: "คนไข้เข้าเกณฑ์ DM Type-2" };
+export const metadata = { title: "ลูกหนี้สิทธิ UC" };
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
-      <h1 className="text-title text-balance">คนไข้เข้าเกณฑ์ DM Type-2</h1>
+    <div>
+      <h1 className="text-title text-balance">ลูกหนี้สิทธิ UC</h1>
       <div className="mt-6">
         {/* DataGrid และ DateRangeFilter ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}
         <Suspense fallback={<p className="text-sm text-muted">กำลังโหลด…</p>}>
-          <DmRemissionGrid />
+          <UcDebtorGrid />
         </Suspense>
       </div>
     </div>

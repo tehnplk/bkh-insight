@@ -24,7 +24,9 @@ export const navItems: NavItem[] = [
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
-      { label: "คนไข้เข้าเกณฑ์ DM Type-2", href: "/fund/dm-remission" },
+      { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
+      { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
+      { label: "นำเข้า REP", href: "/fund/rep-import" },
     ],
   },
   {
@@ -33,6 +35,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "ผู้รับบริการผู้ป่วยนอก", href: "/visit/opd-visit" },
       { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
+      { label: "ผู้รับบริการที่เข้าเกณฑ์ DM Type-2", href: "/visit/dm-remission" },
     ],
   },
 ];

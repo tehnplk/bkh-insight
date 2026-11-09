@@ -106,3 +106,24 @@ export async function insightExecute(sql: string, params: unknown[] = []): Promi
   const { rowCount } = await insightPool().query(sql, params);
   return { rowCount: rowCount ?? 0 };
 }
+
+export type InsightTx = <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
+
+/**
+ * Runs `fn` in one insight transaction: COMMIT when it resolves, ROLLBACK when it throws (and rethrows).
+ * `tx(sql, params)` works like `insightQuery` (returns rows) but on the transaction's own connection.
+ */
+export async function insightTransaction<T>(fn: (tx: InsightTx) => Promise<T>): Promise<T> {
+  const client = await insightPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(async (sql, params = []) => (await client.query(sql, params)).rows);
+    await client.query("COMMIT");
+    return result;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
