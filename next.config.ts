@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   reactCompiler: true,
   agentRules: false,
+  experimental: {
+    // proxy.ts buffers request bodies and silently truncates past this (default 10MB). REP .xls uploads
+    // (/api/fund/rep-import, one file per request) go up to 30MB plus multipart overhead.
+    proxyClientMaxBodySize: "32mb",
+  },
   // Bottom-left is taken by the sidebar's profile block.
   devIndicators: { position: "bottom-right" },
   // Dev only: let LAN machines that open http://<ip>:3000 load HMR/dev assets. Per machine via .env.

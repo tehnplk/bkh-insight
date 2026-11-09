@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
 import { parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { xlsxResponse } from "@/lib/xlsx";
-import { DAY_MS, badRequest, inList, isAuthed, isoDate, parseRange, unauthorized } from "../_lib/fund";
+import { DAY_MS, badRequest, inList, isAuthed, isoDate, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
 import {
   THRESHOLD, ageAt, hasCandidatePair, normalizeResults, remissionEvents,
   type DmRemissionRow, type DmRemissionSummary, type LabResult, type RemissionEvent,

@@ -10,7 +10,7 @@ export type LabResult = { vn: string | null; date: string; value: number };
 export type RemissionKind = "ครั้งแรก" | "เพิ่มเติม";
 export type RemissionEvent = { kind: RemissionKind; prev: LabResult; cur: LabResult; days: number; amount: number };
 
-/** แถวของ /api/fund/dm-remission */
+/** แถวของ /api/visit/dm-remission */
 export type DmRemissionRow = {
   id: string;
   hn: string;
