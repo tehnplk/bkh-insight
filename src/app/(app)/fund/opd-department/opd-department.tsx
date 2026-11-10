@@ -14,7 +14,8 @@ import { VisitGrid } from "../_components/visit-grid";
 
 // q = ช่องค้นหาของ DataGrid ล้างตอนเปิด/ปิด modal ให้ grid ใน modal เริ่มใหม่ (page ล้างใน set อยู่แล้ว)
 // deps/pttypes = ตัวกรองแผนก/สิทธิ (คั่นด้วย ",") คนละตัวกับ dep/fund ของ modal
-const PARAMS = ["dep", "fund", "income", "q", "deps", "pttypes"] as const;
+// via=queue = modal ขอบเขต visit ที่ส่งเข้าคิวแผนก (opd_dep_queue) แทนแผนกหลัก
+const PARAMS = ["dep", "fund", "income", "q", "via", "deps", "pttypes"] as const;
 const FILTERS = ["deps", "pttypes"] as const;
 
 type Options = { pttypeOptions: CodeOptionGroup[]; depOptions: CodeOptionGroup[] };
@@ -28,14 +29,17 @@ const toRows = (deps: DepartmentSummary[]): SummaryRow[] =>
     name: d.dep_name,
     visits: d.visits,
     patients: d.patients,
+    queued: d.queued,
+    queuedAmount: d.queuedAmount,
     amount: d.amount,
-    children: d.funds.map((f) => ({ code: f.fund_code, name: f.fund_name, visits: f.visits, amount: f.amount })),
+    children: d.funds.map((f) => ({ code: f.fund_code, name: f.fund_name, visits: f.visits, amount: f.amount, queued: f.queued, queuedAmount: f.queuedAmount })),
   }));
 
 export function OpdDepartment({ title }: { title: ReactNode }) {
   usePersistedFilter("fund/opd-department", FILTERS);
   const { start, end } = useDateRange();
-  const { dep, fund, income, q, deps, pttypes, set } = useUrlParams(PARAMS);
+  const { dep, fund, income, q, via, deps, pttypes, set } = useUrlParams(PARAMS);
+  const queue = via === "queue";
   const filter = { deps, pttypes };
   const query = new URLSearchParams(Object.entries({ start, end, ...filter }).filter(([, v]) => v));
   const { loading, data, error, retry } = useJson<Summary>(`/api/fund/opd-department/summary?${query}`);
@@ -45,14 +49,15 @@ export function OpdDepartment({ title }: { title: ReactNode }) {
 
   const selected = data?.departments.find((d) => d.dep_code === dep);
 
-  // เลือกกองทุน (จากตารางหรือใน modal) หมวดที่เลือกไว้ไม่มีในขอบเขตใหม่ให้ล้าง เปลี่ยนแผนก = เปิด modal ใหม่ ล้างคำค้น
-  function selectFund(depCode: string, code: string) {
+  // เลือกกองทุน (จากตารางหรือใน modal) หมวดที่เลือกไว้ไม่มีในขอบเขตใหม่ให้ล้าง เปลี่ยนแผนกหรือโหมด = เปิด modal ใหม่ ล้างคำค้น
+  function selectFund(depCode: string, code: string, mode = via) {
     const d = data?.departments.find((x) => x.dep_code === depCode);
-    const scope = (code ? d?.funds.find((f) => f.fund_code === code)?.categories : d?.categories) ?? [];
+    const s = code ? d?.funds.find((f) => f.fund_code === code) : d;
+    const scope = (mode === "queue" ? s?.queuedCategories : s?.categories) ?? [];
     const keepIncome = income && scope.some((c) => c.income_code === income);
-    set({ dep: depCode, fund: code, income: keepIncome ? income : null, q: depCode === dep ? q : null });
+    set({ dep: depCode, fund: code, via: mode, income: keepIncome ? income : null, q: depCode === dep && mode === via ? q : null });
   }
-  const close = () => set({ dep: null, fund: null, income: null, q: null });
+  const close = () => set({ dep: null, fund: null, income: null, q: null, via: null });
 
   let summary: ReactNode;
   if (error) {
@@ -72,17 +77,20 @@ export function OpdDepartment({ title }: { title: ReactNode }) {
         header="แผนก"
         expandLabel="แยกตามกองทุน"
         hideRowCode
+        queuedHeader="ส่งเข้าแผนก"
+        queuedAmountHeader="มูลค่าที่ส่งเข้าแผนก (บาท)"
         selected={dep}
         selectedChild={fund}
-        onSelect={(code) => (code ? selectFund(code, "") : close())}
-        onSelectChild={selectFund}
+        onSelect={(code) => (code ? selectFund(code, "", "") : close())}
+        onSelectChild={(depCode, code) => selectFund(depCode, code, "")}
+        onSelectQueued={(depCode, code) => selectFund(depCode, code, "queue")}
       />
     );
   }
 
   let detail: ReactNode;
   if (selected) {
-    detail = <DepartmentDetail dep={selected} fund={fund} income={income} start={start} end={end} filter={filter} onFund={(code) => selectFund(selected.dep_code, code)} onIncome={(code) => set({ income: code })} />;
+    detail = <DepartmentDetail dep={selected} queue={queue} fund={fund} income={income} start={start} end={end} filter={filter} onFund={(code) => selectFund(selected.dep_code, code)} onIncome={(code) => set({ income: code })} />;
   } else if (error) {
     detail = <Notice title="โหลดข้อมูลไม่สำเร็จ" detail={error} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />;
   } else if (!data) {
@@ -126,7 +134,8 @@ export function OpdDepartment({ title }: { title: ReactNode }) {
           size="wide"
           title={
             <>
-              {selected?.dep_name ?? dep}{" "}
+              {selected?.dep_name ?? dep}
+              {queue && " · ส่งเข้าแผนก"}{" "}
               <span className="ml-1 font-normal whitespace-nowrap text-muted">{rangeText(start, end)}</span>
             </>
           }
@@ -140,6 +149,8 @@ export function OpdDepartment({ title }: { title: ReactNode }) {
 
 type DepartmentDetailProps = {
   dep: DepartmentSummary;
+  /** ขอบเขต visit ที่ส่งเข้าคิวแผนก: ตัวเลข/หมวดใช้ queued* และ grid กรองด้วย qdep */
+  queue: boolean;
   fund: string;
   income: string;
   start: string;
@@ -149,21 +160,27 @@ type DepartmentDetailProps = {
   onIncome: (code: string) => void;
 };
 
-// grid ใน modal ไม่มีคอลัมน์แผนก เพราะทุกแถวเป็นแผนกเดียวกัน
-function DepartmentDetail({ dep, fund, income, start, end, filter, onFund, onIncome }: DepartmentDetailProps) {
-  const f = dep.funds.find((x) => x.fund_code === fund);
+// grid โหมดปกติไม่มีคอลัมน์แผนก เพราะทุกแถวเป็นแผนกเดียวกัน ส่วนโหมดคิวแสดงแผนกหลักของ visit
+function DepartmentDetail({ dep, queue, fund, income, start, end, filter, onFund, onIncome }: DepartmentDetailProps) {
+  // chip เฉพาะกองทุนที่มีค่าในขอบเขตนั้น (กองทุนที่มีแต่คิวไม่โผล่ในโหมดปกติ)
+  const funds = dep.funds.filter((x) => (queue ? x.queued > 0 || x.queuedAmount > 0 : x.visits > 0 || x.amount > 0));
+  const f = funds.find((x) => x.fund_code === fund);
+  const s = f ?? dep;
 
-  const params: Record<string, string> = { start, end, dep: dep.dep_code, ...filter };
+  // โหมดคิวไม่ส่ง deps: route กรอง deps ด้วย main_dep จะตัด visit ที่มาจากแผนกอื่นทิ้ง
+  const params: Record<string, string> = queue
+    ? { start, end, qdep: dep.dep_code, pttypes: filter.pttypes }
+    : { start, end, dep: dep.dep_code, ...filter };
   if (f) params.fund = f.fund_code;
   if (income) params.income = income;
 
   return (
     <ScopeDetail
-      visits={f?.visits ?? dep.visits}
-      patients={f ? undefined : dep.patients}
-      amount={f?.amount ?? dep.amount}
+      visits={queue ? s.queued : s.visits}
+      patients={f || queue ? undefined : dep.patients}
+      amount={queue ? s.queuedAmount : s.amount}
       chipsLabel="กองทุน"
-      chips={dep.funds.map((x) => ({
+      chips={funds.map((x) => ({
         code: x.fund_code,
         label: (
           <>
@@ -173,10 +190,11 @@ function DepartmentDetail({ dep, fund, income, start, end, filter, onFund, onInc
       }))}
       chip={f?.fund_code ?? ""}
       onChip={onFund}
-      categories={f?.categories ?? dep.categories}
+      categories={queue ? s.queuedCategories : s.categories}
       income={income}
       onIncome={onIncome}
       gridParams={params}
+      showDepartment={queue}
     />
   );
 }

@@ -6,8 +6,10 @@ export const LEDGER_START = "2025-10-01";
 /** รหัสหน่วยบริการของโรงพยาบาล และจังหวัดที่ตั้ง (UCS OP ใน CUP / ในจังหวัด / ต่างจังหวัด) */
 export const HOSPITAL_HCODE = "11252";
 export const HOSPITAL_CHWPART = "65";
+/** หน่วยบริการประจำนอกสังกัด สธ. ในจังหวัด (UCS OP ลง .201 นอกสังกัด สธ.): รพ.มหาวิทยาลัยนเรศวร, รพ.ค่ายสมเด็จพระนเรศวร, รพ.จิตเวชพิษณุโลก */
+export const NON_MOPH_HCODES = new Set(["14972", "11517", "41429"]);
 /** บัญชี UCS OP ตามหน่วยบริการประจำ */
-export const UC_OP_ACCOUNTS = { cup: "1102050101.201", province: "1102050101.203", other: "1102050101.204" } as const;
+export const UC_OP_ACCOUNTS = { cup: "1102050101.201", province: "1102050101.203", other: "1102050101.204", nonMoph: "1102050102.201" } as const;
 /** ชุดละไม่เกิน 31 วัน (เท่ากับช่วงสูงสุดของ query his) */
 export const MAX_BATCH_DAYS = 31;
 export const DAILY_OPD_DAYS = 14;
@@ -69,7 +71,7 @@ const day = (v: string) => String(v).slice(0, 10);
 
 /**
  * บัญชีของสิทธิ: override ราย pttype > UCS OP ตามหน่วยบริการประจำ > ตามกองทุน > null (ไม่ระบุบัญชี ห้ามเดา)
- * UCS OP: hospmain = รพ. หรืออยู่ใน CUP = .201, จังหวัดเดียวกัน = .203, จังหวัดอื่น = .204, ไม่มี hospmain/จังหวัด = null
+ * UCS OP: hospmain = รพ. หรืออยู่ใน CUP = .201, นอกสังกัด สธ. = 1102050102.201, จังหวัดเดียวกัน = .203, จังหวัดอื่น = .204, ไม่มี hospmain/จังหวัด = null
  */
 export function accountFor(c: Coverage, rules: AccountRules): string | null {
   const byPttype = c.pttype && rules.maps.find((m) => m.pttype === c.pttype && m.patient_type === c.patient_type);
@@ -77,6 +79,7 @@ export function accountFor(c: Coverage, rules: AccountRules): string | null {
   if (c.hipdata_code === "UCS" && c.patient_type === "OP") {
     if (!c.hospmain) return null;
     if (c.hospmain === HOSPITAL_HCODE || rules.cup.has(c.hospmain)) return UC_OP_ACCOUNTS.cup;
+    if (NON_MOPH_HCODES.has(c.hospmain)) return UC_OP_ACCOUNTS.nonMoph;
     if (!c.hospmain_chwpart) return null;
     return c.hospmain_chwpart === HOSPITAL_CHWPART ? UC_OP_ACCOUNTS.province : UC_OP_ACCOUNTS.other;
   }

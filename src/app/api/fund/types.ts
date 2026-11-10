@@ -86,13 +86,29 @@ export type FundDashboardResponse = {
 // มูลค่าตามแผนก: แผนก = ovst.main_dep (ว่าง/NULL = "UNKNOWN") มูลค่าทุกรายการของ visit นับเข้าแผนกหลักของ visit
 // กองทุนภายในแผนกใช้หลักเดียวกับหน้ากองทุน (มูลค่าตาม opitemrece.pttype, จำนวน visit ตาม ovst.pttype)
 
-export type DepartmentFund = { fund_code: FundCode; fund_name: string; visits: number; amount: number; categories: CategoryAmount[] };
+/** queued/queuedAmount/queuedCategories ตาม opd_dep_queue: จำนวนตาม ovst.pttype, มูลค่าตาม opitemrece.pttype */
+export type DepartmentFund = {
+  fund_code: FundCode;
+  fund_name: string;
+  visits: number;
+  queued: number;
+  queuedAmount: number;
+  queuedCategories: CategoryAmount[];
+  amount: number;
+  categories: CategoryAmount[];
+};
 
 export type DepartmentSummary = {
   dep_code: string;
   dep_name: string;
   visits: number;
   patients: number;
+  /** visit ที่ถูกส่งเข้าคิวของแผนก (opd_dep_queue) ไม่ใช่ตาม main_dep และรวมข้ามแผนกไม่ได้ */
+  queued: number;
+  /** มูลค่าทั้ง visit ของ visit ใน queued (ซ้ำข้ามแผนกได้ รวมข้ามแผนกไม่ได้) */
+  queuedAmount: number;
+  /** หมวดของ queuedAmount */
+  queuedCategories: CategoryAmount[];
   amount: number;
   categories: CategoryAmount[];
   /** เรียงตาม amount มากไปน้อย */

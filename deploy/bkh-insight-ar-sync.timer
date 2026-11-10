@@ -1,0 +1,11 @@
+# Runs bkh-insight-ar-sync.service every day at 01:00 Bangkok time; Persistent catches up a run missed while the server was off.
+# Install: see the header of bkh-insight-ar-sync.service. Check: systemctl list-timers bkh-insight-ar-sync.timer
+[Unit]
+Description=bkh-insight daily AR ledger sync at 01:00
+
+[Timer]
+OnCalendar=*-*-* 01:00:00 Asia/Bangkok
+Persistent=true
+
+[Install]
+WantedBy=timers.target
