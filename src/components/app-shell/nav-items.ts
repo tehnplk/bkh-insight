@@ -26,6 +26,7 @@ export const navItems: NavItem[] = [
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
       { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
+      { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
       { label: "นำเข้า REP", href: "/fund/rep-import" },
     ],
   },
@@ -45,5 +46,8 @@ export const navItems: NavItem[] = [
 export const adminSection: NavSection = {
   label: "ผู้ดูแลระบบ",
   icon: "shield",
-  children: [{ label: "ผู้ใช้งาน", href: "/admin/users" }],
+  children: [
+    { label: "ผู้ใช้งาน", href: "/admin/users" },
+    { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
+  ],
 };
