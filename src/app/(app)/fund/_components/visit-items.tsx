@@ -1,9 +1,10 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import type { VisitItemsResponse } from "@/app/api/fund/types";
+import type { CategoryAmount, VisitItem, VisitItemsResponse } from "@/app/api/fund/types";
 import { Money, focusRing, num, useJson } from "./ui";
 
 /** รายการค่าใช้จ่ายของ visit แยกตามหมวด (เนื้อหาใน modal ของ DataGrid) */
@@ -49,54 +50,82 @@ export function VisitItems({ vn }: { vn: string }) {
         <dd className="tabular-nums">{d.vn}</dd>
       </dl>
 
-      {d.categories.length === 0 ? (
-        <p className="mt-5 rounded-lg border border-line px-4 py-8 text-center text-muted">ไม่มีรายการค่าใช้จ่าย</p>
-      ) : (
-        <div className="mt-5 overflow-hidden rounded-lg border border-line">
-          {d.categories.map((c) => (
-            <details key={c.income_code} open className="group border-b border-line last:border-b-0">
-              <summary
-                className={`flex cursor-pointer list-none items-center gap-2 bg-surface-sunken px-3 py-2 hover:bg-hover [&::-webkit-details-marker]:hidden ${focusRing}`}
-              >
-                <ChevronRight className="size-4 shrink-0 text-muted transition-transform duration-200 group-open:rotate-90" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate font-medium">{c.income_name}</span>
-                <span className="text-xs text-muted">{formatCount(c.items.length)} รายการ</span>
-                <span className={`w-25 font-semibold ${num}`}><Money value={c.amount} /></span>
-              </summary>
-              <table className="w-full table-fixed border-collapse tabular-nums">
-                <colgroup>
-                  <col />
-                  <col className="w-20" />
-                  <col className="w-32" />
-                  <col className="w-28" />
-                </colgroup>
-                <thead className="text-left text-xs text-muted">
-                  <tr>
-                    <th className="py-1.5 pr-3 pl-9 font-medium">รายการ</th>
-                    <th className={`px-3 py-1.5 font-medium ${num}`}>จำนวน</th>
-                    <th className={`px-3 py-1.5 font-medium ${num}`}>ราคาต่อหน่วย (บาท)</th>
-                    <th className={`py-1.5 pr-3 pl-3 font-medium ${num}`}>มูลค่า (บาท)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {c.items.map((it, i) => (
-                    <tr key={`${it.icode}-${i}`} className="border-t border-line">
-                      <td className="py-1.5 pr-3 pl-9 break-words">{it.name}</td>
-                      <td className={`px-3 py-1.5 ${num}`}>{it.qty.toLocaleString("th-TH")}</td>
-                      <td className={`px-3 py-1.5 ${num}`}><Money value={it.unitprice} /></td>
-                      <td className={`py-1.5 pr-3 pl-3 ${num}`}><Money value={it.amount} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
-          ))}
+      <div className="mt-5">
+        <ItemCategories categories={d.categories}>
           <div className="flex items-center justify-between border-t-2 border-line px-3 py-2.5 font-semibold">
             <span>รวมทั้งหมด (บาท)</span>
             <span className={num}><Money value={d.total} /></span>
           </div>
-        </div>
-      )}
+        </ItemCategories>
+      </div>
+    </div>
+  );
+}
+
+type ItemCategory<T extends VisitItem> = CategoryAmount & { items: T[] };
+
+/**
+ * ตารางรายการค่าใช้จ่ายแยกหมวด income พับได้ (ใช้ทั้ง /fund/opd-fund และ /fund/uc-debtor)
+ * `open` = กางทุกหมวดตอนเริ่ม, `tag` = ป้ายต่อท้ายชื่อรายการ, `children` = แถวรวมท้ายกรอบ
+ */
+export function ItemCategories<T extends VisitItem>({
+  categories,
+  open = true,
+  tag,
+  children,
+}: {
+  categories: ItemCategory<T>[];
+  open?: boolean;
+  tag?: (item: T) => ReactNode;
+  children?: ReactNode;
+}) {
+  if (categories.length === 0) {
+    return <p className="rounded-lg border border-line px-4 py-8 text-center text-muted">ไม่มีรายการค่าใช้จ่าย</p>;
+  }
+  return (
+    <div className="overflow-hidden rounded-lg border border-line">
+      {categories.map((c) => (
+        <details key={c.income_code} open={open} className="group border-b border-line last:border-b-0">
+          <summary
+            className={`flex cursor-pointer list-none items-center gap-2 bg-surface-sunken px-3 py-2 hover:bg-hover [&::-webkit-details-marker]:hidden ${focusRing}`}
+          >
+            <ChevronRight className="size-4 shrink-0 text-muted transition-transform duration-200 group-open:rotate-90" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate font-medium">{c.income_name}</span>
+            <span className="text-xs whitespace-nowrap text-muted">{formatCount(c.items.length)} รายการ</span>
+            <span className={`w-25 font-semibold ${num}`}><Money value={c.amount} /></span>
+          </summary>
+          {/* จอแคบ: ตารางเลื่อนแนวนอนในกรอบของหมวด หัวหมวดไม่เลื่อนตาม */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-120 table-fixed border-collapse tabular-nums">
+              <colgroup>
+                <col />
+                <col className="w-20" />
+                <col className="w-32" />
+                <col className="w-28" />
+              </colgroup>
+              <thead className="text-left text-xs text-muted">
+                <tr>
+                  <th className="py-1.5 pr-3 pl-9 font-medium">รายการ</th>
+                  <th className={`px-3 py-1.5 font-medium ${num}`}>จำนวน</th>
+                  <th className={`px-3 py-1.5 font-medium ${num}`}>ราคาต่อหน่วย (บาท)</th>
+                  <th className={`py-1.5 pr-3 pl-3 font-medium ${num}`}>มูลค่า (บาท)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.items.map((it, i) => (
+                  <tr key={`${it.icode}-${i}`} className="border-t border-line">
+                    <td className="py-1.5 pr-3 pl-9 break-words">{it.name}{tag?.(it)}</td>
+                    <td className={`px-3 py-1.5 ${num}`}>{it.qty.toLocaleString("th-TH")}</td>
+                    <td className={`px-3 py-1.5 ${num}`}><Money value={it.unitprice} /></td>
+                    <td className={`py-1.5 pr-3 pl-3 ${num}`}><Money value={it.amount} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ))}
+      {children}
     </div>
   );
 }

@@ -119,6 +119,7 @@
     - ชื่อกองทุน (`pttype.hipdata_code`) มาจาก `nhso_inscl_code.inscl_name` (ตาราง `hipdata` เป็นข้อมูลบุคคล ไม่ใช่ชื่อกองทุน) ชื่อรายการค่าใช้จ่ายมาจาก `s_drugitems`
     - รวม `ovst` กับ `opitemrece`: สรุป `opitemrece` ใน derived table ด้วย `FORCE INDEX (ix_vstdate)` ก่อน แล้วค่อย JOIN `ovst` ด้วย `vn` ห้าม JOIN สองตารางตรงๆ เพราะ FORCE INDEX ทำให้ใช้ `ix_vn` ไม่ได้ และถ้าเริ่มจาก `ovst` จะสแกน `opitemrece` ซ้ำทุกแถว (ล็อกนาน)
     - แผนกหลักของ visit คือ `ovst.main_dep` ชื่อแผนกอยู่ที่ `kskdepartment.department`
+    - สมุดลูกหนี้ตามผังบัญชี (`ar_ledger` ใน insight, `/fund/ar-ledger`) ตั้งจาก `rcpt_debt` (OPD, key `debt_id`, ลดด้วย `rcpt_debt_cancel`) และ `ipt.finance_lock = 'Y'` (IPD, ยอด `an_stat.uc_money`) SQL และ logic อยู่ที่ `src/app/api/fund/ar-sync/` แถวที่ลงแล้วไม่แก้ตาม HOSxP ส่วนต่างลงเป็นแถวใหม่ บัญชีตามสิทธิแก้ที่ `/admin/ar-accounts`
   - `insight`: ฐานของระบบเองบน PostgreSQL (`pg`) อ่านด้วย `insightQuery<T>(sql, params)` (คืน `rows`) เขียนด้วย `insightExecute(sql, params)` (คืน `{ rowCount }`) ต้องการค่าที่สร้างใหม่ (เช่น id) ให้ใช้ `insightQuery` กับ `RETURNING` หลายคำสั่งที่ต้องสำเร็จพร้อมกันใช้ `insightTransaction(async (tx) => { ... })` (`tx(sql, params)` คืน rows เหมือน `insightQuery` บน connection ของ transaction, throw = ROLLBACK ทั้งหมด ดู `/api/fund/rep-import`)
   - placeholder: his ใช้ `?` ส่วน insight ใช้ `$1, $2, …` (ไม่มีตัวแปลง `?` เป็น `$n`)
   - JOIN ข้าม his กับ insight ทำไม่ได้ เพราะอยู่คนละ engine ให้ query แยกแต่ละฐานแล้วรวมผลในโค้ด

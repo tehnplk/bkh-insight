@@ -5,6 +5,8 @@ import { formatBaht } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { UcDebtorRow } from "@/app/api/fund/uc-debtor/debtor";
 import type { RepDetailResponse } from "@/app/api/fund/uc-debtor/detail/rep-detail";
+import { DEBTOR_PAIDST, PAIDST_LABEL, type DebtorItem, type DebtorItemsResponse } from "@/app/api/fund/uc-debtor/items/items";
+import { ItemCategories } from "../_components/visit-items";
 import { Money, Skeleton, btn, num, useJson } from "../_components/ui";
 
 const dash = <span className="text-muted">–</span>;
@@ -35,6 +37,16 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+function LoadError({ what, error, retry }: { what: string; error?: string; retry: () => void }) {
+  return (
+    <div className="py-6 text-center">
+      <p className="font-medium text-danger">โหลด{what}ไม่สำเร็จ</p>
+      <p className="mt-1 text-muted">{error}</p>
+      <button type="button" onClick={retry} className={`${btn} mt-4`}>ลองอีกครั้ง</button>
+    </div>
+  );
+}
+
 const Codes = ({ codes }: { codes: string[] }) =>
   codes.length ? (
     <span className="flex flex-wrap gap-1">
@@ -61,20 +73,71 @@ export function UcDebtorDetail({ row, status }: { row: UcDebtorRow; status: Reac
         <Fact label="ส่วนต่าง (บาท)"><span className="font-semibold"><Money value={row.diff} /></span></Fact>
         <Fact label="สถานะ">{status}</Fact>
       </Facts>
+      <DebtorItems row={row} />
       {loading ? (
         <div className="mt-6"><Skeleton rows={6} /></div>
       ) : error || !data ? (
-        <div className="mt-6 py-6 text-center">
-          <p className="font-medium text-danger">โหลดข้อมูล REP ไม่สำเร็จ</p>
-          <p className="mt-1 text-muted">{error}</p>
-          <button type="button" onClick={retry} className={`${btn} mt-4`}>ลองอีกครั้ง</button>
-        </div>
+        <div className="mt-6"><LoadError what="ข้อมูล REP" error={error} retry={retry} /></div>
       ) : !data.latest ? (
         <p className="mt-6 rounded-lg border border-line px-4 py-8 text-center text-muted">ยังไม่มี REP</p>
       ) : (
         <RepSections data={data} latest={data.latest} ipd={type === "ipd"} />
       )}
     </div>
+  );
+}
+
+// รายการเกินนี้ (มักเป็น IPD) เริ่มแบบพับหมวด ให้เห็นยอดต่อหมวดและยอดสรุปก่อน
+const OPEN_MAX_ITEMS = 15;
+
+const PaidTag = ({ item }: { item: DebtorItem }) => {
+  if (item.paidst === DEBTOR_PAIDST) return null;
+  const t = (item.paidst && PAIDST_LABEL[item.paidst]) || { label: "ไม่ใช่ลูกหนี้", title: "ไม่ใช่ลูกหนี้สิทธิ" };
+  return (
+    <span title={t.title} className="ml-1.5 inline-block rounded border border-line px-1 text-xs whitespace-nowrap text-muted">
+      {t.label}
+    </span>
+  );
+};
+const paidTag = (item: DebtorItem) => <PaidTag item={item} />;
+
+const SumRow = ({ label, value, strong }: { label: string; value: number; strong?: boolean }) => (
+  <div className={`flex items-center justify-between px-3 py-1.5 ${strong ? "font-semibold" : "text-muted"}`}>
+    <span>{label}</span>
+    <span className={num}><Money value={value} /></span>
+  </div>
+);
+
+/** รายการค่าใช้จ่ายของ visit/admission (HOSxP opitemrece) โหลดแยกจาก REP */
+function DebtorItems({ row }: { row: UcDebtorRow }) {
+  const q: Record<string, string> = row.an ? { an: row.an } : { vn: row.key };
+  const { loading, data, error, retry } = useJson<DebtorItemsResponse>(`/api/fund/uc-debtor/items?${new URLSearchParams(q)}`);
+  const count = data?.categories.reduce((n, c) => n + c.items.length, 0) ?? 0;
+  const gap = data ? Math.round((data.debtor - row.debtor) * 100) / 100 : 0;
+
+  return (
+    <Section title="รายการค่าใช้จ่าย">
+      {loading ? (
+        <Skeleton rows={4} />
+      ) : error || !data ? (
+        <LoadError what="รายการค่าใช้จ่าย" error={error} retry={retry} />
+      ) : (
+        <>
+          <ItemCategories categories={data.categories} open={count <= OPEN_MAX_ITEMS} tag={paidTag}>
+            <div className="border-t-2 border-line py-1">
+              <SumRow label="ลูกหนี้สิทธิ (บาท)" value={data.debtor} strong />
+              <SumRow label="ชำระเอง/อื่นๆ (บาท)" value={data.other} />
+              <SumRow label="รวม (บาท)" value={data.total} strong />
+            </div>
+          </ItemCategories>
+          {data.categories.length > 0 && gap !== 0 && (
+            <p className="mt-2 text-xs text-muted">
+              ลูกหนี้สิทธิจากรายการ{gap > 0 ? "มากกว่า" : "น้อยกว่า"}ยอดลูกหนี้ {formatBaht(Math.abs(gap))} บาท
+            </p>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 
