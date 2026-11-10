@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { formatCount } from "@/lib/number-format";
 import { Money, ShareBar, focusRing, formatPct, num, pct } from "./ui";
 
-export type SummaryChild = { code: string; name: string; visits: number; amount: number };
+export type SummaryChild = { code: string; name: string; visits: number; amount: number; queued?: number; queuedAmount?: number };
 export type SummaryRow = SummaryChild & { patients: number; children: SummaryChild[] };
 
 type Props = {
@@ -19,11 +19,17 @@ type Props = {
   childCodeFirst?: boolean;
   /** ไม่แสดงรหัสหลังชื่อแถวหลัก (เมื่อชื่อมีรหัสอยู่แล้ว เช่นแผนก "054-คลินิกรักษ์ตับ") */
   hideRowCode?: boolean;
+  /** หัวคอลัมน์ `queued` ถัดจากผู้ป่วย (ไม่ส่ง = ไม่แสดง) แถวรวมแสดง "–" เพราะรวมข้ามแถวไม่ได้ แถวย่อยที่ไม่มีค่าก็แสดง "–" */
+  queuedHeader?: string;
+  /** หัวคอลัมน์ `queuedAmount` ถัดจาก queued (เงื่อนไขเดียวกับ queuedHeader) */
+  queuedAmountHeader?: string;
   selected: string;
   selectedChild: string;
   /** "" = ยกเลิกการเลือก */
   onSelect: (code: string) => void;
   onSelectChild: (parentCode: string, code: string) => void;
+  /** ส่ง = ตัวเลข queued (> 0) เป็นปุ่ม childCode "" = แถวหลัก */
+  onSelectQueued?: (code: string, childCode: string) => void;
 };
 
 // "UNKNOWN" = ไม่ระบุ ไม่ต้องแสดงรหัส (ชื่อจาก API บอกแล้ว)
@@ -31,7 +37,7 @@ const Code = ({ code, className }: { code: string; className: string }) =>
   code === "UNKNOWN" ? null : <span className={className}>{code}</span>;
 
 /** ตารางสรุป 2 ชั้น (แถวหลัก + แถวย่อยกางได้) พร้อมสัดส่วนและแถวรวม แถวหลักเรียงมาจาก API แล้ว */
-export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst, hideRowCode, selected, selectedChild, onSelect, onSelectChild }: Props) {
+export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst, hideRowCode, queuedHeader, queuedAmountHeader, selected, selectedChild, onSelect, onSelectChild, onSelectQueued }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selected ? [selected] : []));
   const toggle = (code: string) =>
     setExpanded((prev) => {
@@ -40,6 +46,22 @@ export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst
       else next.add(code);
       return next;
     });
+
+  const dash = queuedHeader && <td className={`px-3 text-muted ${num}`}>–</td>;
+  const amountDash = queuedAmountHeader && <td className={`px-3 text-muted ${num}`}>–</td>;
+  const queuedValue = (n: number, label: string, code: string, childCode: string) =>
+    onSelectQueued && n > 0 ? (
+      <button
+        type="button"
+        aria-label={`รายการที่ส่งเข้าแผนก ${label} ${formatCount(n)} visit`}
+        onClick={() => onSelectQueued(code, childCode)}
+        className={`-mx-1 rounded px-1 py-0.5 underline decoration-line underline-offset-2 hover:text-foreground hover:decoration-current ${focusRing}`}
+      >
+        {formatCount(n)}
+      </button>
+    ) : (
+      formatCount(n)
+    );
 
   return (
     <div className="overflow-x-auto rounded-lg border border-line">
@@ -52,6 +74,8 @@ export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst
             <th className="px-3 py-2.5 font-medium">{header}</th>
             <th className={`px-3 py-2.5 font-medium ${num}`}>visit</th>
             <th className={`px-3 py-2.5 font-medium ${num}`}>ผู้ป่วย</th>
+            {queuedHeader && <th className={`px-3 py-2.5 font-medium ${num}`}>{queuedHeader}</th>}
+            {queuedAmountHeader && <th className={`px-3 py-2.5 font-medium ${num}`}>{queuedAmountHeader}</th>}
             <th className={`px-3 py-2.5 font-medium ${num}`}>มูลค่า (บาท)</th>
             <th className="w-1/5 px-3 py-2.5 font-medium">สัดส่วน</th>
           </tr>
@@ -94,6 +118,8 @@ export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst
                   </td>
                   <td className={`px-3 py-1.5 ${num}`}>{formatCount(r.visits)}</td>
                   <td className={`px-3 py-1.5 ${num}`}>{formatCount(r.patients)}</td>
+                  {queuedHeader && <td className={`px-3 py-1.5 ${num}`}>{queuedValue(r.queued ?? 0, r.name, r.code, "")}</td>}
+                  {queuedAmountHeader && <td className={`px-3 py-1.5 ${num}`}><Money value={r.queuedAmount ?? 0} /></td>}
                   <td className={`px-3 py-1.5 font-medium ${num}`}><Money value={r.amount} /></td>
                   <td className="px-3 py-1.5">
                     <div className="flex items-center gap-2">
@@ -128,6 +154,8 @@ export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst
                         </td>
                         <td className={`px-3 py-1 ${num}`}>{formatCount(c.visits)}</td>
                         <td />
+                        {queuedHeader && (c.queued == null ? dash : <td className={`px-3 py-1 ${num}`}>{queuedValue(c.queued, `${r.name} ${c.name}`, r.code, c.code)}</td>)}
+                        {queuedAmountHeader && (c.queuedAmount == null ? amountDash : <td className={`px-3 py-1 ${num}`}><Money value={c.queuedAmount} /></td>)}
                         <td className={`px-3 py-1 ${num}`}><Money value={c.amount} /></td>
                         <td className="px-3 py-1 text-right text-xs">
                           <span className="inline-block w-12">{formatPct(pct(c.amount, r.amount))}</span>
@@ -145,6 +173,8 @@ export function SummaryTable({ rows, totals, header, expandLabel, childCodeFirst
             <td className="px-3 py-2">รวม</td>
             <td className={`px-3 py-2 ${num}`}>{formatCount(totals.visits)}</td>
             <td className={`px-3 py-2 ${num}`}>{formatCount(totals.patients)}</td>
+            {dash}
+            {amountDash}
             <td className={`px-3 py-2 ${num}`}><Money value={totals.amount} /></td>
             <td />
           </tr>

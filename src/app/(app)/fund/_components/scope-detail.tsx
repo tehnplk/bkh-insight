@@ -24,10 +24,12 @@ type ScopeDetailProps = {
   income: string;
   onIncome: (code: string) => void;
   gridParams: Record<string, string>;
+  /** คอลัมน์แผนก (แผนกหลักของ visit) ใน grid */
+  showDepartment?: boolean;
 };
 
 /** เนื้อหาใน modal ของแถวสรุป (กองทุน/แผนก): ตัวเลขสรุป, แถวย่อย, หมวดค่าใช้จ่าย และรายการรับบริการ ตามขอบเขตที่เลือก */
-export function ScopeDetail({ visits, patients, amount, chipsLabel, chips, chip, onChip, categories, income, onIncome, gridParams }: ScopeDetailProps) {
+export function ScopeDetail({ visits, patients, amount, chipsLabel, chips, chip, onChip, categories, income, onIncome, gridParams, showDepartment }: ScopeDetailProps) {
   const incomeName = categories.find((c) => c.income_code === income)?.income_name ?? income;
 
   return (
@@ -57,7 +59,7 @@ export function ScopeDetail({ visits, patients, amount, chipsLabel, chips, chip,
       </Panel>
 
       <Panel title="รายการรับบริการ" aside={income && <FilterChip label={incomeName} onRemove={() => onIncome("")} />}>
-        <VisitGrid extraParams={gridParams} />
+        <VisitGrid extraParams={gridParams} showDepartment={showDepartment} />
       </Panel>
     </div>
   );

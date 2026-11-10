@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "node --env-file=.env scripts/migrate.mjs"
+    "db:migrate": "node --env-file=.env scripts/migrate.mjs",
+    "ar:sync": "node --env-file=.env scripts/ar-sync-daily.mjs"
   },
   "dependencies": {
     "@tanstack/react-table": "^9.3.1",

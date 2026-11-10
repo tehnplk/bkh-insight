@@ -1,0 +1,15 @@
+# Daily AR ledger sync (same as "ดึงยอดล่าสุด" on /fund/ar-ledger), started by bkh-insight-ar-sync.timer.
+# Install (on the server, from /var/www/bkh-insight):
+#   sudo cp deploy/bkh-insight-ar-sync.service deploy/bkh-insight-ar-sync.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now bkh-insight-ar-sync.timer
+# Run now / check: sudo systemctl start bkh-insight-ar-sync.service; journalctl -u bkh-insight-ar-sync.service
+# User: same as the main app service (check `systemctl cat <app service>`), it must be able to read .env.
+[Unit]
+Description=bkh-insight daily AR ledger sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bkhadmin
+WorkingDirectory=/var/www/bkh-insight
+ExecStart=/usr/bin/npm run ar:sync

@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
     pttype: params.get("pttype") || null,
     income: params.get("income") || null,
     dep: params.get("dep") || null,
+    // แผนกของคิว (opd_dep_queue) ไม่ใช่ main_dep: visit ที่ถูกส่งเข้าคิวแผนกนั้น
+    qdep: params.get("qdep") || null,
   };
   for (const [k, v] of Object.entries(filters)) {
     if (v !== null && !CODE.test(v)) return badRequest(`${k} ไม่ถูกต้อง`);
@@ -103,6 +105,11 @@ export async function GET(request: NextRequest) {
   if (filters.dep) {
     where += ` AND ${depSql("v")} = ?`;
     whereParams.push(filters.dep);
+  }
+  if (filters.qdep) {
+    where += " AND EXISTS (SELECT 1 FROM opd_dep_queue dq WHERE dq.vn = v.vn AND dq.depcode = ?)";
+    // summary นับ depcode ว่างเป็น UNKNOWN
+    whereParams.push(filters.qdep === "UNKNOWN" ? "" : filters.qdep);
   }
   if (deps) {
     where += ` AND ${inList(depSql("v"), deps.length)}`;

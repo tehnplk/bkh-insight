@@ -28,6 +28,7 @@ export const navItems: NavItem[] = [
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
       { label: "นำเข้า REP", href: "/fund/rep-import" },
+      { label: "นำเข้า STM", href: "/fund/stm-import" },
     ],
   },
   {
@@ -38,6 +39,11 @@ export const navItems: NavItem[] = [
       { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
       { label: "ผู้รับบริการที่เข้าเกณฑ์ DM Type-2", href: "/visit/dm-remission" },
     ],
+  },
+  {
+    label: "FDH",
+    icon: "document",
+    children: [{ label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" }],
   },
 ];
 

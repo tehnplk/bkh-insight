@@ -29,7 +29,9 @@ export async function GET(request: NextRequest) {
   const oFilter = pttypes ? ` AND ${inList("o.pttype", pttypes.length)}` : "";
   const params = [start, end, ...(pttypes ?? []), ...(depCodes ?? [])];
 
-  const [visitRows, patientRows, itemRows] = await Promise.all([
+  const qFilter = (pttypes ? ` AND ${inList("v.pttype", pttypes.length)}` : "") + (depCodes ? ` AND ${inList("x.depcode", depCodes.length)}` : "");
+
+  const [visitRows, patientRows, itemRows, queueRows, queueAmountRows] = await Promise.all([
     hisQuery<{ dep: string; pttype: string | null; visits: number }>(
       `SELECT ${depSql("v")} AS dep, v.pttype, COUNT(*) AS visits FROM ovst v
        WHERE v.vstdate BETWEEN ? AND ?${vFilter} GROUP BY dep, v.pttype`,
@@ -51,20 +53,38 @@ export async function GET(request: NextRequest) {
        GROUP BY dep, x.pttype, x.income`,
       params,
     ),
+    // visit ที่ถูกส่งเข้าคิวของแผนก (ตรงกับ OPD Visit List ของ HOSxP) visit เดียวเข้าได้หลายแผนก จึงห้ามรวมข้ามแผนก
+    // shortcut: depcode ว่างนับเป็น UNKNOWN ในโค้ด แต่ ?deps=UNKNOWN ไม่จับแถวนั้น (ไม่ COALESCE ใน SQL เพื่อใช้ index), แก้เมื่อแถวว่างมีนัยสำคัญ
+    // กองทุนตาม ovst.pttype (visit มีสิทธิเดียว และ (vn, depcode) unique จึงบวกข้ามกองทุนในแผนกเดียวกันได้)
+    hisQuery<{ dep: string | null; pttype: string | null; queued: number }>(
+      `SELECT x.depcode AS dep, v.pttype, COUNT(DISTINCT x.vn) AS queued FROM ovst v
+       JOIN opd_dep_queue x ON x.vn = v.vn
+       WHERE v.vstdate BETWEEN ? AND ?${qFilter} GROUP BY x.depcode, v.pttype`,
+      params,
+    ),
+    // มูลค่าทั้ง visit ของ visit ที่ส่งเข้าคิวแผนก (ซ้ำข้ามแผนกได้) กองทุนตาม opitemrece.pttype รวมต่อ vn ก่อน แล้วค่อย join คิว
+    hisQuery<{ dep: string | null; pttype: string; income: string; amount: number }>(
+      `SELECT q.depcode AS dep, x.pttype, x.income, SUM(x.amount) AS amount
+       FROM (SELECT o.vn, o.pttype, o.income, SUM(o.sum_price) AS amount FROM ${OPI_BY_DATE}
+             WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL${oFilter} GROUP BY o.vn, o.pttype, o.income) x
+       JOIN opd_dep_queue q ON q.vn = x.vn${depCodes ? ` WHERE ${inList("q.depcode", depCodes.length)}` : ""}
+       GROUP BY q.depcode, x.pttype, x.income`,
+      params,
+    ),
   ]);
   const depName = new Map(deps.map((d) => [d.code, d.name]));
 
-  type FundAcc = { visits: number; amount: number; categories: Map<string, number> };
-  type DepAcc = { visits: number; amount: number; categories: Map<string, number>; funds: Map<string, FundAcc> };
+  type FundAcc = { visits: number; amount: number; categories: Map<string, number>; queued: number; queuedAmount: number; queuedCategories: Map<string, number> };
+  type DepAcc = FundAcc & { funds: Map<string, FundAcc> };
   const depAcc = new Map<string, DepAcc>();
   const dep = (code: string) => {
     let d = depAcc.get(code);
-    if (!d) depAcc.set(code, (d = { visits: 0, amount: 0, categories: new Map(), funds: new Map() }));
+    if (!d) depAcc.set(code, (d = { visits: 0, amount: 0, categories: new Map(), queued: 0, queuedAmount: 0, queuedCategories: new Map(), funds: new Map() }));
     return d;
   };
   const fund = (d: DepAcc, code: string) => {
     let f = d.funds.get(code);
-    if (!f) d.funds.set(code, (f = { visits: 0, amount: 0, categories: new Map() }));
+    if (!f) d.funds.set(code, (f = { visits: 0, amount: 0, categories: new Map(), queued: 0, queuedAmount: 0, queuedCategories: new Map() }));
     return f;
   };
 
@@ -84,6 +104,24 @@ export async function GET(request: NextRequest) {
     add(f.categories, r.income, amount);
     add(allCategories, r.income, amount);
   }
+  // คิวลงเฉพาะแผนกที่มีแถวอยู่แล้ว (ไม่เรียก dep() เพราะจะสร้างแผนกใหม่) กองทุนที่มีแต่คิวสร้างแถวใหม่ได้ แถวย่อยจะได้รวมครบยอดแผนก
+  const queueDep = (code: string | null) => depAcc.get(code?.trim() || UNKNOWN_FUND);
+  for (const r of queueRows) {
+    const d = queueDep(r.dep);
+    if (!d) continue;
+    d.queued += int(r.queued);
+    fund(d, fundOf(lk, r.pttype)).queued += int(r.queued);
+  }
+  for (const r of queueAmountRows) {
+    const d = queueDep(r.dep);
+    if (!d) continue;
+    const amount = Number(r.amount);
+    const f = fund(d, fundOf(lk, r.pttype));
+    for (const x of [d, f]) {
+      x.queuedAmount += amount;
+      add(x.queuedCategories, r.income, amount);
+    }
+  }
   const patients = new Map(patientRows.map((r) => [r.dep, int(r.patients)]));
 
   const departments: DepartmentSummary[] = [...depAcc]
@@ -92,6 +130,9 @@ export async function GET(request: NextRequest) {
       dep_name: dep_code === UNKNOWN_FUND ? UNKNOWN_NAME : (depName.get(dep_code) ?? dep_code),
       visits: d.visits,
       patients: patients.get(dep_code) ?? 0,
+      queued: d.queued,
+      queuedAmount: round2(d.queuedAmount),
+      queuedCategories: categoryList(lk, d.queuedCategories),
       amount: round2(d.amount),
       categories: categoryList(lk, d.categories),
       funds: [...d.funds]
@@ -99,6 +140,9 @@ export async function GET(request: NextRequest) {
           fund_code,
           fund_name: lk.fundName(fund_code),
           visits: f.visits,
+          queued: f.queued,
+          queuedAmount: round2(f.queuedAmount),
+          queuedCategories: categoryList(lk, f.queuedCategories),
           amount: round2(f.amount),
           categories: categoryList(lk, f.categories),
         }))

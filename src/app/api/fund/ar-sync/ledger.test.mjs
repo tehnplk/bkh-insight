@@ -19,6 +19,8 @@ test("accountFor: pttype override > UCS OP by hospmain > fund map > null", () =>
   assert.equal(accountFor(cov({ hospmain: "10676", hospmain_chwpart: "65" }), rules), "1102050101.203");
   assert.equal(accountFor(cov({ hospmain: "10676", hospmain_chwpart: "64" }), rules), "1102050101.204");
   assert.equal(accountFor(cov({ hospmain: "10676" }), rules), null);
+  for (const h of ["14972", "11517", "41429"]) assert.equal(accountFor(cov({ hospmain: h, hospmain_chwpart: "65" }), rules), "1102050102.201");
+  assert.equal(accountFor(cov({ hospmain: "41429" }), rules), "1102050102.201");
   assert.equal(accountFor(cov({}), rules), null);
   assert.equal(accountFor(cov({ pttype: "89", hospmain: "11252" }), rules), "1102050101.209");
   assert.equal(accountFor(cov({ patient_type: "IP" }), rules), "1102050101.202");

@@ -1,58 +1,42 @@
-# Handoff: werawat (อัปเดต 9 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 10 พ.ย. 2569)
 
 ## สถานะ
-- main = `a52d4c5` (PR #28) deploy ขึ้น server แล้ว (https://10.10.10.159): REP import, ลูกหนี้ UC + modal, dashboard ลูกหนี้ UC, ย้าย dm-remission ไป `/visit/dm-remission`
-- 10 พ.ย. 2569: PR #29 รวมรายการค่าใช้จ่ายใน uc-debtor + ระบบตั้งลูกหนี้เฟส 1 + ปรับ copy หน้า /admin/ar-accounts (จับคู่แล้วคำนวณบัญชีให้อัตโนมัติ)
-- server timezone เป็น `Asia/Bangkok` ; nginx ตั้ง `client_max_body_size 32m` แล้ว
+- PR #29 (ลูกหนี้เฟส 1, รายการค่าใช้จ่ายใน uc-debtor) deploy แล้ว
+- PR ถัดไป (10 พ.ย. 2569): นำเข้า STM, ตั้งลูกหนี้อัตโนมัติ 01:00, โมดูล FDH, UC นอกสังกัด สธ., คอลัมน์ "ส่งเข้าแผนก" ใน `/fund/opd-department`
+- server timezone `Asia/Bangkok` ; nginx `client_max_body_size 32m`
 
-## งานที่ขึ้นใน PR #29
-1. รายการค่าใช้จ่ายใน modal `/fund/uc-debtor` (OPD vn / IPD an)
-   - API ใหม่ `src/app/api/fund/uc-debtor/items/{route.ts,items.ts,items.test.mjs}` (IPD ใช้ `opitemrece FORCE INDEX (ix_an)`)
-   - แยก `ItemCategories` ใน `fund/_components/visit-items.tsx` (opd-fund ยังเหมือนเดิม; claim-overview ยังไม่ได้เปิดตรวจ)
-   - paidst 02 = ลูกหนี้สิทธิ ตรงกับ uc_money (700/704 AN)
-2. ระบบตั้งลูกหนี้รายวัน เฟส 1
-   - migration `202611091700_ar_ledger.sql` **รันลงฐาน insight แล้ว** (ar_account 73 รหัส, ar_account_map, ar_ledger, ar_sync_log)
-   - `src/app/api/fund/ar-sync/` (ledger.ts pure + test, sync.ts, route.ts), `src/app/api/fund/ar-ledger/`, `src/app/api/admin/ar-accounts/`
-   - หน้า `/fund/ar-ledger` "ลูกหนี้ตามผังบัญชี" และ `/admin/ar-accounts` "บัญชีลูกหนี้ตามสิทธิ"
-   - แก้ shared: `nav-items.ts` (2 เมนู), AGENTS.md (1 บรรทัดใต้ `@/lib/db`)
-   - sync ต.ค. 2569 ลงฐานแล้ว: OPD 17,673 ราย 17,067,681.11 ; IPD 660 AN 5,047,073.99 ; ไม่ระบุบัญชี 250 ราย 313,615.66
-   - ผู้ใช้ยังต้อง: backfill ต.ค. 2568–ก.ย. 2569 ที่หน้า admin, กด "ดึงยอดล่าสุด" ครั้งแรก, จับคู่สิทธิที่ยังไม่มีบัญชีกับงานบัญชี
+## งานในรอบนี้
+1. `/fund/stm-import` นำเข้า statement (UC และ OFC layout) migration `202611101000_stm_import.sql` (รันลงฐานแล้ว): `stm_file`, `stm_summary`, `stm_row`, `ar_ledger.stm_row_id` (FK กันลบไฟล์ที่ใช้ตัดหนี้แล้ว)
+   - UC จับคู่ `tran_id` กับ `rep_row` 100% ; ยอด STM = `net_nhso` ; OFC จับคู่ (rep_no, seq_no/an) ; ไฟล์ไม่มีวันที่โอน ผู้นำเข้ากรอก
+2. ตั้งลูกหนี้รายวัน 01:00: `scripts/ar-sync-daily.mjs` + `deploy/bkh-insight-ar-sync.{service,timer}` (`npm run ar:sync`)
+3. FDH `/fdh/c-check` ตรวจ C ก่อนส่ง (skill `fdh-pre-validate` แปลงเป็น WITH อ่านอย่างเดียว ไม่สร้าง view ใน HOSxP)
+   - C111/C112 ยอม '01'–'09' ; C153/C114 แปลง `ipt.bw` กรัม → กก. ; C160/C161 ปิด (ไม่มี SVCTYPE ทุก admission = 1)
+4. UC OP นอกสังกัด สธ. (14972 ม.นเรศวร, 11517 ค่ายสมเด็จฯ, 41429 จิตเวชพิษณุโลก) → `1102050102.201` migration `202611101530_ar_uc_non_moph.sql` (รันแล้ว ย้าย 62 แถว)
+5. `/fund/opd-department` คอลัมน์ "ส่งเข้าแผนก" และ "มูลค่าที่ส่งเข้าแผนก (บาท)" จาก `opd_dep_queue` (ตรงกับ OPD Visit List ของ HOSxP ที่กรองแผนก) แยกตามกองทุน กดตัวเลขเปิด modal (`via=queue`, API visits รับ `qdep`)
+   - ซ้ำข้ามแผนกได้ แถวรวมจึงเป็น "–" ; ยอดเดิมยังนับตาม `ovst.main_dep`
+   - ยังไม่ได้ตรวจในหน้าจอจริง (agent login SSO จาก localhost ไม่ได้)
 
-## รอคำตอบจากผู้ใช้/งานที่เกี่ยวข้อง (ก่อนทำเฟส 2 ตัดลูกหนี้จาก STM)
-1. ส่วนต่างได้ต่ำกว่าตั้ง (หนี้ OP ใน CUP .201 ส่วนใหญ่ไม่มีใน STM เพราะเป็นเหมาจ่ายรายหัว): ก. ตัดตามยอดได้รับแล้วปล่อยคงเหลือให้บัญชีปรับปรุงเอง (แนะนำ) หรือ ข. ปิดหนี้ทั้งก้อนเมื่อรายการอยู่ใน STM แล้วบันทึกส่วนต่างทันที
-2. วันที่ตัดหนี้: วันที่โอนเงิน (ผู้นำเข้ากรอก) หรือวันที่นำเข้าไฟล์
-3. ยังค้าง: กองทุนย่อย UC (CR .216/.217, P&P .209) ย้ายบัญชีตอนตัด STM ได้ไหม ; บัญชี 1102050102.201 (UC นอกสังกัด สธ.) และ .222 (OP-Refer) ใช้จริงไหม
-
-## ข้อมูลสำหรับเฟส 2 (STM) ที่สำรวจแล้ว
-- ไฟล์ตัวอย่าง `C:\Users\MyPC\Desktop\rep\stm` (75 ไฟล์ .xls BIFF8: OP_UC 24, IP_UC 12, OP_CS 26, IP_OFC 13) ตรวจครบ 276 ชีต ไม่มีชีตซ่อน
-- UC: ชีต รายงานพึงรับ / รายงานสรุป / รายละเอียด(ข้อมูลปกติ) 1 / รายละเอียด(ข้อมูลอุทธรณ์) / ชีตผู้พิการ D1 (บางไฟล์) ; ชื่อชีตมีช่องว่าง ต้อง trim ; รายละเอียด หัว 3 ชั้น index 11–13 ข้อมูลเริ่ม 14 ; col 2 TRAN_ID, 37 ยอดชดเชยทั้งสิ้น (number), 21–36 พึงรับรายกองทุน (string มีจุลภาค), 41 SEQ NO
-- UC จับคู่ `stm.tran_id = rep_row.tran_id` 100% ; ยอด STM = `net_nhso` (ไม่มี `net_affiliation` ใน STM เลย ~88.8 ล้าน/ปี) ; IP UC เม.ย. 69 มี 443 แถวที่ REP = 0 แต่ STM จ่ายจริง 1.33 ล้าน → ยอดจริงต้องใช้ STM
-- OFC: layout ต่าง (ชีต พึงรับ เป็นบล็อกต่อ REP, สรุป(พึงรับ)) ไม่มี TRAN_ID ต้องจับคู่ (rep_no, seq_no) / (rep_no, an) ; ชื่อไฟล์ปี ค.ศ.
-- ไม่มีวันที่โอนในไฟล์ ; กันซ้ำด้วย "เลขที่เอกสาร" + sha256 ; ไฟล์ใหญ่สุด 22 MB
-- ร่าง schema stm_file / stm_summary / stm_row อยู่ในรายงาน sr (สรุป: ไม่ใช้ tran_id เป็น PK, ไม่เขียนทับ rep_row)
-
-## ข้อเท็จจริงของ HOSxP ที่ใช้ในระบบลูกหนี้
-- OPD ตั้งหนี้จาก `rcpt_debt` (key debt_id, `LENGTH(vn)=12`, ตัด ABORT) ; ABORT มี amount 0 และ `rcpt_debt_cancel.amount` เป็น NULL → ยอดลดหนี้ใช้ยอดที่ ledger เคยตั้ง
-- IPD ใช้ `ipt.finance_lock='Y'` + `an_stat.uc_money` ไม่มีวันที่ปิด (backfill ใช้ dchdate, รายวันใช้วันที่ sync)
-- UCS OPD แยกบัญชีตาม hospmain: 11252 หรือใน `hospcode_cup` = .201, จังหวัด 65 = .203, อื่น = .204
-- ผังบัญชีจาก `C:\Users\MyPC\Desktop\rep\รหัสลูกหนี้.xlsx` (รหัสเก็บเป็นตัวเลข: `.31`→`.310`, `.11`→`.110`, Manual เป็นทศนิยม 5 หลัก)
+## รอคำตอบจากการเงิน (ก่อนทำเฟส 2 ตัดลูกหนี้จาก STM)
+- คำตอบที่ได้แล้ว: หนี้ OP ใน CUP .201 และ P&P ไม่อยู่ใน STM ให้ปิดทั้งก้อนแล้วลงส่วนต่าง "ส่วนต่างค่ารักษาที่สูงกว่าเหมาจ่ายรายหัว-กองทุน UC OP/P&P" ; วันตัดหนี้ = วันที่การเงินออกใบเสร็จ ; CR โอนมากับ IP ดูรายตัว ; บัญชีนอกสังกัด สธ. ใช้ ; OP-Refer ไม่ใช้
+- ยังรอ: Q1 ปิดหนี้ .201/P&P เมื่อไร (แนะนำ: เมื่อ REP ผ่านไม่ติด C) ; Q2 จ่ายหลาย statement เมื่อไรถือว่าครบ (แนะนำ: เทียบ STM ที่รับกับยอดพึงรับใน REP รายกองทุน)
+- แบบที่วางไว้: ขั้น "ตัดหนี้" ต่อไฟล์ STM กรอกวันที่และเลขใบเสร็จ, แถว settle อ้าง `stm_row_id` (หนึ่งหนี้มีหลาย settle ได้), แยก CR → .216/.217, P&P → .209
+- ก่อนเขียน SQL ตัดหนี้: ผู้ใช้ต้องนำเข้า STM 75 ไฟล์ และ backfill ลูกหนี้ ต.ค. 2568–ก.ย. 2569
 
 ## ค้างอื่นๆ
-- ตั้งเวลา sync ลูกหนี้อัตโนมัติทุกเช้า (systemd timer + session ของ service user, ไม่แก้ proxy.ts) ยังไม่ทำ
-- REP: ไฟล์อุทธรณ์แสดงผ่าน/ไม่ผ่าน "–" ในรายการไฟล์ (ยอดอยู่ในส่วนข้อมูลอุทธรณ์ คอลัมน์ 22–24) ; ORF และ .ecd ยังไม่รองรับ ; admin UI ของ rep_error_code ยังไม่มี
-- dm-remission: ยังไม่เคยวัดเวลาโหลดกับข้อมูลจริง, ดูย้อนหลังแค่ 730 วัน (`shortcut:`)
-- login_count ยังไม่ทดสอบกับ SSO จริง
-- `fund/claim-overview/stacked-bar.tsx` endLabelPlugin ค้างค่าเก่า ; `DateRangeFilter` ช่อง "ถึง" ไม่มี max
-- ผู้ป่วยใน 10 รายมี `ward` NULL ตั้งแต่ 2567 ควรแจ้งเวชระเบียน
-- `deploy_guide.md` เก็บรหัสผ่านเป็นข้อความธรรมดา ควรเปลี่ยนเป็น SSH key
+- FDH: ยังไม่มีส่งออก Excel, ยังไม่ทดสอบ error state, กฎยังไม่ได้เทียบกับ REP จริง
+- `deps=UNKNOWN` ใน opd-department ไม่นับคิวที่ depcode ว่าง (31 วันมี 1 แถว)
+- ย้าย `fund/_components/ui` + `Segmented` ไป `src/components/`
+- REP: ORF และ .ecd ยังไม่รองรับ ; admin UI ของ rep_error_code ยังไม่มี
+- claim-overview `visit-items` ยังไม่ได้ดูที่จอแคบ ; `stacked-bar.tsx` endLabelPlugin ค้างค่าเก่า
+- ผู้ป่วยใน 10 รายมี `ward` NULL ควรแจ้งเวชระเบียน ; `deploy_guide.md` เก็บรหัสผ่านเป็นข้อความธรรมดา ควรเปลี่ยนเป็น SSH key
 
 ## การตัดสินใจ
-- deploy เฉพาะ main ต้องให้ผู้ใช้สั่ง merge ก่อน (main บังคับ CI ผ่าน)
-- ฐาน insight ของ dev กับ prod เป็นฐานเดียวกัน migration/ข้อมูลที่รันจาก dev มีผลกับ prod ทันที
-- REP ใช้บอกสถานะเคลม/error ; การตัดลูกหนี้ใช้ STM (ผู้ใช้ยืนยัน)
-- ledger เป็นแบบเพิ่มแถวอย่างเดียว ยอดที่ตั้งแล้วไม่เปลี่ยนตาม HOSxP (ลงส่วนต่างเป็นรายการปรับปรุง)
+- deploy เฉพาะ main หลังผู้ใช้สั่ง merge ; ฐาน insight ของ dev กับ prod เป็นฐานเดียวกัน
+- his อ่านอย่างเดียวแม้ skill จะสั่งให้สร้าง view
+- REP ใช้บอกสถานะเคลม ; ตัดลูกหนี้ใช้ STM ; ledger เพิ่มแถวอย่างเดียว (migration non-MOPH แก้ตรงได้เพราะบัญชียังไม่ใช้ยอด)
 
 ## คำสั่งตรวจ
 - `npx tsc --noEmit` ; `npm run lint`
-- `node --test src/app/api/fund/ar-sync/ledger.test.mjs src/app/api/fund/uc-debtor/items/items.test.mjs src/app/api/fund/rep-import/*.test.mjs`
+- `node --test src/app/api/fund/ar-sync/ledger.test.mjs src/app/api/fund/uc-debtor/items/items.test.mjs src/app/api/fund/rep-import/*.test.mjs src/app/api/fund/stm-import/stm.test.mjs src/app/api/fdh/c-check/fdh.test.mjs`
 - deploy: `cd /var/www/bkh-insight && git pull --ff-only && npm ci (ถ้า lockfile เปลี่ยน) && npm run db:migrate && npm run build && sudo systemctl restart bkh-insight`
+- timer: `systemctl list-timers bkh-insight-ar-sync.timer` ; `journalctl -u bkh-insight-ar-sync.service`

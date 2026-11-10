@@ -117,7 +117,7 @@ function Backfill() {
 type Draft = { by: "hipdata_code" | "pttype"; value: string; patient_type: PatientType; account_code: string };
 const EMPTY: Draft = { by: "hipdata_code", value: "", patient_type: "OP", account_code: "" };
 const ACCOUNT_ID = "ar-map-account";
-const UC_OP_REASON = "HOSxP ไม่ได้บันทึกหน่วยบริการประจำหรือจังหวัด จึงแยก .201/.203/.204 ไม่ได้";
+const UC_OP_REASON = "HOSxP ไม่ได้บันทึกหน่วยบริการประจำหรือจังหวัด จึงแยกบัญชีตามหน่วยบริการประจำไม่ได้";
 
 function MapForm({ data, draft, setDraft, onSaved }: { data: ArAccountsData; draft: Draft; setDraft: (d: Draft) => void; onSaved: () => void }) {
   const [pending, startTransition] = useTransition();
@@ -244,6 +244,7 @@ function Maps({ data, reload }: { data: ArAccountsData; reload: () => void }) {
           <td className={TD}>
             <ul className="flex flex-col gap-0.5">
               <li>ใน CUP: {account(UC_OP_ACCOUNTS.cup)}</li>
+              <li>นอกสังกัด สธ.: {account(UC_OP_ACCOUNTS.nonMoph)}</li>
               <li>ในจังหวัด: {account(UC_OP_ACCOUNTS.province)}</li>
               <li>ต่างจังหวัด: {account(UC_OP_ACCOUNTS.other)}</li>
             </ul>

@@ -135,7 +135,7 @@ async function syncIpd(w: { from: string; to: string }, mode: SyncLog["mode"], r
  * - daily: OPD ย้อน 14 วัน, ยกเลิกหนี้ตั้งแต่ sync รายวันที่สำเร็จล่าสุด −1 วัน, IPD ย้อน 120 วัน (วันตั้งหนี้ = วันนี้)
  * - backfill: หนึ่งเดือน (YYYY-MM) IPD ใช้ dchdate เป็นวันตั้งหนี้
  * error กลางทาง: ชุดที่ commit แล้วคงอยู่ (กดใหม่ได้เพราะ idempotent) และบันทึก error ลง log
- * shortcut: ยังไม่ตั้งเวลาอัตโนมัติ ต้องกด "ดึงยอดล่าสุด" เอง ทำ systemd timer เรียก runSync("daily") ผ่านสคริปต์ฝั่ง server เมื่อพร้อมใช้งานจริง
+ * daily รันอัตโนมัติทุก 01:00 ผ่าน scripts/ar-sync-daily.mjs (systemd timer ใน deploy/)
  */
 export async function runSync(
   input: { mode: "daily" } | { mode: "backfill"; month: string },
