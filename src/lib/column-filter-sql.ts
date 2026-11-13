@@ -66,6 +66,8 @@ export async function loadFacet(
   from: string,
   where: { sql: string; params: SqlValue[] },
   dialect: Dialect = "mysql",
+  /** ข้อความนำหน้า SELECT เช่น WITH ... เมื่อ FROM อ้างถึง CTE */
+  prefix = "",
 ): Promise<FacetPage> {
   const ph = PH[dialect];
   const def = defs[key];
@@ -78,7 +80,7 @@ export async function loadFacet(
   const str = (v: string | number | null) => (v == null ? "" : String(v));
 
   if ("where" in def) {
-    const rows = await query(`SELECT ${def.expr} AS v, COUNT(*) AS n ${from}\n${where.sql}\nGROUP BY ${def.expr}`, where.params);
+    const rows = await query(`${prefix}SELECT ${def.expr} AS v, COUNT(*) AS n ${from}\n${where.sql}\nGROUP BY ${def.expr}`, where.params);
     const sum = new Map<string, number>();
     for (const r of rows) {
       const v = def.value(r.v == null ? null : String(r.v));
@@ -95,7 +97,7 @@ export async function loadFacet(
   const searchParams = sqlSearch ? (def.label ? [like, like] : [like]) : [];
   const limitPh = ph(n0 + searchParams.length);
   const rows = await query(
-    `SELECT ${def.expr} AS v, ${def.label ? `MAX(${def.label})` : "NULL"} AS l, COUNT(*) AS n ${from}\n${where.sql}${searchSql}\nGROUP BY ${def.expr} ORDER BY n DESC LIMIT ${limitPh}`,
+    `${prefix}SELECT ${def.expr} AS v, ${def.label ? `MAX(${def.label})` : "NULL"} AS l, COUNT(*) AS n ${from}\n${where.sql}${searchSql}\nGROUP BY ${def.expr} ORDER BY n DESC LIMIT ${limitPh}`,
     [...where.params, ...searchParams, MAX_FILTER_VALUES + 1],
   );
   const values = rows.map((r) => {

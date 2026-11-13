@@ -24,22 +24,26 @@ const dateCell = { className: "whitespace-nowrap tabular-nums" };
 const textOr = (v: string | null) => v || dash;
 
 const col = gridColumnHelper<DrugNhsoItem>();
+// ตัวกรองหัวคอลัมน์จาก /api/admin/mapcode/drug-nhso?facet=<id> (ยกเว้นราคา)
+const filterable = { ...nowrap, filter: true } as const;
+const codeFilter = { ...dateCell, filter: true } as const;
+const dateFilter = { ...dateCell, filter: { format: (v: string) => formatThaiDate(v) || v } } as const;
 const columns = col.columns([
-  col.accessor("hosp_drug_code", { header: "HOSPDRUGCODE", meta: dateCell }),
-  col.accessor("tmt_id", { header: "TMTID", cell: (c) => textOr(c.getValue()), meta: dateCell }),
-  col.accessor("generic_name", { header: "GENERICNAME", cell: (c) => textOr(c.getValue()) }),
-  col.accessor("trade_name", { header: "TRADENAME", cell: (c) => textOr(c.getValue()) }),
-  col.accessor("dosage_form", { header: "DOSAGEFORM", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: nowrap }),
-  col.accessor("strength", { header: "STRENGTH", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: nowrap }),
-  col.accessor("content", { header: "CONTENT", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: nowrap }),
+  col.accessor("hosp_drug_code", { header: "HOSPDRUGCODE", meta: codeFilter }),
+  col.accessor("tmt_id", { header: "TMTID", cell: (c) => textOr(c.getValue()), meta: codeFilter }),
+  col.accessor("generic_name", { header: "GENERICNAME", cell: (c) => textOr(c.getValue()), meta: { filter: true } }),
+  col.accessor("trade_name", { header: "TRADENAME", cell: (c) => textOr(c.getValue()), meta: { filter: true } }),
+  col.accessor("dosage_form", { header: "DOSAGEFORM", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
+  col.accessor("strength", { header: "STRENGTH", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
+  col.accessor("content", { header: "CONTENT", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
   col.accessor("unit_price", { header: "UNITPRICE (บาท)", cell: (c) => (c.getValue() == null ? dash : <Money value={Number(c.getValue())} />), meta: { className: num } }),
-  col.accessor("ised", { header: "ISED", cell: (c) => textOr(c.getValue()), meta: nowrap }),
-  col.accessor("ised_approved", { header: "ISED_APPROVED", cell: (c) => textOr(c.getValue()), meta: nowrap }),
-  col.accessor("update_flag", { header: "UPDATEFLAG", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: nowrap }),
-  col.accessor("date_effective", { header: "DATEEFFECTIVE", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateCell }),
-  col.accessor("date_approved", { header: "DATE_APPROVED", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateCell }),
-  col.accessor("ised_status", { header: "ISED_STATUS", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: nowrap }),
-  col.accessor("versions", { header: "แถวในไฟล์", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
+  col.accessor("ised", { header: "ISED", cell: (c) => textOr(c.getValue()), meta: filterable }),
+  col.accessor("ised_approved", { header: "ISED_APPROVED", cell: (c) => textOr(c.getValue()), meta: filterable }),
+  col.accessor("update_flag", { header: "UPDATEFLAG", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
+  col.accessor("date_effective", { header: "DATEEFFECTIVE", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateFilter }),
+  col.accessor("date_approved", { header: "DATE_APPROVED", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateFilter }),
+  col.accessor("ised_status", { header: "ISED_STATUS", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
+  col.accessor("versions", { header: "แถวในไฟล์", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
 ]);
 
 type DrugPage = GridPage<DrugNhsoItem> & { file: CatalogFileInfo };

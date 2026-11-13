@@ -32,28 +32,30 @@ const serviceDate = (r: ClaimErrorRow) => formatThaiDate(r.service_at);
 
 const col = gridColumnHelper<ClaimErrorRow>();
 const nowrap = { className: "whitespace-nowrap" };
+// ตัวกรองหัวคอลัมน์จาก /api/fund/claim-errors?facet=<id> (ยกเว้นชื่อ รหัส และยอดเงิน)
+const filterable = { ...nowrap, filter: true } as const;
 const COLUMNS = col.columns([
-  col.accessor("type", { header: "OP/IP", meta: nowrap }),
-  col.accessor("key", { header: "VN/AN", meta: nowrap }),
-  col.accessor("hn", { header: "HN", cell: (c) => c.getValue() || dash, meta: nowrap }),
+  col.accessor("type", { header: "OP/IP", meta: filterable }),
+  col.accessor("key", { header: "VN/AN", meta: filterable }),
+  col.accessor("hn", { header: "HN", cell: (c) => c.getValue() || dash, meta: filterable }),
   // ชื่ออยู่ his คนละฐานกับคิว (insight) จึง sort ไม่ได้
   col.accessor("full_name", { header: "ชื่อ-สกุล", enableSorting: false, cell: (c) => c.getValue() || dash, meta: nowrap }),
   col.accessor("service_at", {
     header: "วันรับบริการ/จำหน่าย",
     cell: (c) => serviceDate(c.row.original),
-    meta: { className: "whitespace-nowrap tabular-nums" },
+    meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } },
   }),
   col.accessor("fund", {
     header: "กองทุน",
     cell: (c) => <span title={c.row.original.fund_name}>{fundCode(c.getValue())}</span>,
-    meta: nowrap,
+    meta: filterable,
   }),
-  col.accessor("status", { header: "สถานะ", cell: (c) => <Status status={c.getValue()} /> }),
+  col.accessor("status", { header: "สถานะ", cell: (c) => <Status status={c.getValue()} />, meta: { filter: true } }),
   col.accessor("codes", { header: "รหัส", enableSorting: false, cell: (c) => c.getValue().join(", "), meta: { className: "tabular-nums" } }),
   col.accessor("claim_total", { header: "ยอดเรียกเก็บ (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } }),
-  col.accessor("age_service_days", { header: "ค้าง (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
-  col.accessor("age_rep_days", { header: "นับจาก REP (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
-  col.accessor("rep_no", { header: "REP", meta: nowrap }),
+  col.accessor("age_service_days", { header: "ค้าง (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
+  col.accessor("age_rep_days", { header: "นับจาก REP (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
+  col.accessor("rep_no", { header: "REP", meta: filterable }),
 ]);
 
 const detailTitle = (r: ClaimErrorRow) => (

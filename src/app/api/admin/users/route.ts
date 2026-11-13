@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { escapeLike, insightQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
 
 export type AdminUser = {
@@ -25,6 +26,19 @@ const SORTABLE = ["id", "provider_id", "fname", "lname", "role", "is_approve", "
 const WHERE = `WHERE ($1::text IS NULL OR fname ILIKE $1 OR lname ILIKE $1 OR provider_id ILIKE $1
        OR EXISTS (SELECT 1 FROM jsonb_array_elements(organizations) x WHERE x->>'org_name' ILIKE $1))`;
 
+// Column header filters (allowlist). organizations is a JSON array, so it has no list filter.
+const FILTER_DEFS: ColumnFilterDefs = {
+  provider_id: { expr: "provider_id" },
+  pname: { expr: "pname" },
+  fname: { expr: "fname" },
+  lname: { expr: "lname" },
+  job_position: { expr: "job_position" },
+  role: { expr: "role" },
+  is_approve: { expr: "CASE WHEN is_approve THEN 'Y' ELSE 'N' END", labels: { Y: "อนุมัติแล้ว", N: "รออนุมัติ" } },
+  login_count: { expr: "login_count" },
+};
+const FILTERABLE = Object.keys(FILTER_DEFS);
+
 // proxy.ts covers a missing session too, but admin routes check both themselves.
 async function adminSession() {
   const session = await auth();
@@ -41,15 +55,21 @@ export async function GET(request: NextRequest) {
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   const { page, pageSize, sort, dir, q, format } = parsed.query;
 
+  const cf = parseColumnFilters(request.nextUrl.searchParams, FILTERABLE);
+  if (!cf.ok) return Response.json({ error: cf.error }, { status: 400 });
   const like = q ? `%${escapeLike(q)}%` : null;
+  const cfw = columnFilterWhere(FILTER_DEFS, cf.query.filters, cf.query.facet, "pg", 2);
+  const where = `${WHERE}${cfw.parts.map((p) => ` AND ${p}`).join("")}`;
+  const args = [like, ...cfw.params] as SqlValue[];
+  if (cf.query.facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, "FROM users", { sql: where, params: args }, "pg"));
   // sort is from the allowlist, so it is safe as an identifier.
   const select = `SELECT id, provider_id, pname, fname, lname, role, is_approve, job_position, organizations, login_count
 FROM users
-${WHERE}
+${where}
 ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
 
   if (format === "xlsx") {
-    const rows = (await insightQuery<AdminUser>(select, [like])).map((r, i) => ({
+    const rows = (await insightQuery<AdminUser>(select, args)).map((r, i) => ({
       ...r,
       no: i + 1,
       org_names: r.organizations.map((o) => o.org_name).filter(Boolean).join(", "),
@@ -71,10 +91,10 @@ ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
 
   const [rows, [{ total }]] = await Promise.all([
     insightQuery<AdminUser>(`${select}
-LIMIT $2 OFFSET $3`, [like, pageSize, (page - 1) * pageSize]),
+LIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, (page - 1) * pageSize]),
     insightQuery<{ total: number }>(`SELECT count(*)::int AS total
 FROM users
-${WHERE}`, [like]),
+${where}`, args),
   ]);
   const body: GridPage<AdminUser> = { rows, total };
   return Response.json(body);

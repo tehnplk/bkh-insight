@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
-import { parseGridQuery } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { FULL_NAME_SQL, UNKNOWN_FUND, UNKNOWN_NAME, badRequest, inList, isAuthed, loadLookups, unauthorized } from "../_lib/fund";
@@ -13,7 +14,8 @@ import {
 
 // รายการที่ REP ล่าสุด (tran_id มากสุด) ยังติด C หรือ Deny ต่อ VN (seq_no) / AN; แถวไม่มีทั้งสองใช้ (hn, admit_at) แทนและไม่อยู่ใน rows
 // $1 type, $2 status, $3 code, $4 fy ค.ศ., $5 q (LIKE), $6 funds text[] — SQL ผ่าน prove-query กับฐาน insight แล้ว
-const CTE = `WITH latest AS (
+// cf = เงื่อนไขตัวกรองหัวคอลัมน์ ($7 เป็นต้นไป) ต่อท้าย filtered จึงมีผลกับทั้งรายการและตัวเลขสรุป
+const cte = (cf: string) => `WITH latest AS (
   SELECT 'OP'::text AS type, r.seq_no AS key, r.tran_id, r.rep_no, r.rep_file_id, r.hn, r.admit_at, r.discharge_at,
          r.claim_total, r.error_codes, r.deny, r.main_inscl, r.sub_inscl
   FROM rep_row r
@@ -54,10 +56,10 @@ const CTE = `WITH latest AS (
     AND ($3::text IS NULL OR $3::text = ANY(codes))
     AND ($4::int IS NULL OR fy = $4::int)
     AND ($5::text IS NULL OR key LIKE $5::text OR hn LIKE $5::text OR rep_no LIKE $5::text OR tran_id LIKE $5::text)
-    AND ($6::text[] IS NULL OR fund = ANY($6::text[]))
+    AND ($6::text[] IS NULL OR fund = ANY($6::text[]))${cf}
 )`;
 
-const SQL_CODES = `${CTE}
+const SQL_CODES = (cf: string) => `${cte(cf)}
 SELECT c.code, e.kind, e.description, count(*) AS n, sum(f.claim_total) AS amount,
        round(avg(f.age_service_days)) AS avg_age, max(f.age_service_days) AS max_age
 FROM filtered f
@@ -66,19 +68,19 @@ LEFT JOIN rep_error_code e ON e.code = c.code
 WHERE f.key IS NOT NULL
 GROUP BY c.code, e.kind, e.description
 ORDER BY n DESC, c.code`;
-const SQL_BUCKETS = `${CTE}
+const SQL_BUCKETS = (cf: string) => `${cte(cf)}
 SELECT CASE WHEN age_service_days <= 30 THEN 1 WHEN age_service_days <= 60 THEN 2 WHEN age_service_days <= 90 THEN 3 ELSE 4 END AS bucket,
        count(*) AS n, sum(claim_total) AS amount
 FROM filtered WHERE key IS NOT NULL GROUP BY 1 ORDER BY 1`;
-const SQL_TOTALS = `${CTE}
+const SQL_TOTALS = (cf: string) => `${cte(cf)}
 SELECT count(*) AS total, sum(claim_total) AS amount,
        count(*) FILTER (WHERE status = 'c') AS c_count, count(*) FILTER (WHERE status = 'deny') AS deny_count,
        count(*) FILTER (WHERE type = 'OP') AS op_count, count(*) FILTER (WHERE type = 'IP') AS ip_count
 FROM filtered WHERE key IS NOT NULL`;
-const SQL_FUNDS = `${CTE}
+const SQL_FUNDS = (cf: string) => `${cte(cf)}
 SELECT fund, count(*) AS n, sum(claim_total) AS amount
 FROM filtered WHERE key IS NOT NULL GROUP BY fund ORDER BY n DESC, fund`;
-const SQL_ORPHAN = `${CTE}
+const SQL_ORPHAN = (cf: string) => `${cte(cf)}
 SELECT count(*) AS n, sum(claim_total) AS amount,
        count(*) FILTER (WHERE status = 'c') AS c_count, count(*) FILTER (WHERE status = 'deny') AS deny_count
 FROM filtered WHERE key IS NULL`;
@@ -88,6 +90,21 @@ const SORTABLE = [
   "type", "key", "hn", "rep_no", "rep_date", "service_at", "fy", "fund", "sub_inscl", "status", "claim_total", "age_rep_days", "age_service_days",
 ] as const;
 const XLSX_LIMIT = 100_000;
+// ตัวกรองหัวคอลัมน์ (allowlist) บน filtered ; ชื่อ-สกุลอยู่ his และรหัสเป็น array จึงไม่มีตัวกรองรายการ
+const FILTERABLE = ["type", "key", "hn", "service_at", "fund", "status", "age_service_days", "age_rep_days", "rep_no"] as const;
+function filterDefs(fundName: (code: string) => string): ColumnFilterDefs {
+  return {
+    type: { expr: "type" },
+    key: { expr: "key" },
+    hn: { expr: "hn" },
+    service_at: { expr: "to_char(service_at, 'YYYY-MM-DD')" },
+    fund: { expr: "fund", display: (v) => (fundName(v) === v ? v : `${v} ${fundName(v)}`) },
+    status: { expr: "status", labels: STATUS_LABEL },
+    age_service_days: { expr: "age_service_days" },
+    age_rep_days: { expr: "age_rep_days" },
+    rep_no: { expr: "rep_no" },
+  };
+}
 const NAME_BATCH = 1000;
 
 type Num = string | number | null;
@@ -135,23 +152,34 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
   const f = parsed.filters;
-  const base = [f.type, f.status, f.code, f.fyCe, q ? `%${escapeLike(q)}%` : null, f.funds];
+  const base0 = [f.type, f.status, f.code, f.fyCe, q ? `%${escapeLike(q)}%` : null, f.funds];
   // sort ผ่าน allowlist แล้ว ไม่มี sort = ค้างนานสุดก่อน
   const order = sort ? `${sort} ${dir === "desc" ? "DESC" : "ASC"}` : "age_service_days DESC";
   const xlsx = format === "xlsx";
-  const listSql = `${CTE}
-SELECT type, key, hn, rep_no, rep_date, service_at, fy, fund, sub_inscl, status, codes, claim_total, age_rep_days, age_service_days
-FROM filtered WHERE key IS NOT NULL
-ORDER BY ${order} NULLS LAST, key
-LIMIT $7::int OFFSET $8::int`;
-  const list = insightQuery<DbRow>(listSql, [...base, xlsx ? XLSX_LIMIT : pageSize, xlsx ? 0 : (page - 1) * pageSize]);
   // ชื่อกองทุนมาจาก his: ต่อ his ไม่ได้ก็ยังแสดงคิวได้ด้วยรหัส
   const lookups = loadLookups().catch(() => null);
   const fundName = async () => {
     const lk = await lookups;
     return (code: string) => (lk ? lk.fundName(code) : code === UNKNOWN_FUND ? UNKNOWN_NAME : code);
   };
+  const defs = filterDefs(await fundName());
+  const cfw = columnFilterWhere(defs, cf.query.filters, cf.query.facet, "pg", base0.length + 1);
+  const cfSql = cfw.parts.map((p) => `\n    AND ${p}`).join("");
+  const base = [...base0, ...cfw.params] as (SqlValue | null | string[])[];
+  if (cf.query.facet) {
+    return Response.json(
+      await loadFacet(insightQuery, defs, cf.query.facet, cf.query.facetQ, "FROM filtered", { sql: "WHERE key IS NOT NULL", params: base as SqlValue[] }, "pg", `${cte(cfSql)}\n`),
+    );
+  }
+  const listSql = `${cte(cfSql)}
+SELECT type, key, hn, rep_no, rep_date, service_at, fy, fund, sub_inscl, status, codes, claim_total, age_rep_days, age_service_days
+FROM filtered WHERE key IS NOT NULL
+ORDER BY ${order} NULLS LAST, key
+LIMIT $${base.length + 1}::int OFFSET $${base.length + 2}::int`;
+  const list = insightQuery<DbRow>(listSql, [...base, xlsx ? XLSX_LIMIT : pageSize, xlsx ? 0 : (page - 1) * pageSize]);
   // ชื่อรอแค่ rows ของ Query A ไม่รอ query สรุป; ต่อ his ไม่ได้ก็ยังแสดงคิวได้ (ชื่อเป็น –)
   const named = list.then(async (rows) => ({ rows, names: await loadNames(rows.map((r) => r.hn)).catch(() => new Map<string, string>()) }));
   const toRow = (name: (c: string) => string, names: Map<string, string>) => (r: DbRow): ClaimErrorRow => ({
@@ -172,12 +200,12 @@ LIMIT $7::int OFFSET $8::int`;
 
   const [{ rows, names }, codes, buckets, [t], funds, [o], name] = await Promise.all([
     named,
-    insightQuery<Omit<CodeSummary, "n" | "amount" | "avg_age" | "max_age"> & Record<"n" | "amount" | "avg_age" | "max_age", Num>>(SQL_CODES, base),
-    insightQuery<{ bucket: number; n: Num; amount: Num }>(SQL_BUCKETS, base),
-    insightQuery<Record<"total" | "amount" | "c_count" | "deny_count" | "op_count" | "ip_count", Num>>(SQL_TOTALS, base),
+    insightQuery<Omit<CodeSummary, "n" | "amount" | "avg_age" | "max_age"> & Record<"n" | "amount" | "avg_age" | "max_age", Num>>(SQL_CODES(cfSql), base),
+    insightQuery<{ bucket: number; n: Num; amount: Num }>(SQL_BUCKETS(cfSql), base),
+    insightQuery<Record<"total" | "amount" | "c_count" | "deny_count" | "op_count" | "ip_count", Num>>(SQL_TOTALS(cfSql), base),
     // ไม่กรองกองทุน ตัวเลือกจึงไม่หายเมื่อเลือกแล้ว
-    insightQuery<{ fund: string; n: Num; amount: Num }>(SQL_FUNDS, [...base.slice(0, 5), null]),
-    insightQuery<Record<"n" | "amount", Num>>(SQL_ORPHAN, base),
+    insightQuery<{ fund: string; n: Num; amount: Num }>(SQL_FUNDS(cfSql), [...base.slice(0, 5), null, ...base.slice(6)]),
+    insightQuery<Record<"n" | "amount", Num>>(SQL_ORPHAN(cfSql), base),
     fundName(),
   ]);
   const body: ClaimErrorsResponse = {

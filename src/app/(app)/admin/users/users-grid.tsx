@@ -6,6 +6,8 @@ import { formatCount } from "@/lib/number-format";
 import type { AdminUser, Organization } from "@/app/api/admin/users/route";
 
 const col = gridColumnHelper<AdminUser>();
+// Column header filters from /api/admin/users?facet=<id> (not organizations: a JSON array).
+const filter = { filter: true } as const;
 const columns = col.columns([
   // Running number across pages: DataGrid feeds pageIndex/pageSize (from the URL) into the table state.
   col.display({
@@ -24,11 +26,12 @@ const columns = col.columns([
         {info.getValue()}
       </span>
     ),
+    meta: filter,
   }),
-  col.accessor("pname", { header: "คำนำหน้า", enableSorting: false }),
-  col.accessor("fname", { header: "ชื่อ" }),
-  col.accessor("lname", { header: "นามสกุล" }),
-  col.accessor("job_position", { header: "ตำแหน่ง", cell: (info) => info.getValue() ?? "–" }),
+  col.accessor("pname", { header: "คำนำหน้า", enableSorting: false, meta: filter }),
+  col.accessor("fname", { header: "ชื่อ", meta: filter }),
+  col.accessor("lname", { header: "นามสกุล", meta: filter }),
+  col.accessor("job_position", { header: "ตำแหน่ง", cell: (info) => info.getValue() ?? "–", meta: filter }),
   col.accessor("organizations", {
     header: "หน่วยบริการ",
     enableSorting: false,
@@ -37,6 +40,7 @@ const columns = col.columns([
   col.accessor("role", {
     header: "role",
     cell: (info) => <RoleCell user={info.row.original} reload={() => info.table.options.meta?.reload()} />,
+    meta: filter,
   }),
   col.accessor("is_approve", {
     header: "สถานะ",
@@ -46,11 +50,12 @@ const columns = col.columns([
       ) : (
         <span className="rounded border border-warning-line bg-warning-soft px-1.5 py-0.5 whitespace-nowrap text-warning">รออนุมัติ</span>
       ),
+    meta: filter,
   }),
   col.accessor("login_count", {
     header: "จำนวนครั้งที่เข้าใช้งาน",
     cell: (info) => formatCount(info.getValue()),
-    meta: { className: "text-right tabular-nums" },
+    meta: { className: "text-right tabular-nums", filter: true },
   }),
   col.display({
     id: "action",

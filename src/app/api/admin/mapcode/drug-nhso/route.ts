@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { read, utils } from "xlsx";
 import { auth } from "@/auth";
 import { escapeLike, insightQuery, insightTransaction } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
 import { MAX_CATALOG_BYTES, parseDrugNhso, type CatalogFileInfo, type DrugNhsoImportResult, type DrugNhsoItem } from "../drug-nhso";
 
@@ -81,28 +82,43 @@ type SortKey = keyof typeof SORT_SQL;
 const SORTABLE = Object.keys(SORT_SQL) as SortKey[];
 
 // รายการปัจจุบัน = แถวล่าสุดของแต่ละรหัส (วันที่มีผลล่าสุด แล้ววันที่อนุมัติล่าสุด แล้วแถวท้ายไฟล์) $1 = คำค้น (null หรือ LIKE pattern)
-const LATEST = `WITH v AS (
+const LATEST_FROM = `FROM (
   SELECT DISTINCT ON (hosp_drug_code) hosp_drug_code, tmt_id, generic_name, trade_name, dosage_form, strength, content, unit_price,
          ised, ised_approved, product_cat, update_flag, date_effective, date_approved, ised_status,
          COUNT(*) OVER (PARTITION BY hosp_drug_code) AS versions
   FROM drug_catalog_nhso
   ORDER BY hosp_drug_code, date_effective DESC NULLS LAST, date_approved DESC NULLS LAST, line_no DESC
-)
-SELECT * FROM v
-WHERE ($1::text IS NULL OR hosp_drug_code ILIKE $1 OR tmt_id ILIKE $1 OR generic_name ILIKE $1 OR trade_name ILIKE $1)`;
+) v`;
+const SEARCH_WHERE = "WHERE ($1::text IS NULL OR hosp_drug_code ILIKE $1 OR tmt_id ILIKE $1 OR generic_name ILIKE $1 OR trade_name ILIKE $1)";
+// ตัวกรองหัวคอลัมน์ (allowlist) ยกเว้นราคา
+const FILTER_DEFS: ColumnFilterDefs = Object.fromEntries(
+  ["hosp_drug_code", "tmt_id", "generic_name", "trade_name", "dosage_form", "strength", "content", "ised", "ised_approved", "update_flag", "ised_status", "versions"]
+    .map((c) => [c, { expr: `v.${c}` }]),
+);
+FILTER_DEFS.date_effective = { expr: "to_char(v.date_effective, 'YYYY-MM-DD')" };
+FILTER_DEFS.date_approved = { expr: "to_char(v.date_approved, 'YYYY-MM-DD')" };
+const FILTERABLE = Object.keys(FILTER_DEFS);
 
 /** GET + พารามิเตอร์ DataGrid: รายการยาปัจจุบันจากไฟล์ล่าสุด และข้อมูลไฟล์ที่นำเข้า */
 export async function GET(request: Request) {
   const { error } = await adminSession();
   if (error) return error;
-  const grid = parseGridQuery<SortKey>(new URL(request.url).searchParams, SORTABLE);
+  const searchParams = new URL(request.url).searchParams;
+  const grid = parseGridQuery<SortKey>(searchParams, SORTABLE);
   if (!grid.ok) return Response.json({ error: grid.error }, { status: 400 });
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters(searchParams, FILTERABLE);
+  if (!cf.ok) return Response.json({ error: cf.error }, { status: 400 });
   const like = q ? `%${escapeLike(q)}%` : null;
+  const cfw = columnFilterWhere(FILTER_DEFS, cf.query.filters, cf.query.facet, "pg", 2);
+  const where = `${SEARCH_WHERE}${cfw.parts.map((p) => ` AND ${p}`).join("")}`;
+  const args = [like, ...cfw.params] as SqlValue[];
+  if (cf.query.facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, LATEST_FROM, { sql: where, params: args }, "pg"));
+  const LATEST = `SELECT v.* ${LATEST_FROM}\n${where}`;
   const order = `ORDER BY ${SORT_SQL[sort ?? "hosp_drug_code"]} ${dir === "desc" ? "DESC" : "ASC"} NULLS LAST, hosp_drug_code`;
 
   if (format === "xlsx") {
-    const rows = await insightQuery<DrugNhsoItem>(`${LATEST}\n${order}`, [like]);
+    const rows = await insightQuery<DrugNhsoItem>(`${LATEST}\n${order}`, args);
     return xlsxResponse<DrugNhsoItem>("drug-catalog-nhso.xlsx", [
       { key: "hosp_drug_code", header: "HOSPDRUGCODE", width: 12 },
       { key: "tmt_id", header: "TMTID", width: 10 },
@@ -123,8 +139,8 @@ export async function GET(request: Request) {
   }
 
   const [rows, [{ total }], [info]] = await Promise.all([
-    insightQuery<DrugNhsoItem>(`${LATEST}\n${order}\nLIMIT $2 OFFSET $3`, [like, pageSize, (page - 1) * pageSize]),
-    insightQuery<{ total: number }>(`SELECT COUNT(*)::int AS total FROM (${LATEST}) t`, [like]),
+    insightQuery<DrugNhsoItem>(`${LATEST}\n${order}\nLIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, (page - 1) * pageSize]),
+    insightQuery<{ total: number }>(`SELECT COUNT(*)::int AS total ${LATEST_FROM}\n${where}`, args),
     insightQuery<NonNullable<CatalogFileInfo>>(
       "SELECT file_name, row_count, item_count, imported_by, imported_at FROM catalog_file WHERE kind = 'drug_nhso' ORDER BY imported_at DESC, id DESC LIMIT 1",
     ),
