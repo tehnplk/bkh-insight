@@ -20,6 +20,7 @@ import {
 import { DetailModal, type DetailModalProps } from "@/components/detail-modal/detail-modal";
 import { STORAGE_USER_EVENT, storageUser } from "@/lib/persisted-filter";
 import { ColumnFilter } from "./column-filter";
+import { ColumnChooser } from "./column-chooser";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
 const features = tableFeatures({
@@ -79,6 +80,12 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   detailIcon?: ReactNode;
   /** ผู้ใช้ลากหัวคอลัมน์ (หรือ Alt+←/→ บนหัวคอลัมน์) เพื่อย้ายลำดับได้ จำไว้ใน localStorage ต่อหน้า */
   reorderable?: boolean;
+  /** ปุ่ม "คอลัมน์" ให้ผู้ใช้เลือกซ่อนคอลัมน์ (คอลัมน์ที่ header เป็นข้อความ) จำต่อผู้ใช้ต่อหน้าใน localStorage */
+  hideable?: boolean;
+  /** ตารางกว้าง: กรอบตารางสูงพอดีจอ (แถบเลื่อนแนวนอนอยู่ขอบล่างจอเสมอ) หัวตารางค้าง และมีแถบเลื่อนแนวนอนด้านบนเพิ่ม */
+  fitScreen?: boolean;
+  /** ตรึงคอลัมน์ซ้ายกี่คอลัมน์ (นับตามลำดับที่แสดง ไม่รวมปุ่มรายละเอียดซึ่งตรึงให้เอง) ใช้คู่กับ fitScreen */
+  pinColumns?: number;
 };
 
 const API_KEYS = ["page", "pageSize", "sort", "dir", "q", "cf"] as const;
@@ -163,6 +170,9 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   searchSize = "default",
   detailIcon,
   reorderable = false,
+  hideable = false,
+  fitScreen = false,
+  pinColumns = 0,
 }: DataGridProps<T, R>) {
   const router = useRouter();
   const pathname = usePathname();
@@ -324,11 +334,28 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     saveOrder(ids);
   }
 
+  // คอลัมน์ที่ผู้ใช้ซ่อน (id) จำต่อผู้ใช้ต่อหน้า
+  const hiddenKey = () => `bkh:grid-hidden:${storageUser()}:${pathname}`;
+  const hiddenRaw = useSyncExternalStore(subscribeOrder, () => (hideable ? readStorage(hiddenKey()) : null), () => null);
+  const hidden = useMemo(() => parseOrder(hiddenRaw), [hiddenRaw]);
+  function saveHidden(next: string[]) {
+    try {
+      if (next.length) localStorage.setItem(hiddenKey(), JSON.stringify(next));
+      else localStorage.removeItem(hiddenKey());
+      window.dispatchEvent(new Event(ORDER_EVENT));
+    } catch {
+      // shortcut: storage ใช้ไม่ได้ = ซ่อนคอลัมน์ไม่ได้ ถ้าต้องการให้เก็บใน state แทน
+    }
+  }
+  // คอลัมน์ที่ซ่อนได้ = header เป็นข้อความ (ช่องเลือก/ปุ่มในแถวซ่อนไม่ได้)
+  const choosable = orderedColumns.flatMap((c) => (typeof c.header === "string" && columnId(c) ? [{ id: columnId(c), label: c.header }] : []));
+  const visibleColumns = useMemo(() => (hidden.length ? orderedColumns.filter((c) => !hidden.includes(columnId(c))) : orderedColumns), [orderedColumns, hidden]);
+
   const sorting: SortingState = sort ? [{ id: sort, desc: dir === "desc" }] : [];
   const table = useTable({
     features,
     data: data?.rows ?? NO_ROWS,
-    columns: orderedColumns,
+    columns: visibleColumns,
     getRowId,
     state: { sorting, globalFilter: q, pagination: { pageIndex: page - 1, pageSize } },
     manualPagination: true,
@@ -348,6 +375,63 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     getRowCanExpand: () => detailMode === "expand" && !!renderDetail,
     meta: { reload: () => setReload((n) => n + 1) },
   });
+
+  // ---- ตารางกว้าง: สูงพอดีจอ, ตรึงคอลัมน์ซ้าย, แถบเลื่อนด้านบน ----
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const topBarRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const headRowRef = useRef<HTMLTableRowElement>(null);
+  const [pinLefts, setPinLefts] = useState<number[]>([]);
+  const [tableWidth, setTableWidth] = useState(0);
+  const pinCount = fitScreen && pinColumns > 0 ? pinColumns + (renderDetail ? 1 : 0) : 0;
+  useEffect(() => {
+    if (!fitScreen) return;
+    const box = scrollRef.current;
+    const tbl = tableRef.current;
+    const head = headRowRef.current;
+    if (!box || !tbl) return;
+    // กรอบตาราง = ความสูงที่เหลือใน <main> (ลบแถบแบ่งหน้าด้านล่าง) ตั้งที่ DOM ตรงๆ ไม่ต้อง render ใหม่
+    const fit = () => {
+      const main = box.closest("main");
+      if (!main) return;
+      const top = box.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      box.style.maxHeight = `${Math.max(320, main.clientHeight - top - 76)}px`;
+    };
+    const ro = new ResizeObserver(() => {
+      fit();
+      setTableWidth(tbl.scrollWidth > box.clientWidth ? tbl.scrollWidth : 0);
+      if (head && pinCount) {
+        // ผลรวมความกว้างเซลล์ก่อนหน้า (offsetLeft ของเซลล์ sticky เพี้ยนเมื่อเลื่อนอยู่)
+        const cells = [...head.children].slice(0, pinCount) as HTMLElement[];
+        let left = 0;
+        setPinLefts(cells.map((c) => (left += c.offsetWidth) - c.offsetWidth));
+      }
+    });
+    ro.observe(tbl);
+    ro.observe(box);
+    if (head) ro.observe(head);
+    window.addEventListener("resize", fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [fitScreen, pinCount]);
+  /** style/class ของเซลล์ลำดับที่ i (รวมคอลัมน์ปุ่มรายละเอียด) ถ้าถูกตรึง */
+  const pin = (i: number, head = false) =>
+    i < pinCount && pinLefts[i] != null
+      ? {
+          style: { position: "sticky" as const, left: pinLefts[i] },
+          className: `${head ? "z-30 bg-surface" : "z-10 bg-inherit"} ${i === pinCount - 1 ? "shadow-[inset_-1px_0_0_var(--line)]" : ""}`,
+        }
+      : { style: undefined, className: "" };
+  // เลื่อนแถบบนกับตารางไปด้วยกัน
+  const syncing = useRef(false);
+  const syncScroll = (from: HTMLDivElement | null, to: HTMLDivElement | null) => {
+    if (!from || !to || syncing.current) return;
+    syncing.current = true;
+    to.scrollLeft = from.scrollLeft;
+    requestAnimationFrame(() => (syncing.current = false));
+  };
 
   const pageCount = Math.max(1, table.getPageCount());
   const rows = table.getRowModel().rows;
@@ -416,9 +500,9 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       const isOpen = row.getIsExpanded();
       return (
         <Fragment key={row.id}>
-          <tr className={`border-t border-line ${isOpen ? "bg-accent-soft text-accent-text" : "hover:bg-surface-sunken"}`}>
+          <tr className={`border-t border-line ${isOpen ? "bg-accent-soft text-accent-text" : "bg-surface hover:bg-surface-sunken"}`}>
             {hasDetail && (
-              <td className="w-0 py-1 pr-0 pl-2">
+              <td style={pin(0).style} className={`w-0 py-1 pr-0 pl-2 ${pin(0).className}`}>
                 <button
                   type="button"
                   aria-label="รายละเอียด"
@@ -435,11 +519,14 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                 </button>
               </td>
             )}
-            {row.getAllCells().map((cell) => (
-              <td key={cell.id} className={`px-3 py-2 text-grid-cell ${cell.column.columnDef.meta?.className ?? ""}`}>
-                <table.FlexRender cell={cell} />
-              </td>
-            ))}
+            {row.getAllCells().map((cell, ci) => {
+              const p = pin(ci + (hasDetail ? 1 : 0));
+              return (
+                <td key={cell.id} style={p.style} className={`px-3 py-2 text-grid-cell ${cell.column.columnDef.meta?.className ?? ""} ${p.className}`}>
+                  <table.FlexRender cell={cell} />
+                </td>
+              );
+            })}
           </tr>
           {isOpen && renderDetail && (
             <tr className="bg-accent-soft">
@@ -481,7 +568,10 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
             )}
           </form>
         </div>
-        {!exportInSummary && exportLink}
+        <div className="flex flex-wrap items-center gap-2">
+          {hideable && <ColumnChooser columns={choosable} hidden={hidden} onChange={saveHidden} />}
+          {!exportInSummary && exportLink}
+        </div>
       </div>
 
       {renderSummary && (
@@ -498,13 +588,23 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table aria-busy={loading} className="w-full border-collapse tabular-nums">
-          <thead className="bg-surface text-left text-grid-head text-muted">
+      {fitScreen && tableWidth > 0 && (
+        // แถบเลื่อนแนวนอนด้านบน (ซ้ำกับของตาราง) ไม่ต้องเลื่อนลงไปหาแถบล่าง
+        <div ref={topBarRef} aria-hidden="true" onScroll={() => syncScroll(topBarRef.current, scrollRef.current)} className="-mb-2 overflow-x-auto overflow-y-hidden">
+          <div style={{ width: tableWidth, height: 1 }} />
+        </div>
+      )}
+      <div
+        ref={scrollRef}
+        onScroll={fitScreen ? () => syncScroll(scrollRef.current, topBarRef.current) : undefined}
+        className={`rounded-lg border border-line ${fitScreen ? "overflow-auto overscroll-contain" : "overflow-x-auto"}`}
+      >
+        <table ref={tableRef} aria-busy={loading} className="w-full border-collapse tabular-nums">
+          <thead className={`bg-surface text-left text-grid-head text-muted ${fitScreen ? "sticky top-0 z-20 shadow-[inset_0_-1px_0_var(--line)]" : ""}`}>
             {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
+              <tr key={hg.id} ref={headRowRef}>
                 {hasDetail && (
-                  <th className="w-0 pl-2">
+                  <th style={pin(0, true).style} className={`w-0 pl-2 ${pin(0, true).className}`}>
                     <span className="sr-only">รายละเอียด</span>
                   </th>
                 )}
@@ -552,12 +652,14 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                         },
                       }
                     : {};
+                  const p = pin(i + (hasDetail ? 1 : 0), true);
                   return (
                     <th
                       key={h.id}
                       {...drag}
+                      style={p.style}
                       aria-sort={dirNow === "asc" ? "ascending" : dirNow === "desc" ? "descending" : undefined}
-                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${reorderable ? `cursor-grab ${focusRing}` : ""} ${dragId === id ? "opacity-40" : ""} ${cls}`}
+                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${reorderable ? `cursor-grab ${focusRing}` : ""} ${dragId === id ? "opacity-40" : ""} ${cls} ${p.className}`}
                     >
                       {h.column.getCanSort() ? (
                         <button
