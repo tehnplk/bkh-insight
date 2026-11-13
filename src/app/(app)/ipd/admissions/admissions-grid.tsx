@@ -45,6 +45,9 @@ const RATE_NOTE = `AdjRW × อัตราตามวันจำหน่า�
 const dash = <span className="text-muted">–</span>;
 const nowrap = { className: "whitespace-nowrap" };
 const dateCell = { className: "whitespace-nowrap tabular-nums" };
+// ตัวกรองหัวคอลัมน์ (ค่าจาก /api/ipd/admissions?facet=<id>) ทุกคอลัมน์ยกเว้น RW/AdjRW/เงิน/สถานะ REP
+const filterable = { ...nowrap, filter: true } as const;
+const dateFilter = { ...dateCell, filter: { format: (v: string) => formatThaiDate(v) || v } } as const;
 const chip = "rounded border px-1.5 py-0.5 whitespace-nowrap";
 const th = "px-3 py-1.5 font-medium";
 const td = "px-3 py-1.5 align-top";
@@ -134,20 +137,20 @@ const text = (
   col.accessor(key, {
     header,
     cell: (c) => c.getValue() || dash,
-    meta: nowrap,
+    meta: filterable,
     enableSorting: sortable,
   });
 const date = (key: "regdate" | "dchdate", header: string) =>
   col.accessor(key, {
     header,
     cell: (c) => formatThaiDate(c.getValue()) || dash,
-    meta: dateCell,
+    meta: dateFilter,
   });
 const count = (key: "los_days", header: string) =>
   col.accessor(key, {
     header,
     cell: (c) => (c.getValue() == null ? dash : formatCount(c.getValue()!)),
-    meta: { className: num },
+    meta: { className: num, filter: true },
   });
 const decimal = (key: "rw" | "adjrw", header: string) =>
   col.accessor(key, {
@@ -215,12 +218,13 @@ const columns = col.columns([
   text("an", "AN"),
   text("hn", "HN"),
   text("patient_name", "ชื่อ-สกุล", false),
-  col.accessor("fund", { header: "กองทุน", meta: nowrap, enableSorting: false }),
+  col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
   text("pttype_name", "สิทธิ"),
   col.display({
     id: "codes",
     header: "Authen Code/Claim Code",
     cell: (c) => <Codes row={c.row.original} />,
+    meta: { filter: true },
   }),
   date("regdate", "วันที่ admit"),
   date("dchdate", "วันที่จำหน่าย"),
@@ -245,17 +249,18 @@ const columns = col.columns([
         formatCount(v)
       );
     },
-    meta: { className: num },
+    meta: { className: num, filter: true },
   }),
   col.accessor("summary_status_name", {
     id: "ipt_summary_status_id",
     header: "สรุปชาร์ต",
     cell: (c) => c.getValue() || dash,
-    meta: nowrap,
+    meta: filterable,
   }),
   col.accessor("pdx", {
     header: "PDx",
     cell: (c) => <Pdx row={c.row.original} />,
+    meta: { filter: true },
   }),
   text("drg", "DRG", false),
   decimal("rw", "RW"),
@@ -271,7 +276,7 @@ const columns = col.columns([
     header: "ปิดสิทธิการเงิน",
     cell: (c) =>
       c.getValue() ? "ปิดแล้ว" : <span className="text-muted">ยังไม่ปิด</span>,
-    meta: nowrap,
+    meta: filterable,
   }),
   // สถานะ REP มีเฉพาะ UCS แถวกองทุนอื่นแสดงขีด
   col.display({

@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery } from "@/lib/db";
-import { MAX_FILTER_VALUES, inFilterSql, parseColumnFilters, parseGridQuery, type FacetPage, type FacetValue } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import {
-  FULL_NAME_SQL, UNKNOWN_FUND, activePttypes, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
+  FULL_NAME_SQL, activePttypes, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
+  type Lookups,
 } from "@/app/api/fund/_lib/fund";
 import { CLAIM_JOINS, STATUS_SQL } from "@/app/api/fund/_lib/claim";
 import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
@@ -53,22 +55,36 @@ const CODES_LABEL: Record<string, string> = {
   NY: "ไม่พบ Authen มีเลขปิดสิทธิ",
   NN: "ไม่พบ Authen และเลขปิดสิทธิ",
 };
-const FILTER_SQL: Record<string, { expr: string; label?: string; labels?: Record<string, string> }> = {
-  vn: { expr: "o.vn" },
-  hn: { expr: "o.hn" },
-  patient_name: { expr: FULL_NAME_SQL },
-  pttype_name: { expr: "o.pttype", label: "t.name" },
-  codes: { expr: `CONCAT(IF(${AUTH_CODE_SQL} IS NULL, 'N', 'Y'), IF(${CLOSE_CODE_SQL} IS NULL, 'N', 'Y'))`, labels: CODES_LABEL },
-  vstdate: { expr: "DATE_FORMAT(o.vstdate, '%Y-%m-%d')" },
-  vsttime: { expr: "TIME_FORMAT(o.vsttime, '%H:%i')" },
-  dep_name: { expr: depSql("o"), label: "k.department" },
-  pdx: { expr: "vs.pdx", label: "cd.name" },
-  rcpt_no: { expr: RCPT_SQL },
-};
-const FILTERABLE = [...Object.keys(FILTER_SQL), "fund", "ovst_status"] as const;
+/** ตัวกรองหัวคอลัมน์ (allowlist): ค่าที่คำนวณในโค้ดต้องใช้ lookup จึงสร้างต่อ request */
+function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDefs {
+  return {
+    vn: { expr: "o.vn" },
+    hn: { expr: "o.hn" },
+    patient_name: { expr: FULL_NAME_SQL },
+    fund: fundFilterDef(lk, "o.pttype"),
+    pttype_name: { expr: "o.pttype", label: "t.name" },
+    codes: { expr: `CONCAT(IF(${AUTH_CODE_SQL} IS NULL, 'N', 'Y'), IF(${CLOSE_CODE_SQL} IS NULL, 'N', 'Y'))`, labels: CODES_LABEL },
+    vstdate: { expr: "DATE_FORMAT(o.vstdate, '%Y-%m-%d')" },
+    vsttime: { expr: "TIME_FORMAT(o.vsttime, '%H:%i')" },
+    dep_name: { expr: depSql("o"), label: "k.department" },
+    pdx: { expr: "vs.pdx", label: "cd.name" },
+    // สถานะการจำหน่ายคำนวณจาก ovstost (export_code + ชื่อ) จึงกรองผ่านรหัส ovstost
+    ovst_status: {
+      expr: "o.ovstost",
+      value: (raw) => (raw && statusOf.get(raw)) || "",
+      where: (values, ph, start) => {
+        const set = new Set(values);
+        const codes = [...statusOf].filter(([, label]) => label && set.has(label)).map(([code]) => code);
+        const ors = codes.length ? [`o.ovstost IN (${codes.map((_, i) => ph(start + i)).join(", ")})`] : [];
+        if (set.has("")) ors.push("o.ovstost IS NULL OR os.ovstost IS NULL");
+        return { sql: ors.length ? `(${ors.join(" OR ")})` : "1 = 0", params: codes };
+      },
+    },
+    rcpt_no: { expr: RCPT_SQL, display: (v) => v.replaceAll(":", "/") },
+  };
+}
+const FILTERABLE = ["vn", "hn", "patient_name", "fund", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no"] as const;
 type FilterKey = (typeof FILTERABLE)[number];
-const FACET_LIMIT = MAX_FILTER_VALUES;
-const q1 = () => "?";
 
 const XLSX_COLUMNS: XlsxColumn<VisitRow>[] = [
   { key: "vn", header: "VN", width: 14 },
@@ -123,12 +139,12 @@ export async function GET(request: NextRequest) {
     // เลือกครบทุกค่าที่เปิดใช้ = ไม่กรอง (ชุดเดียวกับตัวเลือกของหน้า)
     const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
     const depCodes = deps && effectiveCodes(rawDeps, deps.filter((d) => d.active).map((d) => d.code));
-    const statusOf = new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""]));
+    const defs = filterDefs(lk, new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""])));
 
     /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet ของคอลัมน์นั้น) */
     const whereFor = (except: FilterKey | null) => {
       const parts = ["o.vstdate BETWEEN ? AND ?", "(o.an IS NULL OR o.an = '')"];
-      const args: string[] = [start, end];
+      const args: SqlValue[] = [start, end];
       if (pttypes) {
         parts.push(inList("o.pttype", pttypes.length));
         args.push(...pttypes);
@@ -139,47 +155,17 @@ export async function GET(request: NextRequest) {
       }
       if (q) {
         const like = `%${escapeLike(q)}%`;
-        {
-          parts.push(`(o.vn LIKE ? OR o.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)`);
-          args.push(like, like, like);
-        }
+        parts.push(`(o.vn LIKE ? OR o.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)`);
+        args.push(like, like, like);
       }
       if (unclosed) parts.push(`${CLOSE_CODE_SQL} IS NULL`);
-      for (const [key, values] of Object.entries(filters) as [FilterKey, string[]][]) {
-        if (key === except) continue;
-        if (key === "fund") {
-          const set = new Set(values);
-          const codes = [...lk.pttype].filter(([, v]) => set.has(v.fund)).map(([code]) => code);
-          const known = [...lk.pttype.keys()];
-          const ors = codes.length ? [inList("o.pttype", codes.length)] : [];
-          args.push(...codes);
-          // กองทุน UNKNOWN = pttype ที่ไม่อยู่ใน lookup
-          if (set.has(UNKNOWN_FUND)) {
-            ors.push(`o.pttype IS NULL OR ${known.length ? `o.pttype NOT IN (${known.map(q1).join(", ")})` : "1 = 1"}`);
-            args.push(...known);
-          }
-          parts.push(ors.length ? `(${ors.join(" OR ")})` : "1 = 0");
-        } else if (key === "ovst_status") {
-          const set = new Set(values);
-          const codes = [...statusOf].filter(([, label]) => set.has(label) && label !== "").map(([code]) => code);
-          const ors = codes.length ? [inList("o.ovstost", codes.length)] : [];
-          args.push(...codes);
-          if (set.has("")) ors.push("o.ovstost IS NULL OR o.ovstost = '' OR os.ovstost IS NULL");
-          parts.push(ors.length ? `(${ors.join(" OR ")})` : "1 = 0");
-        } else {
-          const f = inFilterSql(FILTER_SQL[key].expr, values, q1);
-          {
-            parts.push(f.sql);
-            args.push(...f.params);
-          }
-        }
-      }
-      return { sql: `WHERE ${parts.join("\n  AND ")}`, args };
+      const cfw = columnFilterWhere(defs, filters, except);
+      return { sql: `WHERE ${[...parts, ...cfw.parts].join("\n  AND ")}`, params: [...args, ...cfw.params] };
     };
 
-    if (facet) return Response.json(await loadFacet(facet, facetQ, whereFor(facet), (p) => fundOf(lk, p), statusOf));
+    if (facet) return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FROM, whereFor(facet)));
 
-    const { sql: where, args } = whereFor(null);
+    const { sql: where, params: args } = whereFor(null);
     const order = `${SORT_SQL[sort ?? "vstdate"]} ${(sort ? dir : "desc") === "desc" ? "DESC" : "ASC"}, o.vn`;
     const [limit, offset] = xlsx ? [XLSX_MAX, 0] : [pageSize, (page - 1) * pageSize];
     const [raws, count] = await Promise.all([
@@ -194,44 +180,4 @@ export async function GET(request: NextRequest) {
     console.error("opd/admissions", e);
     return Response.json({ error: `อ่านข้อมูลไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
   }
-}
-
-/** ค่าที่ไม่ซ้ำของคอลัมน์ key ตามตัวกรองอื่น เรียงตามจำนวนมากไปน้อย ไม่เกิน FACET_LIMIT ค่า */
-async function loadFacet(
-  key: FilterKey,
-  facetQ: string,
-  where: { sql: string; args: string[] },
-  fund: (pttype: string | null) => string,
-  statusOf: Map<string, string>,
-): Promise<FacetPage> {
-  const needle = facetQ.toLowerCase();
-  const pick = (values: FacetValue[]) => {
-    const hit = needle ? values.filter((v) => `${v.value} ${v.label}`.toLowerCase().includes(needle)) : values;
-    hit.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "th"));
-    return { values: hit.slice(0, FACET_LIMIT), truncated: hit.length > FACET_LIMIT };
-  };
-  // ค่าที่คำนวณในโค้ด: นับตามรหัสต้นทางแล้วรวมตามค่าที่แสดง
-  const derived = async (expr: string, toValue: (raw: string | null) => string) => {
-    const rows = await hisQuery<{ v: string | null; n: number }>(`SELECT ${expr} AS v, COUNT(*) AS n ${FROM}\n${where.sql}\nGROUP BY v`, where.args);
-    const sum = new Map<string, number>();
-    for (const r of rows) sum.set(toValue(r.v), (sum.get(toValue(r.v)) ?? 0) + Number(r.n));
-    return pick([...sum].map(([value, count]) => ({ value, label: value, count })));
-  };
-  if (key === "fund") return derived("o.pttype", (p) => fund(p));
-  if (key === "ovst_status") return derived("o.ovstost", (c) => (c && statusOf.get(c)) || "");
-
-  const def = FILTER_SQL[key];
-  const searchSql = needle && !def.labels ? ` AND (${def.expr} LIKE ?${def.label ? ` OR ${def.label} LIKE ?` : ""})` : "";
-  const like = `%${escapeLike(facetQ)}%`;
-  const rows = await hisQuery<{ v: string | null; l: string | null; n: number }>(
-    `SELECT ${def.expr} AS v, ${def.label ? `MAX(${def.label})` : "NULL"} AS l, COUNT(*) AS n ${FROM}\n${where.sql}${searchSql}\nGROUP BY v ORDER BY n DESC LIMIT ?`,
-    [...where.args, ...(searchSql ? (def.label ? [like, like] : [like]) : []), FACET_LIMIT + 1],
-  );
-  const values = rows.map((r) => {
-    const value = r.v ?? "";
-    const label = def.labels?.[value] ?? (key === "rcpt_no" ? value.replaceAll(":", "/") : r.l ? `${value} ${r.l}` : value);
-    return { value, label, count: Number(r.n) };
-  });
-  if (def.labels) return pick(values);
-  return { values: values.slice(0, FACET_LIMIT), truncated: values.length > FACET_LIMIT };
 }

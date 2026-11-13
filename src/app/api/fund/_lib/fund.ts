@@ -83,6 +83,33 @@ export async function loadLookups(): Promise<Lookups> {
 }
 
 export const fundOf = (lk: Lookups, pttype: string | null) => (pttype && lk.pttype.get(pttype)?.fund) || UNKNOWN_FUND;
+/**
+ * ตัวกรองหัวคอลัมน์ "กองทุน" (ค่าคำนวณจาก pttype ผ่าน lookup) สำหรับ @/lib/column-filter-sql
+ * เลือกกองทุน = pttype ของกองทุนนั้น ; UNKNOWN = pttype ที่ไม่อยู่ใน lookup
+ */
+export function fundFilterDef(lk: Lookups, pttypeExpr: string) {
+  return {
+    expr: pttypeExpr,
+    value: (raw: string | null) => fundOf(lk, raw),
+    where: (values: string[], ph: (n: number) => string, start: number) => {
+      const set = new Set(values);
+      const codes = [...lk.pttype].filter(([, v]) => set.has(v.fund)).map(([code]) => code);
+      const ors: string[] = [];
+      const params: string[] = [];
+      if (codes.length) {
+        ors.push(`${pttypeExpr} IN (${codes.map((_, i) => ph(start + i)).join(", ")})`);
+        params.push(...codes);
+      }
+      if (set.has(UNKNOWN_FUND)) {
+        const known = [...lk.pttype.keys()];
+        const n = start + params.length;
+        ors.push(`${pttypeExpr} IS NULL${known.length ? ` OR ${pttypeExpr} NOT IN (${known.map((_, i) => ph(n + i)).join(", ")})` : ""}`);
+        params.push(...known);
+      }
+      return { sql: ors.length ? `(${ors.join(" OR ")})` : "1 = 0", params };
+    },
+  };
+}
 export const pttypeName = (lk: Lookups, pttype: string | null) => (pttype ? (lk.pttype.get(pttype)?.name ?? pttype) : "");
 
 /** รวมยอดตามหมวด (income) แล้วเรียงมากไปน้อย */

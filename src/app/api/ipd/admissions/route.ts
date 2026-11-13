@@ -1,10 +1,12 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
-import { parseGridQuery } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import {
-  FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
+  FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundFilterDef, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
+  type Lookups,
 } from "@/app/api/fund/_lib/fund";
 import { ADJRW_RATES, IPD_MAX_DAYS, REP_FUND, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep } from "./admissions";
 
@@ -22,19 +24,7 @@ const XLSX_MAX = 10_000;
 
 // Authen Code = visit_pttype.auth_code ของ visit ที่รับไว้นอน (สิทธิเดียวกับ admission ก่อน) Claim Code = ipt_pttype.claim_code (แถวแรก กันแถวซ้ำเมื่อมีหลายสิทธิ) สถานะจำหน่ายจาก dchstts เหตุผลการจำหน่ายจาก dchtype
 // PDx จาก an_stat.pdx (ตรงกับ iptdiag diagtype 1 ทุก AN ของปีงบ 2569) ชื่อโรคจาก icd101 (PK จึงไม่ทำให้แถวซ้ำ)
-const SELECT = `SELECT i.an, i.hn,
-       ${FULL_NAME_SQL} AS patient_name,
-       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, COALESCE(dt.name, i.dchtype) AS dch_reason, w.name AS ward_name,
-       DATEDIFF(i.dchdate, i.regdate) AS los_days,
-       s.income, s.uc_money,
-       i.pttype, t.name AS pttype_name,
-       (SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WHERE vp.vn = i.vn ORDER BY vp.pttype = i.pttype DESC, vp.pttype LIMIT 1) AS auth_code,
-       (SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1) AS claim_code,
-       i.finance_lock, i.ipt_summary_status_id, ss.ipt_summary_status_name AS summary_status_name,
-       s.pdx, c.name AS pdx_name,
-       i.drg, i.rw, i.adjrw,
-       DATEDIFF(CAST(? AS DATE), i.dchdate) AS days_since_dch
-FROM ipt i
+const FROM = `FROM ipt i
 LEFT JOIN patient p ON p.hn = i.hn
 LEFT JOIN ward w ON w.ward = i.ward
 LEFT JOIN dchstts d ON d.dchstts = i.dchstts
@@ -43,6 +33,21 @@ LEFT JOIN an_stat s ON s.an = i.an
 LEFT JOIN icd101 c ON c.code = s.pdx
 LEFT JOIN pttype t ON t.pttype = i.pttype
 LEFT JOIN ipt_summary_status ss ON ss.ipt_summary_status_id = i.ipt_summary_status_id`;
+const AUTH_SQL = "(SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WHERE vp.vn = i.vn ORDER BY vp.pttype = i.pttype DESC, vp.pttype LIMIT 1)";
+const CLAIM_SQL = "(SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)";
+const SELECT = `SELECT i.an, i.hn,
+       ${FULL_NAME_SQL} AS patient_name,
+       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, COALESCE(dt.name, i.dchtype) AS dch_reason, w.name AS ward_name,
+       DATEDIFF(i.dchdate, i.regdate) AS los_days,
+       s.income, s.uc_money,
+       i.pttype, t.name AS pttype_name,
+       ${AUTH_SQL} AS auth_code,
+       ${CLAIM_SQL} AS claim_code,
+       i.finance_lock, i.ipt_summary_status_id, ss.ipt_summary_status_name AS summary_status_name,
+       s.pdx, c.name AS pdx_name,
+       i.drg, i.rw, i.adjrw,
+       DATEDIFF(CAST(? AS DATE), i.dchdate) AS days_since_dch
+${FROM}`;
 
 // จำนวนแถว + CMI + ยอดตาม AdjRW ของทั้งชุดที่ตรงตัวกรอง (ไม่ใช่แค่หน้าปัจจุบัน) CMI = ผลรวม AdjRW / จำนวนรายที่มี AdjRW
 // อัตราตามวันจำหน่ายจาก ADJRW_RATES (ส่งเป็น parameter) จำหน่ายก่อนอัตราเก่าสุด CASE ได้ NULL จึงไม่ถูกนับ
@@ -50,7 +55,7 @@ const RATE_CASE = `CASE ${ADJRW_RATES.map(() => "WHEN i.dchdate >= ? THEN ?").jo
 const RATE_PARAMS = ADJRW_RATES.flatMap((r) => [r.from, r.rate]);
 const COUNT_SELECT = `SELECT COUNT(*) AS total, SUM(i.adjrw) AS adjrw_sum, COUNT(i.adjrw) AS adjrw_n,
        SUM(i.adjrw * ${RATE_CASE}) AS adjrw_amount, COUNT(i.adjrw * ${RATE_CASE}) AS adjrw_amount_n
-FROM ipt i LEFT JOIN patient p ON p.hn = i.hn`;
+${FROM}`;
 type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: number; adjrw_amount: number | string | null; adjrw_amount_n: number };
 
 const REP_SQL = `SELECT DISTINCT ON (r.an)
@@ -66,6 +71,41 @@ FROM rep_row r
 JOIN rep_file f ON f.id = r.rep_file_id
 WHERE r.patient_type = 'IP' AND r.an = ANY($1::text[])
 ORDER BY r.an, r.tran_id::bigint DESC`;
+
+// ตัวกรองหัวคอลัมน์ (allowlist) ; สถานะ REP อยู่อีกฐาน (insight) และค่า RW/AdjRW/เงินเป็นตัวเลขต่อเนื่อง จึงไม่มีตัวกรอง
+const CODES_LABEL: Record<string, string> = {
+  YY: "มี Authen และ Claim Code",
+  YN: "มี Authen ไม่มี Claim Code",
+  NY: "ไม่มี Authen มี Claim Code",
+  NN: "ไม่มี Authen และ Claim Code",
+};
+function filterDefs(lk: Lookups): ColumnFilterDefs {
+  return {
+    an: { expr: "i.an" },
+    hn: { expr: "i.hn" },
+    patient_name: { expr: FULL_NAME_SQL },
+    fund: fundFilterDef(lk, "i.pttype"),
+    pttype_name: { expr: "i.pttype", label: "t.name" },
+    codes: { expr: `CONCAT(IF(${AUTH_SQL} IS NULL, 'N', 'Y'), IF(${CLAIM_SQL} IS NULL, 'N', 'Y'))`, labels: CODES_LABEL },
+    regdate: { expr: "DATE_FORMAT(i.regdate, '%Y-%m-%d')" },
+    dchdate: { expr: "DATE_FORMAT(i.dchdate, '%Y-%m-%d')" },
+    dchstts_name: { expr: "i.dchstts", label: "d.name" },
+    dch_reason: { expr: "i.dchtype", label: "dt.name" },
+    ward_name: { expr: "i.ward", label: "w.name" },
+    los_days: { expr: "DATEDIFF(i.dchdate, i.regdate)" },
+    // server ฐานเป็นเวลาไทย (+07) CURDATE() จึงตรงกับวันนี้ที่ใช้ในรายการ
+    days_since_dch: { expr: "DATEDIFF(CURDATE(), i.dchdate)" },
+    ipt_summary_status_id: { expr: "i.ipt_summary_status_id", label: "ss.ipt_summary_status_name" },
+    pdx: { expr: "s.pdx", label: "c.name" },
+    drg: { expr: "i.drg" },
+    finance_lock: { expr: "IF(i.finance_lock = 'Y', 'Y', 'N')", labels: { Y: "ปิดแล้ว", N: "ยังไม่ปิด" } },
+  };
+}
+const FILTERABLE = [
+  "an", "hn", "patient_name", "fund", "pttype_name", "codes", "regdate", "dchdate", "dchstts_name", "dch_reason", "ward_name",
+  "los_days", "days_since_dch", "ipt_summary_status_id", "pdx", "drg", "finance_lock",
+] as const;
+type FilterKey = (typeof FILTERABLE)[number];
 
 type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_label", string>;
 const REP_LABEL = { pass: "ผ่าน", c: "ติด C", deny: "Deny" } as const;
@@ -111,14 +151,32 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery<SortKey>(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters<FilterKey>(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
+  const { filters, facet, facetQ } = cf.query;
   const xlsx = format === "xlsx";
 
   const lk = await loadLookups();
   // เลือกครบทุกสิทธิที่เปิดใช้ = ไม่กรอง (ชุดเดียวกับตัวเลือกของหน้า)
   const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
-  const like = `%${escapeLike(q)}%`;
-  const where = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
-  const whereParams = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(q ? [like, like, like] : [])];
+  const defs = filterDefs(lk);
+  /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet) */
+  const whereFor = (except: FilterKey | null) => {
+    const like = `%${escapeLike(q)}%`;
+    const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
+    const cfw = columnFilterWhere(defs, filters, except);
+    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(q ? [like, like, like] : []), ...cfw.params];
+    return { sql: cfw.parts.length ? `${base}\n  AND ${cfw.parts.join("\n  AND ")}` : base, params };
+  };
+  if (facet) {
+    try {
+      return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FROM, whereFor(facet)));
+    } catch (e) {
+      console.error("ipd/admissions facet", e);
+      return Response.json({ error: `อ่านรายการไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
+    }
+  }
+  const { sql: where, params: whereParams } = whereFor(null);
   const order = `${SORT_SQL[sort ?? "dchdate"]} ${(sort ? dir : "desc") === "desc" ? "DESC" : "ASC"}, i.an`;
   const [limit, offset] = xlsx ? [XLSX_MAX, 0] : [pageSize, (page - 1) * pageSize];
 
