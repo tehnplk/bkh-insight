@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
 import type { PendingRow } from "../../types";
 import {
-  FULL_NAME_SQL, UNKNOWN_NAME, badRequest, depSql, fundOf, fundPttypeFilter, isAuthed, loadLookups, parseRange, round2, unauthorized,
+  FULL_NAME_SQL, UNKNOWN_NAME, badRequest, depSql, fundFilterDef, fundOf, fundPttypeFilter, isAuthed, loadLookups, parseRange, round2, unauthorized,
 } from "../../_lib/fund";
 import { CLAIM_JOINS, STATUS_SQL, VISIT_AMOUNT_JOIN } from "../../_lib/claim";
 
@@ -24,6 +25,16 @@ const STATUSES = {
   none: ["none", "none"],
 } as const;
 const CODE = /^[A-Za-z0-9]{1,10}$/;
+const AUTHEN_SQL = `COALESCE(IF(vp.auth_code LIKE 'PP%', vp.auth_code, NULL), (SELECT s2.claim_code FROM nhso_smartcard_agent s2
+    WHERE s2.vn = o.vn AND s2.claim_code LIKE 'PP%' ORDER BY s2.nhso_smartcard_agent_id DESC LIMIT 1))`;
+// ตัวกรองหัวคอลัมน์ (allowlist) เงื่อนไขอยู่ใน subquery ชั้นใน (ovst + CLAIM_JOINS + patient) ส่วน facet นับจากชุดเดียวกับ count (ไม่แตะ opitemrece)
+const STATUS_LABEL = { closed: "ปิดสิทธิแล้ว", authen_only: "มี authen ยังไม่ปิด", none: "ไม่มี authen" };
+const FILTERABLE = ["vstdate", "hn", "full_name", "fund_name", "dep_name", "authen_code", "status"] as const;
+type FilterKey = (typeof FILTERABLE)[number];
+const FACET_FROM = `FROM ovst o
+  ${CLAIM_JOINS}
+  LEFT JOIN patient p ON p.hn = o.hn
+  LEFT JOIN kskdepartment d ON d.depcode = o.main_dep`;
 
 type Raw = Omit<PendingRow, "fund_code" | "fund_name"> & { pttype: string | null; main_dep: string | null };
 
@@ -36,6 +47,9 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters<FilterKey>(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
+  const { filters, facet, facetQ } = cf.query;
 
   const status = params.get("status") || "pending";
   if (!(status in STATUSES)) return badRequest("status ได้เฉพาะ: pending, authen_only, none");
@@ -64,6 +78,26 @@ export async function GET(request: NextRequest) {
     extraParams.push(like, like);
   }
   const statusParams = STATUSES[status as keyof typeof STATUSES];
+  const defs: ColumnFilterDefs = {
+    vstdate: { expr: "DATE_FORMAT(o.vstdate, '%Y-%m-%d')" },
+    hn: { expr: "o.hn" },
+    full_name: { expr: FULL_NAME_SQL },
+    fund_name: fundFilterDef(lk, "o.pttype"),
+    dep_name: { expr: depSql("o"), label: "d.department" },
+    authen_code: { expr: AUTHEN_SQL },
+    status: { expr: `(${STATUS_SQL})`, labels: STATUS_LABEL },
+  };
+  if (facet) {
+    const cfw = columnFilterWhere(defs, filters, facet);
+    const where = {
+      sql: `WHERE o.vstdate BETWEEN ? AND ?${extra}${cfw.parts.map((p) => ` AND ${p}`).join("")} AND (${STATUS_SQL}) IN (?, ?)`,
+      params: [start, end, ...extraParams, ...cfw.params, ...statusParams],
+    };
+    return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FACET_FROM, where));
+  }
+  const cfw = columnFilterWhere(defs, filters, null);
+  extra += cfw.parts.map((p) => ` AND ${p}`).join("");
+  const filterParams = [...extraParams, ...cfw.params];
 
   const select = `
 SELECT t.vn, t.vstdate, t.hn, t.full_name, t.pttype, IFNULL(pt.name, IFNULL(t.pttype, '')) AS pttype_name, t.main_dep,
@@ -87,7 +121,7 @@ LEFT JOIN pttype pt ON pt.pttype = t.pttype
 LEFT JOIN kskdepartment d ON d.depcode = t.main_dep
 WHERE t.status IN (?, ?)
 ORDER BY ${sort ? SORT_SQL[sort] : "t.amount"} ${sort ? dir : "desc"}, t.vn`;
-  const selectParams = [start, end, start, end, ...extraParams, ...statusParams];
+  const selectParams = [start, end, start, end, ...filterParams, ...statusParams];
 
   const toRow = ({ pttype, main_dep, ...r }: Raw): PendingRow => {
     const fund_code = fundOf(lk, pttype);
@@ -127,7 +161,7 @@ ORDER BY ${sort ? SORT_SQL[sort] : "t.amount"} ${sort ? dir : "desc"}, t.vn`;
   WHERE o.vstdate BETWEEN ? AND ?${extra}
 ) t
 WHERE t.status IN (?, ?)`,
-    [start, end, ...extraParams, ...statusParams],
+    [start, end, ...filterParams, ...statusParams],
   );
   const body: GridPage<PendingRow> = { rows: rows.map(toRow), total: Number(total) };
   return Response.json(body);

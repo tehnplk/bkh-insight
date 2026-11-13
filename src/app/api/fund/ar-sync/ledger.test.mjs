@@ -74,7 +74,7 @@ test("planIpd: set date by mode, adjust, re-lock, reverse only inside the window
   const w = { from: "2025-10-01", to: "2025-10-31" };
   const states = new Map([
     ["A2", ist("A2", 10000)], // ยอดเปลี่ยน
-    ["A3", ist("A3", 0)], // เคยกลับรายการ แล้วปิดสิทธิ์อีกครั้ง
+    ["A3", ist("A3", 0)], // เคยกลับรายการ แล้วปิดสิทธิอีกครั้ง
     ["A4", ist("A4", 5000)], // finance_lock กลับเป็น N
     ["A5", ist("A5", 5000, "2025-12-01")], // นอก window: ไม่แตะ
     ["A6", ist("A6", 0)], // กลับรายการแล้ว: ไม่ซ้ำ

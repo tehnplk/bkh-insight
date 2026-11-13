@@ -41,14 +41,14 @@ export const isoDate = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 export type DateRange = { start: string; end: string; startMs: number; endMs: number; days: number };
 
-/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน MAX_RANGE_DAYS (31) วัน (นับรวมวันแรกและวันสุดท้าย) */
-export function parseRange(params: URLSearchParams): { ok: true; range: DateRange } | { ok: false; error: string } {
+/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน maxDays (ค่าเริ่มต้น MAX_RANGE_DAYS 31) วัน (นับรวมวันแรกและวันสุดท้าย) */
+export function parseRange(params: URLSearchParams, maxDays = MAX_RANGE_DAYS): { ok: true; range: DateRange } | { ok: false; error: string } {
   const startMs = toUtc(params.get("start"));
   const endMs = toUtc(params.get("end"));
   if (startMs === null || endMs === null) return { ok: false, error: "start และ end ต้องเป็นวันที่รูปแบบ YYYY-MM-DD" };
   if (startMs > endMs) return { ok: false, error: "start ต้องไม่เกิน end" };
   const days = (endMs - startMs) / DAY_MS + 1;
-  if (days > MAX_RANGE_DAYS) return { ok: false, error: `ช่วงวันที่ยาวได้ไม่เกิน ${MAX_RANGE_DAYS} วัน` };
+  if (days > maxDays) return { ok: false, error: `ช่วงวันที่ยาวได้ไม่เกิน ${maxDays} วัน` };
   return { ok: true, range: { start: isoDate(startMs), end: isoDate(endMs), startMs, endMs, days } };
 }
 
@@ -83,6 +83,34 @@ export async function loadLookups(): Promise<Lookups> {
 }
 
 export const fundOf = (lk: Lookups, pttype: string | null) => (pttype && lk.pttype.get(pttype)?.fund) || UNKNOWN_FUND;
+/**
+ * ตัวกรองหัวคอลัมน์ "กองทุน" (ค่าคำนวณจาก pttype ผ่าน lookup) สำหรับ @/lib/column-filter-sql
+ * เลือกกองทุน = pttype ของกองทุนนั้น ; UNKNOWN = pttype ที่ไม่อยู่ใน lookup
+ */
+export function fundFilterDef(lk: Lookups, pttypeExpr: string) {
+  return {
+    expr: pttypeExpr,
+    value: (raw: string | null) => fundOf(lk, raw),
+    labelOf: (code: string) => (lk.fundName(code) === code ? code : `${code} ${lk.fundName(code)}`),
+    where: (values: string[], ph: (n: number) => string, start: number) => {
+      const set = new Set(values);
+      const codes = [...lk.pttype].filter(([, v]) => set.has(v.fund)).map(([code]) => code);
+      const ors: string[] = [];
+      const params: string[] = [];
+      if (codes.length) {
+        ors.push(`${pttypeExpr} IN (${codes.map((_, i) => ph(start + i)).join(", ")})`);
+        params.push(...codes);
+      }
+      if (set.has(UNKNOWN_FUND)) {
+        const known = [...lk.pttype.keys()];
+        const n = start + params.length;
+        ors.push(`${pttypeExpr} IS NULL${known.length ? ` OR ${pttypeExpr} NOT IN (${known.map((_, i) => ph(n + i)).join(", ")})` : ""}`);
+        params.push(...known);
+      }
+      return { sql: ors.length ? `(${ors.join(" OR ")})` : "1 = 0", params };
+    },
+  };
+}
 export const pttypeName = (lk: Lookups, pttype: string | null) => (pttype ? (lk.pttype.get(pttype)?.name ?? pttype) : "");
 
 /** รวมยอดตามหมวด (income) แล้วเรียงมากไปน้อย */

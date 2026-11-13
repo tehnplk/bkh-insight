@@ -15,18 +15,20 @@ const dateTh = (iso: string) => new Date(iso).toLocaleDateString("th-TH", { day:
 
 const col = gridColumnHelper<Patient>();
 const columns = col.columns([
-  col.accessor("hn", { header: "HN" }),
-  col.accessor("name", { header: "ชื่อ-สกุล", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("age", { header: "อายุ", meta: { className: "text-right" } }),
-  col.accessor("ward", { header: "หอผู้ป่วย", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("admitDate", { header: "วันที่รับไว้", cell: (c) => dateTh(c.getValue()), meta: { className: "whitespace-nowrap" } }),
-  col.accessor("diagnosis", { header: "การวินิจฉัย", enableSorting: false }),
+  // meta.filter = ตัวกรองบนหัวคอลัมน์ (ติ๊กเลือก/ค้นหาค่า) endpoint ต้องรองรับ cf/facet ดู route ของ demo นี้
+  col.accessor("hn", { header: "HN", meta: { filter: true } }),
+  col.accessor("name", { header: "ชื่อ-สกุล", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("age", { header: "อายุ", meta: { className: "text-right", filter: true } }),
+  col.accessor("ward", { header: "หอผู้ป่วย", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("admitDate", { header: "วันที่รับไว้", cell: (c) => dateTh(c.getValue()), meta: { className: "whitespace-nowrap", filter: { format: dateTh } } }),
+  col.accessor("diagnosis", { header: "การวินิจฉัย", enableSorting: false, meta: { filter: true } }),
   col.accessor("status", {
     header: "สถานะ",
     cell: (c) => {
       const s = c.getValue();
       return <span className={`inline-block rounded-full px-2 font-medium whitespace-nowrap ${STATUS_STYLE[s]}`}>{s}</span>;
     },
+    meta: { filter: true },
   }),
 ]);
 

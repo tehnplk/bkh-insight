@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
 import type { FundVisitRow } from "../../types";
 import {
@@ -22,6 +23,16 @@ const SORTABLE = Object.keys(SORT_SQL) as (keyof typeof SORT_SQL)[];
 // รหัสกองทุน/สิทธิ/หมวด/แผนก รวม "UNKNOWN"
 const CODE = /^[A-Za-z0-9]{1,10}$/;
 
+// ตัวกรองหัวคอลัมน์ (allowlist) บน ovst v ; facet นับจาก FROM/WHERE เดียวกับ count
+const FILTER_DEFS: ColumnFilterDefs = {
+  vstdate: { expr: "DATE_FORMAT(v.vstdate, '%Y-%m-%d')" },
+  hn: { expr: "v.hn" },
+  full_name: { expr: FULL_NAME_SQL },
+  pttype_name: { expr: "v.pttype", label: "t.name" },
+  dep_name: { expr: depSql("v"), label: "k.department" },
+};
+const FILTERABLE = ["vstdate", "hn", "full_name", "pttype_name", "dep_name"] as const;
+
 export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
   const params = request.nextUrl.searchParams;
@@ -31,6 +42,8 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
 
   const filters = {
     fund: params.get("fund") || null,
@@ -121,6 +134,11 @@ export async function GET(request: NextRequest) {
     whereParams.push(like, like);
   }
 
+  const facet = cf.query.facet;
+  const cfw = columnFilterWhere(FILTER_DEFS, cf.query.filters, facet);
+  where += cfw.parts.map((p) => ` AND ${p}`).join("");
+  whereParams.push(...cfw.params.map(String));
+
   const from = `FROM ovst v
     LEFT JOIN (${itemSql}) a ON a.vn = v.vn
     LEFT JOIN patient p ON p.hn = v.hn
@@ -132,6 +150,7 @@ export async function GET(request: NextRequest) {
   // sort มาจาก allowlist และ dir เป็น asc|desc เท่านั้น
   const orderBy = `ORDER BY ${sort ? `${SORT_SQL[sort]} ${dir}, ` : "v.vstdate, "}v.vn`;
   const allParams = [...itemParams, ...whereParams];
+  if (facet) return Response.json(await loadFacet(hisQuery, FILTER_DEFS, facet, cf.query.facetQ, from, { sql: where, params: allParams }));
 
   const normalize = (r: FundVisitRow): FundVisitRow => ({ ...r, pttype: r.pttype ?? "", amount: round2(r.amount) });
 

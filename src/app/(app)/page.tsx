@@ -8,7 +8,7 @@ export default function Home() {
   return (
     // พื้นหน้าเต็มพื้นที่ <main> (หักล้าง padding ของ AppShell: px-8 py-7, จอแคบ px-4 py-5) ให้การ์ด bg-surface ลอยขึ้นมา
     <div className="-mx-8 -my-7 min-h-[calc(100%+3.5rem)] bg-background px-8 py-7 max-md:-mx-4 max-md:-my-5 max-md:min-h-[calc(100%+2.5rem)] max-md:px-4 max-md:py-5">
-      <div className="max-w-6xl">
+      <div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-title text-balance">ภาพรวมโรงพยาบาล</h1>
           {/* useSearchParams ต้องอยู่ใต้ Suspense */}

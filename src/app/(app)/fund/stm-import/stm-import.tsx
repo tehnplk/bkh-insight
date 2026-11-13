@@ -41,21 +41,21 @@ const baseColumns = [
         <span className="text-muted"> ครั้งที่ {c.row.original.run_no}</span>
       </>
     ),
-    meta: { className: "whitespace-nowrap tabular-nums" },
+    meta: { className: "whitespace-nowrap tabular-nums", filter: { format: periodLabel } },
   }),
-  col.accessor("scheme", { header: "สิทธิ", cell: (c) => SCHEMES[c.getValue()] ?? c.getValue() }),
-  col.accessor("patient_type", { header: "OP/IP" }),
-  col.accessor("doc_no", { header: "เลขที่เอกสาร", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("transfer_date", { header: "วันที่โอน", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("row_count", { header: "จำนวนรายการ", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
+  col.accessor("scheme", { header: "สิทธิ", cell: (c) => SCHEMES[c.getValue()] ?? c.getValue(), meta: { filter: { format: (v) => SCHEMES[v] ?? v } } }),
+  col.accessor("patient_type", { header: "OP/IP", meta: { filter: true } }),
+  col.accessor("doc_no", { header: "เลขที่เอกสาร", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("transfer_date", { header: "วันที่โอน", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } } }),
+  col.accessor("row_count", { header: "จำนวนรายการ", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
   col.accessor("paid_total", { header: "ยอดชดเชย (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
   col.accessor("deduction", { header: "หัก (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
   col.accessor("net_total", { header: "ยอดโอนสุทธิ (บาท)", cell: (c) => money(c.getValue()), meta: { className: `${num} font-semibold` } }),
-  col.accessor("imported_by", { header: "ผู้นำเข้า", cell: (c) => c.getValue() ?? dash, meta: { className: "whitespace-nowrap" } }),
+  col.accessor("imported_by", { header: "ผู้นำเข้า", cell: (c) => c.getValue() ?? dash, meta: { className: "whitespace-nowrap", filter: true } }),
   col.accessor("imported_at", {
     header: "เวลา",
     cell: (c) => `${formatThaiDate(c.getValue())} ${c.getValue().slice(11, 16)}`,
-    meta: { className: "whitespace-nowrap tabular-nums" },
+    meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } },
   }),
 ];
 const columns = col.columns(baseColumns);

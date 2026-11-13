@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { clearPersistedFilters } from "@/lib/persisted-filter";
+import { clearPersistedFilters, setStorageUser } from "@/lib/persisted-filter";
 import { Icon } from "./icons";
 import { adminSection } from "./nav-items";
 
@@ -17,12 +17,26 @@ const itemClass =
 // Sidebar footer: avatar + name; opens a menu upward (expanded) or as a flyout to the right (collapsed rail).
 // Native popover gives top layer (escapes the rail's overflow clipping), click-outside and Esc to close.
 // `admin` adds the admin pages (adminSection) above sign-out; access is still enforced by proxy.ts and the admin layout.
-export function ProfileMenu({ name, admin = false, signOut }: { name: string; admin?: boolean; signOut: () => Promise<void> }) {
+export function ProfileMenu({
+  name,
+  userKey,
+  admin = false,
+  signOut,
+}: {
+  name: string;
+  /** id ของผู้ใช้ใช้แยกค่าที่จำใน localStorage ต่อผู้ใช้ (เช่น ลำดับคอลัมน์) */
+  userKey: string;
+  admin?: boolean;
+  signOut: () => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const adminId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // บอก storage ว่าใครใช้ browser นี้อยู่ (ค่าที่จำต่อผู้ใช้จะได้ไม่ปนกันบนเครื่องที่ใช้ร่วมกัน)
+  useEffect(() => setStorageUser(userKey), [userKey]);
 
   useEffect(() => {
     const menu = menuRef.current;
@@ -120,7 +134,13 @@ export function ProfileMenu({ name, admin = false, signOut }: { name: string; ad
             <div role="separator" className="my-1 h-px bg-line" />
           </>
         )}
-        <form action={signOut} onSubmit={clearPersistedFilters}>
+        <form
+          action={signOut}
+          onSubmit={() => {
+            clearPersistedFilters();
+            setStorageUser("");
+          }}
+        >
           <button type="submit" role="menuitem" tabIndex={-1} className={itemClass}>
             <Icon name="logout" className="size-4 shrink-0 text-muted" />
             ออกจากระบบ

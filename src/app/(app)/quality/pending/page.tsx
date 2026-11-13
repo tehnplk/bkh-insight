@@ -15,7 +15,7 @@ async function Grid() {
 // ข้อมูลอ่านผ่าน /api/quality/pending ซึ่งเช็ค session เอง หน้านี้จึงไม่อ่าน HIS ตรง
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h1 className="text-title text-balance">รายการค้างใน HIS</h1>
         <Clock />

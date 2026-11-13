@@ -7,11 +7,12 @@ import { Money, num } from "./ui";
 import { VisitItems } from "./visit-items";
 
 const col = gridColumnHelper<FundVisitRow>();
-const date = col.accessor("vstdate", { header: "วันที่", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap" } });
-const hn = col.accessor("hn", { header: "HN", meta: { className: "whitespace-nowrap" } });
-const name = col.accessor("full_name", { header: "ชื่อ-นามสกุล", meta: { className: "whitespace-nowrap" } });
-const dep = col.accessor("dep_name", { header: "แผนก" });
-const pttype = col.accessor("pttype_name", { header: "สิทธิ" });
+// ตัวกรองหัวคอลัมน์จาก /api/fund/opd-fund/visits?facet=<id>
+const date = col.accessor("vstdate", { header: "วันที่", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap", filter: { format: (v) => formatThaiDate(v) || v } } });
+const hn = col.accessor("hn", { header: "HN", meta: { className: "whitespace-nowrap", filter: true } });
+const name = col.accessor("full_name", { header: "ชื่อ-นามสกุล", meta: { className: "whitespace-nowrap", filter: true } });
+const dep = col.accessor("dep_name", { header: "แผนก", meta: { filter: true } });
+const pttype = col.accessor("pttype_name", { header: "สิทธิ", meta: { filter: true } });
 const amount = col.accessor("amount", { header: "มูลค่า (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 const columns = col.columns([date, hn, name, pttype, amount]);
 const columnsWithDep = col.columns([date, hn, name, dep, pttype, amount]);

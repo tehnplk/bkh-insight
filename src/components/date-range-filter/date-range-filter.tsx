@@ -10,7 +10,6 @@ import { todayIso } from "@/lib/thai-date";
 
 /** ช่วงยาวสุดที่เลือกได้ (วัน รวมวันแรกและวันสุดท้าย) 31 = เลือกได้เต็มเดือน ต้องตรงกับ MAX_RANGE_DAYS ใน src/app/api/fund/_lib/fund.ts (API ตอบ 400 ถ้าเกิน) */
 export const MAX_RANGE_DAYS = 31;
-const SPAN = MAX_RANGE_DAYS - 1;
 
 // คำนวณบน UTC ล้วน ไม่เลื่อนตาม timezone ของเครื่อง
 const DAY_MS = 86_400_000;
@@ -21,8 +20,9 @@ const minIso = (a: string, b: string) => (a < b ? a : b);
 const maxIso = (a: string, b: string) => (a > b ? a : b);
 const valid = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(toTime(v)) && addDays(v, 0) === v;
 
-/** ปรับช่วงให้ถูกต้อง: end >= start และยาวไม่เกิน MAX_RANGE_DAYS (ตัดฝั่งที่ไม่ได้เลือก) */
-function clampRange(start: string, end: string, keep: "start" | "end", today: string) {
+/** ปรับช่วงให้ถูกต้อง: end >= start และยาวไม่เกิน maxDays (ตัดฝั่งที่ไม่ได้เลือก) */
+function clampRange(start: string, end: string, keep: "start" | "end", today: string, maxDays: number) {
+  const SPAN = maxDays - 1;
   if (keep === "start") {
     let e = maxIso(end, start);
     if (daysBetween(start, e) > SPAN) e = maxIso(start, minIso(addDays(start, SPAN), today));
@@ -33,39 +33,51 @@ function clampRange(start: string, end: string, keep: "start" | "end", today: st
   return { start: s, end };
 }
 
-function presets(today: string) {
+function presets(today: string, maxDays: number) {
   return [
     { id: "today", label: "วันนี้", start: today, end: today },
     { id: "7d", label: "7 วันล่าสุด", start: addDays(today, -6), end: today },
     { id: "30d", label: "30 วันล่าสุด", start: addDays(today, -29), end: today },
     // ต้นเดือนถึงวันนี้ยาวไม่เกิน 31 วันเสมอ
     { id: "month", label: "เดือนนี้", start: `${today.slice(0, 8)}01`, end: today },
+    ...(maxDays >= 90 ? [{ id: "90d", label: "90 วันล่าสุด", start: addDays(today, -89), end: today }] : []),
   ];
 }
 
-/** ช่วงวันที่จาก URL (start, end) ที่ปรับให้ถูกต้องแล้ว (ค่าผิดรูปแบบใช้ค่าเริ่มต้น, end < start หรือยาวเกิน MAX_RANGE_DAYS ถูกตัด) */
-export function useDateRange(): { start: string; end: string } {
+/** ช่วงวันที่จาก URL (start, end) ที่ปรับให้ถูกต้องแล้ว (ค่าผิดรูปแบบใช้ค่าเริ่มต้น, end < start หรือยาวเกิน maxDays ถูกตัด) */
+export function useDateRange(maxDays = MAX_RANGE_DAYS): { start: string; end: string } {
   const sp = useSearchParams();
   const today = todayIso();
   const start = sp.get("start");
   const end = sp.get("end");
   // ไม่มีค่า = วันนี้ (ถ้ามีแค่ end ให้ start = end)
   const e = valid(end) ? end : today;
-  return clampRange(valid(start) ? start : e, e, "start", today);
+  return clampRange(valid(start) ? start : e, e, "start", today, maxDays);
 }
 
-/** ตัวเลือกช่วงวันที่ ("ตั้งแต่" – "ถึง" + ช่วงสำเร็จรูป) เขียน start/end ลง URL และล้าง page ต้องอยู่ใต้ <Suspense> */
-export function DateRangeFilter() {
+/**
+ * ตัวเลือกช่วงวันที่ ("ตั้งแต่" – "ถึง" + ช่วงสำเร็จรูป) เขียน start/end ลง URL และล้าง page ต้องอยู่ใต้ <Suspense>
+ * maxDays: ยาวสุดที่ยอม (ค่าเริ่มต้น 31) ส่งค่าเดียวกับ useDateRange(maxDays) และ parseRange(params, maxDays) ของ API
+ * ใช้เกิน 31 เฉพาะหน้าที่ไม่อ่าน opitemrece ตามช่วงวันที่ (ช่วงยาวล็อกตารางของ HOSxP)
+ * hideLabels: ซ่อนป้าย "ตั้งแต่"/"ถึง" เป็น hint ตอนชี้ (ส่ง hideLabel ให้ ThaiDatePicker)
+ * labels: ป้าย/hint ของ select ช่วงสำเร็จรูป วันเริ่ม และวันสิ้นสุด เช่น { preset: "ช่วงวันที่จำหน่าย", start: "จำหน่ายตั้งแต่", end: "จำหน่ายถึง" }
+ */
+export function DateRangeFilter({
+  maxDays = MAX_RANGE_DAYS,
+  hideLabels = false,
+  labels = {},
+}: { maxDays?: number; hideLabels?: boolean; labels?: { preset?: string; start?: string; end?: string } } = {}) {
+  const { preset = "ช่วงวันที่สำเร็จรูป", start: startLabel = "ตั้งแต่", end: endLabel = "ถึง" } = labels;
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const { start, end } = useDateRange();
+  const { start, end } = useDateRange(maxDays);
   const today = todayIso();
-  const options = presets(today);
+  const options = presets(today, maxDays);
   const current = options.find((p) => p.start === start && p.end === end)?.id ?? "";
 
   function apply(nextStart: string, nextEnd: string, keep: "start" | "end" = "start") {
-    const r = clampRange(nextStart, nextEnd, keep, today);
+    const r = clampRange(nextStart, nextEnd, keep, today, maxDays);
     if (r.start === start && r.end === end) return;
     const next = new URLSearchParams(sp.toString());
     next.set("start", r.start);
@@ -77,7 +89,8 @@ export function DateRangeFilter() {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
       <select
-        aria-label="ช่วงวันที่สำเร็จรูป"
+        aria-label={preset}
+        title={hideLabels ? preset : undefined}
         value={current}
         onChange={(e) => {
           const p = options.find((o) => o.id === e.target.value);
@@ -97,8 +110,8 @@ export function DateRangeFilter() {
           </option>
         )}
       </select>
-      <ThaiDatePicker label="ตั้งแต่" stepper={false} value={start} onChange={(v) => apply(v, end, "start")} />
-      <ThaiDatePicker label="ถึง" stepper={false} value={end} onChange={(v) => apply(start, v, "end")} />
+      <ThaiDatePicker label={startLabel} stepper={false} hideLabel={hideLabels} value={start} onChange={(v) => apply(v, end, "start")} />
+      <ThaiDatePicker label={endLabel} stepper={false} hideLabel={hideLabels} value={end} onChange={(v) => apply(start, v, "end")} />
     </div>
   );
 }

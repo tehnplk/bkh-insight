@@ -5,7 +5,7 @@ export const metadata = { title: "นำเข้า REP" };
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <h1 className="text-title text-balance">นำเข้า REP</h1>
       <div className="mt-6">
         {/* DataGrid ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}

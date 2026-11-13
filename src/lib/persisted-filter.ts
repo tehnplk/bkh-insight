@@ -51,6 +51,31 @@ export function usePersistedFilter(key: string, params: readonly string[]): void
   }, [current, storageKey, params, pathname, router, sp]);
 }
 
+// ผู้ใช้ที่ login อยู่บน browser นี้ (ProfileMenu ตั้งให้) ใช้แยกค่าที่จำต่อผู้ใช้ เช่น ลำดับคอลัมน์ของ DataGrid
+const USER_KEY = "bkh:user";
+/** event ที่ยิงเมื่อผู้ใช้ของ browser เปลี่ยน (ให้ store ที่อิงผู้ใช้อ่านค่าใหม่) */
+export const STORAGE_USER_EVENT = "bkh-storage-user";
+
+/** ตั้งผู้ใช้ปัจจุบัน ("" = ไม่มี เช่น ตอนออกจากระบบ) */
+export function setStorageUser(user: string): void {
+  try {
+    if (user) localStorage.setItem(USER_KEY, user);
+    else localStorage.removeItem(USER_KEY);
+  } catch {
+    // storage ใช้ไม่ได้ = ไม่แยกผู้ใช้
+  }
+  window.dispatchEvent(new Event(STORAGE_USER_EVENT));
+}
+
+/** ผู้ใช้ปัจจุบันของ browser นี้ ("" = ยังไม่รู้) */
+export function storageUser(): string {
+  try {
+    return localStorage.getItem(USER_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 /** ลบ filter ที่จำไว้ทุกหน้า (เรียกตอนออกจากระบบ ผู้ใช้คนถัดไปบนเครื่องเดียวกันจะได้ไม่เห็น filter เดิม) */
 export function clearPersistedFilters(): void {
   try {

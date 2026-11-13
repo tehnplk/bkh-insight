@@ -50,13 +50,15 @@ export type ThaiDateStepperProps = {
   max?: string;
   /** แสดงปุ่มวันก่อน/ถัดไป (ค่าเริ่มต้น true) ปิดได้เมื่อใช้เป็นคู่ช่วงวันที่ */
   stepper?: boolean;
+  /** ซ่อนป้าย (ยังอ่านได้ด้วย screen reader) แล้วแสดงเป็น hint ตอนชี้แทน ใช้เมื่อแถวตัวกรองแน่น */
+  hideLabel?: boolean;
   /** ข้อความ label ที่แสดงหน้าปุ่ม และเป็นชื่อของปฏิทินสำหรับ screen reader */
   label: string;
 };
 
 // ปุ่มแสดงวันที่ พ.ศ. + ปุ่มวันก่อน/ถัดไป และปฏิทินใน native popover (top layer, Esc/คลิกนอกกรอบปิดได้ และคืน focus ให้ปุ่ม)
 // ในปฏิทิน: ลูกศรเลื่อนวัน/สัปดาห์, Home/End ต้น/ท้ายสัปดาห์, PageUp/PageDown เดือน (กด Shift = ปี)
-export function ThaiDateStepper({ value, onChange, min, max, label, stepper = true }: ThaiDateStepperProps) {
+export function ThaiDateStepper({ value, onChange, min, max, label, stepper = true, hideLabel = false }: ThaiDateStepperProps) {
   const id = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -142,8 +144,8 @@ export function ThaiDateStepper({ value, onChange, min, max, label, stepper = tr
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <span id={`${id}-label`} className="text-muted">
+    <div className="flex items-center gap-2" title={hideLabel ? label : undefined}>
+      <span id={`${id}-label`} className={hideLabel ? "sr-only" : "text-muted"}>
         {label}
       </span>
       <div className="flex h-9 items-center rounded-md border border-line bg-surface">

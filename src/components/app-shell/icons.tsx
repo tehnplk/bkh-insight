@@ -84,6 +84,12 @@ const paths = {
       <circle cx="19.5" cy="10" r="2" />
     </>
   ),
+  bed: (
+    <>
+      <path d="M3.5 5.5v14M3.5 15.5h17v4M20.5 15.5V12a2 2 0 0 0-2-2h-8v5.5" />
+      <circle cx="7" cy="11.5" r="1.75" />
+    </>
+  ),
   calendar: (
     <>
       <rect x="3.5" y="5" width="17" height="15" rx="1.5" />

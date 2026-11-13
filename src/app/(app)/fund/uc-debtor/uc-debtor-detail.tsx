@@ -17,18 +17,18 @@ const join = (a: string[] | null) => a?.filter(Boolean).join(", ") || null;
 const pair = (a: string | null, b: string | null) => (a || b ? `${a || "–"} / ${b || "–"}` : null);
 const fileOf = (url: string) => url.slice(url.lastIndexOf("/") + 1);
 
-const Facts = ({ children }: { children: ReactNode }) => (
+export const Facts = ({ children }: { children: ReactNode }) => (
   <dl className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-6 gap-y-3">{children}</dl>
 );
 
-const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
+export const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="min-w-0">
     <dt className="text-xs text-muted">{label}</dt>
     <dd className="mt-0.5 break-words tabular-nums">{children || dash}</dd>
   </div>
 );
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mt-6 border-t border-line pt-5">
       <h3 className="text-base font-semibold">{title}</h3>
@@ -37,7 +37,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function LoadError({ what, error, retry }: { what: string; error?: string; retry: () => void }) {
+export function LoadError({ what, error, retry }: { what: string; error?: string; retry: () => void }) {
   return (
     <div className="py-6 text-center">
       <p className="font-medium text-danger">โหลด{what}ไม่สำเร็จ</p>
@@ -73,7 +73,7 @@ export function UcDebtorDetail({ row, status }: { row: UcDebtorRow; status: Reac
         <Fact label="ส่วนต่าง (บาท)"><span className="font-semibold"><Money value={row.diff} /></span></Fact>
         <Fact label="สถานะ">{status}</Fact>
       </Facts>
-      <DebtorItems row={row} />
+      <DebtorItems vn={row.key} an={row.an} debtor={row.debtor} />
       {loading ? (
         <div className="mt-6"><Skeleton rows={6} /></div>
       ) : error || !data ? (
@@ -108,12 +108,12 @@ const SumRow = ({ label, value, strong }: { label: string; value: number; strong
   </div>
 );
 
-/** รายการค่าใช้จ่ายของ visit/admission (HOSxP opitemrece) โหลดแยกจาก REP */
-function DebtorItems({ row }: { row: UcDebtorRow }) {
-  const q: Record<string, string> = row.an ? { an: row.an } : { vn: row.key };
+/** รายการค่าใช้จ่ายของ visit/admission (HOSxP opitemrece) มี an ใช้ an ไม่งั้นใช้ vn; ไม่ส่ง debtor = ไม่เทียบส่วนต่าง */
+export function DebtorItems({ vn, an, debtor }: { vn: string | null; an: string | null; debtor?: number }) {
+  const q: Record<string, string> = an ? { an } : { vn: vn ?? "" };
   const { loading, data, error, retry } = useJson<DebtorItemsResponse>(`/api/fund/uc-debtor/items?${new URLSearchParams(q)}`);
   const count = data?.categories.reduce((n, c) => n + c.items.length, 0) ?? 0;
-  const gap = data ? Math.round((data.debtor - row.debtor) * 100) / 100 : 0;
+  const gap = data && debtor != null ? Math.round((data.debtor - debtor) * 100) / 100 : 0;
 
   return (
     <Section title="รายการค่าใช้จ่าย">

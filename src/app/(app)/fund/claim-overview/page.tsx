@@ -6,7 +6,7 @@ export const metadata = { title: "ภาพรวมการเคลม" };
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-title text-balance">ภาพรวมการเคลม</h1>
         {/* useSearchParams ต้องอยู่ใต้ Suspense */}

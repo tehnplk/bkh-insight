@@ -13,7 +13,7 @@ async function Grid() {
 // Admin-only via proxy.ts and ../layout.tsx; /api/admin/users checks the role again.
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <h1 className="text-title text-balance">ผู้ใช้งาน</h1>
       <div className="mt-6">
         {/* อ่าน cookie และ useSearchParams ต้องอยู่ใต้ Suspense */}

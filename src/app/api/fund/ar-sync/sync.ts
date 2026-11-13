@@ -29,7 +29,7 @@ JOIN rcpt_debt r ON r.debt_id = c.debt_id
 WHERE c.cancel_datetime >= ? AND c.cancel_datetime < ?
   AND LENGTH(r.vn) = 12
 ORDER BY c.cancel_datetime, c.debt_id`;
-// C IPD ที่ปิดสิทธิ์แล้ว: ช่วงยาวกว่า 120 วันจะ full scan ipt (เราดึงชุดละ ≤31 วัน)
+// C IPD ที่ปิดสิทธิแล้ว: ช่วงยาวกว่า 120 วันจะ full scan ipt (เราดึงชุดละ ≤31 วัน)
 const IPD_SQL = `SELECT i.an, i.dchdate, i.pttype, t.hipdata_code, t.pttype_eclaim_id,
        s.uc_money, i.finance_lock
 FROM ipt i

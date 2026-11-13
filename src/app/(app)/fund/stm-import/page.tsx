@@ -12,7 +12,7 @@ async function Content() {
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <h1 className="text-title text-balance">นำเข้า STM</h1>
       <div className="mt-6">
         {/* อ่าน cookie และ DataGrid ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}

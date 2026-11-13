@@ -144,9 +144,9 @@ export function planCancels(cancels: HisCancel[], states: Map<string, RefState>)
 }
 
 /**
- * IPD ที่ปิดสิทธิ์แล้ว (finance_lock = 'Y') ในช่วง from..to ของ dchdate
+ * IPD ที่ปิดสิทธิแล้ว (finance_lock = 'Y') ในช่วง from..to ของ dchdate
  * - ยังไม่มี: ตั้งเมื่อ uc_money > 0 วันที่ = dchdate (backfill) หรือวันที่ sync (รายวัน = วันที่เจอครั้งแรก)
- * - มีแล้วยอดต่าง (รวมปิดสิทธิ์อีกครั้งหลังกลับรายการ): ปรับปรุงส่วนต่างลงวันที่ sync
+ * - มีแล้วยอดต่าง (รวมปิดสิทธิอีกครั้งหลังกลับรายการ): ปรับปรุงส่วนต่างลงวันที่ sync
  * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ
  */
 export function planIpd(
@@ -168,12 +168,12 @@ export function planIpd(
         entry_date: mode === "backfill" ? day(r.dchdate) : today, account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
       });
     } else if (target !== s.balance) {
-      out.push(follow(s, "adjust", today, target - s.balance, s.balance === 0 ? "ปิดสิทธิ์อีกครั้ง" : changed(s.balance, target)));
+      out.push(follow(s, "adjust", today, target - s.balance, s.balance === 0 ? "ปิดสิทธิอีกครั้ง" : changed(s.balance, target)));
     }
   }
   for (const [an, s] of states) {
     if (seen.has(an) || s.balance === 0 || !s.ref_date || s.ref_date < window.from || s.ref_date > window.to) continue;
-    out.push(follow(s, "reverse", today, -s.balance, "ยกเลิกปิดสิทธิ์ (finance_lock ไม่ใช่ Y)"));
+    out.push(follow(s, "reverse", today, -s.balance, "ยกเลิกปิดสิทธิ (finance_lock ไม่ใช่ Y)"));
   }
   return out;
 }
