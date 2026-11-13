@@ -42,7 +42,7 @@ const col = gridColumnHelper<UcDebtorRow>();
 const money = (key: "debtor" | "debt_amount" | "compensation" | "diff", header: string) =>
   col.accessor(key, { header, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 const text = (key: "vn" | "an" | "hn" | "pttype_name" | "drg" | "rep_no", header: string) =>
-  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: nowrap });
+  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: { ...nowrap, filter: true } });
 // shortcut: DataGrid ไม่เปิด modal ให้ cell เรียกได้ จึงกดปุ่ม "รายละเอียด" ของแถวเดียวกันแทน ถ้า DataGrid มี meta.openDetail ให้เปลี่ยนไปใช้
 function openRowDetail(e: MouseEvent<HTMLButtonElement>) {
   e.currentTarget.closest("tr")?.querySelector<HTMLButtonElement>('td:first-child button[aria-haspopup="dialog"]')?.click();
@@ -59,15 +59,16 @@ const name = col.accessor("full_name", {
       {c.getValue() || "–"}
     </button>
   ),
+  meta: { filter: true },
 });
 const tail = [
   text("rep_no", "REP"),
   money("compensation", "ชดเชยสุทธิ (บาท)"),
   money("diff", "ส่วนต่าง (บาท)"),
-  col.accessor("status", { header: "สถานะ", cell: (c) => <Status row={c.row.original} /> }),
+  col.accessor("status", { header: "สถานะ", cell: (c) => <Status row={c.row.original} />, meta: { filter: true } }),
 ];
 const date = (header: string) =>
-  col.accessor("date", { header, cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } });
+  col.accessor("date", { header, cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } } });
 
 const COLUMNS = {
   opd: col.columns([

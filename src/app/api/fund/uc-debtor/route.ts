@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type GridPage, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { badRequest, inList, isAuthed, loadLookups, parseRange, unauthorized } from "../_lib/fund";
 import {
@@ -14,6 +14,20 @@ const SORTABLE = {
   ipd: ["date", "an", "hn", "full_name", "pttype_name", "drg", "adjrw", "debtor", "rep_no", "compensation", "diff", "status"],
 } as const satisfies Record<DebtorType, readonly (keyof UcDebtorRow)[]>;
 const REP_CHUNK = 15_000;
+// ตัวกรองหัวคอลัมน์ (กรองในหน่วยความจำเหมือน sort) ยกเว้นยอดเงินและ AdjRW
+const FILTER_GET = {
+  date: (r) => r.date,
+  vn: (r) => r.vn,
+  an: (r) => r.an,
+  hn: (r) => r.hn,
+  full_name: (r) => r.full_name,
+  pttype_name: (r) => r.pttype_name,
+  drg: (r) => r.drg,
+  rep_no: (r) => r.rep_no,
+  status: (r) => r.status,
+} satisfies RowGetters<UcDebtorRow, string>;
+type FilterKey = keyof typeof FILTER_GET;
+const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 
 type Person = { hn: string; pname: string | null; fname: string | null; lname: string | null; pttype_name: string | null };
 const fullName = (p: Person) => `${p.pname ?? ""}${p.fname ?? ""} ${p.lname ?? ""}`.trim();
@@ -123,13 +137,23 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery<(typeof SORTABLE)[DebtorType][number]>(params, SORTABLE[type]);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters<FilterKey>(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
+  const { filters, facet, facetQ } = cf.query;
 
   const lk = await loadLookups();
   const codes = [...lk.pttype].filter(([, p]) => p.fund === "UCS").map(([c]) => c);
   const debtors = !codes.length ? [] : type === "opd" ? await loadOpd(start, end, codes) : await loadIpd(start, end, codes);
   const reps = debtors.length ? await loadReps(type, debtors.map((d) => d.key)) : [];
 
-  const searched = mergeDebtors(debtors, reps).filter((r) => !q || matches(r, q));
+  const merged = mergeDebtors(debtors, reps).filter((r) => !q || matches(r, q));
+  if (facet) {
+    const base = filterRows(merged, filters, FILTER_GET, facet);
+    const pool = facet === "status" || statusRaw === "all" ? base : base.filter((r) => r.status === statusRaw);
+    return Response.json(facetRows(pool, FILTER_GET[facet], facetQ, facet === "status" ? (v) => STATUS_LABEL[v as DebtorStatus] ?? v : undefined));
+  }
+  // ตัวกรองหัวคอลัมน์มีผลกับตัวเลขสรุปด้วย
+  const searched = filterRows(merged, filters, FILTER_GET);
   const rows = sortRows(statusRaw === "all" ? searched : searched.filter((r) => r.status === (statusRaw as DebtorStatus)), sort ?? "date", dir);
 
   if (format === "xlsx") {

@@ -1,7 +1,18 @@
 // รัน: node --test src/lib/grid-query.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inFilterSql, parseColumnFilters } from "./grid-query.ts";
+import { facetRows, filterRows, inFilterSql, parseColumnFilters } from "./grid-query.ts";
+
+test("filterRows / facetRows: in-memory filters, blank = '', except own column, counts sorted", () => {
+  const rows = [{ s: "a", n: 1 }, { s: "b", n: 1 }, { s: "a", n: 2 }, { s: null, n: 2 }];
+  const get = { s: (r) => r.s, n: (r) => r.n };
+  assert.equal(filterRows(rows, { s: ["a"] }, get).length, 2);
+  assert.equal(filterRows(rows, { s: [""] }, get).length, 1);
+  assert.equal(filterRows(rows, { s: ["a"], n: ["2"] }, get).length, 1);
+  assert.equal(filterRows(rows, { s: ["a"], n: ["2"] }, get, "s").length, 2);
+  assert.deepEqual(facetRows(rows, get.s, "").values.map((v) => [v.value, v.count]), [["a", 2], ["", 1], ["b", 1]]);
+  assert.deepEqual(facetRows(rows, get.s, "B", (v) => v.toUpperCase()).values, [{ value: "b", label: "B", count: 1 }]);
+});
 
 const p = (o) => new URLSearchParams(o);
 

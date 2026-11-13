@@ -22,14 +22,16 @@ function Result({ date, value }: { date: string; value: number }) {
 }
 
 const col = gridColumnHelper<DmRemissionRow>();
+const dateFilter = { format: (v: string) => formatThaiDate(v) || v };
 const columns = col.columns([
-  col.accessor("hn", { header: "HN", meta: nowrap }),
-  col.accessor("full_name", { header: "ชื่อ-สกุล", meta: nowrap }),
-  col.accessor("age", { header: "อายุ (ปี)", meta: { className: num } }),
-  col.accessor("prev_date", { header: "HbA1c ครั้งก่อน", cell: (c) => <Result date={c.getValue()} value={c.row.original.prev_value} /> }),
-  col.accessor("date", { header: "HbA1c ที่ผ่านเกณฑ์", cell: (c) => <Result date={c.getValue()} value={c.row.original.value} /> }),
-  col.accessor("days", { header: "ห่าง (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
-  col.accessor("kind", { header: "ประเภท", meta: nowrap }),
+  // ตัวกรองหัวคอลัมน์จาก /api/visit/dm-remission?facet=<id> (ยกเว้นจำนวนเงิน) คอลัมน์ HbA1c กรองตามวันที่
+  col.accessor("hn", { header: "HN", meta: { ...nowrap, filter: true } }),
+  col.accessor("full_name", { header: "ชื่อ-สกุล", meta: { ...nowrap, filter: true } }),
+  col.accessor("age", { header: "อายุ (ปี)", meta: { className: num, filter: true } }),
+  col.accessor("prev_date", { header: "HbA1c ครั้งก่อน", cell: (c) => <Result date={c.getValue()} value={c.row.original.prev_value} />, meta: { filter: dateFilter } }),
+  col.accessor("date", { header: "HbA1c ที่ผ่านเกณฑ์", cell: (c) => <Result date={c.getValue()} value={c.row.original.value} />, meta: { filter: dateFilter } }),
+  col.accessor("days", { header: "ห่าง (วัน)", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
+  col.accessor("kind", { header: "ประเภท", meta: { ...nowrap, filter: true } }),
   col.accessor("amount", { header: "จำนวนเงิน (บาท)", cell: (c) => formatBaht(c.getValue()), meta: { className: num } }),
 ]);
 

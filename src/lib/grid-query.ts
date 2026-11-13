@@ -104,6 +104,31 @@ export function parseColumnFilters<C extends string>(
   return { ok: true, query: { filters, facet: facet as C | null, facetQ } };
 }
 
+/** ค่าของคอลัมน์ในแถว (route ที่กรองในหน่วยความจำ) null/"" = ว่าง */
+export type RowGetters<T, C extends string> = Record<C, (row: T) => string | number | null | undefined>;
+const cell = (v: string | number | null | undefined) => (v == null ? "" : String(v));
+
+/** กรองแถวในหน่วยความจำตาม cf (ยกเว้นคอลัมน์ except) ใช้กับ route ที่รวมข้อมูลหลายฐานในโค้ด */
+export function filterRows<T, C extends string>(rows: T[], filters: ColumnFilters<C>, get: RowGetters<T, C>, except: C | null = null): T[] {
+  const active = (Object.entries(filters) as [C, string[]][]).filter(([k, v]) => k !== except && v?.length).map(([k, v]) => [get[k], new Set(v)] as const);
+  return active.length ? rows.filter((r) => active.every(([g, set]) => set.has(cell(g(r))))) : rows;
+}
+
+/** facet จากแถวในหน่วยความจำ: ค่าที่ไม่ซ้ำ + จำนวน เรียงมากไปน้อย labelOf แปลงชื่อที่แสดง (ค้นหาในค่าและชื่อ) */
+export function facetRows<T>(rows: T[], get: (row: T) => string | number | null | undefined, facetQ: string, labelOf?: (v: string) => string): FacetPage {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const v = cell(get(r));
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  const needle = facetQ.toLowerCase();
+  const values = [...counts]
+    .map(([value, count]) => ({ value, label: labelOf?.(value) ?? value, count }))
+    .filter((v) => !needle || `${v.value} ${v.label}`.toLowerCase().includes(needle))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "th"));
+  return { values: values.slice(0, MAX_FILTER_VALUES), truncated: values.length > MAX_FILTER_VALUES };
+}
+
 /** SQL ของตัวกรองหนึ่งคอลัมน์ ("" ในรายการ = ค่าว่าง/NULL) ph(n) = placeholder ตัวที่ n (his "?", insight `$${n}`) */
 export function inFilterSql(expr: string, values: string[], ph: (n: number) => string, start = 1): { sql: string; params: string[] } {
   const real = values.filter((v) => v !== "");

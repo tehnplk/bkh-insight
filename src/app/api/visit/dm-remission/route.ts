@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type GridPage, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse } from "@/lib/xlsx";
 import { DAY_MS, badRequest, inList, isAuthed, isoDate, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
 import {
@@ -21,6 +21,18 @@ const DRUG_BATCH = 50;
 const SORTABLE = ["hn", "full_name", "age", "prev_date", "date", "days", "kind", "amount"] as const satisfies readonly (keyof DmRemissionRow)[];
 
 const day = (v: string) => String(v).slice(0, 10);
+// ตัวกรองหัวคอลัมน์ (กรองในหน่วยความจำ) ยกเว้นจำนวนเงิน
+const FILTER_GET = {
+  hn: (r) => r.hn,
+  full_name: (r) => r.full_name,
+  age: (r) => r.age,
+  prev_date: (r) => r.prev_date,
+  date: (r) => r.date,
+  days: (r) => r.days,
+  kind: (r) => r.kind,
+} satisfies RowGetters<DmRemissionRow, string>;
+type FilterKey = keyof typeof FILTER_GET;
+const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 
 async function loadRows(start: string, end: string, from: string): Promise<DmRemissionRow[]> {
   const [ucsRows, drugRows] = await Promise.all([
@@ -125,9 +137,16 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
+  const cf = parseColumnFilters<FilterKey>(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
 
   let rows = await loadRows(start, end, isoDate(startMs - LOOKBACK_DAYS * DAY_MS));
   if (q) rows = rows.filter((r) => r.hn.includes(q) || r.full_name.includes(q));
+  if (cf.query.facet) {
+    const facet = cf.query.facet;
+    return Response.json(facetRows(filterRows(rows, cf.query.filters, FILTER_GET, facet), FILTER_GET[facet], cf.query.facetQ));
+  }
+  rows = filterRows(rows, cf.query.filters, FILTER_GET);
   const key = sort ?? "date";
   const sign = dir === "desc" ? -1 : 1;
   rows.sort((a, b) => {
