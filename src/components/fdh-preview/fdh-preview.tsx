@@ -1,6 +1,6 @@
 "use client";
 
-// modal 16 แฟ้ม (ดูข้อมูลรายแฟ้ม, ตรวจ C ทีละแฟ้มพร้อมแถบความคืบหน้า, ส่งออก txt ใน zip) ใช้ร่วม /ipd/admissions และ /opd/admissions
+// modal 16 แฟ้ม (ดูข้อมูลรายแฟ้ม, ตรวจ C ทีละแฟ้มพร้อมแถบความคืบหน้า, กรองเฉพาะแถวที่ติด C, ส่งออก txt ใน zip และ Excel) ใช้ร่วม /ipd/admissions และ /opd/admissions
 // ข้อมูลมาจาก endpoint ของหน้า (POST { [idField]: ids, format: "json" }) ตรวจ C ผ่าน checkUrl (POST { [idField]: ids, file })
 import { useEffect, useRef, useState } from "react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
@@ -71,6 +71,43 @@ function ZipButton({ files, n, prefix }: { files: FdhPreview["files"]; n: number
 
 type PreviewFile = FdhPreview["files"][number];
 type RowIssue = { codes: string[]; found?: string };
+type XlsxSheet = { name: string; columns: string[]; rows: Record<string, string | number | null | undefined>[] };
+
+/** ส่งออก Excel หนึ่ง sheet ต่อแฟ้ม (สร้างที่ server จากข้อมูลที่แสดงอยู่ รวมผลตรวจ C) */
+async function downloadXlsx(sheets: XlsxSheet[], filename: string) {
+  const res = await fetch("/api/fdh/files/xlsx", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, sheets }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  Object.assign(document.createElement("a"), { href: url, download: filename }).click();
+  URL.revokeObjectURL(url);
+}
+
+function XlsxButton({ build, filename, label }: { build: () => XlsxSheet[]; filename: string; label: string }) {
+  const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false });
+  async function run() {
+    setState({ busy: true });
+    try {
+      const sheets = build();
+      if (!sheets.length) throw new Error("ไม่มีแถวให้ส่งออก");
+      await downloadXlsx(sheets, filename);
+      setState({ busy: false });
+    } catch (e) {
+      setState({ busy: false, error: `ส่งออก Excel ไม่สำเร็จ: ${(e as Error).message}` });
+    }
+  }
+  return (
+    <>
+      <button type="button" disabled={state.busy} onClick={run} className={`${btn} disabled:cursor-wait disabled:opacity-60`}>
+        {state.busy ? "กำลังสร้างไฟล์…" : label}
+      </button>
+      {state.error && <p role="alert" className="w-full text-xs text-danger">{state.error}</p>}
+    </>
+  );
+}
 /** ผลตรวจหนึ่งแฟ้ม: pending รอคิว, running กำลังตรวจ, done เสร็จ (issues = แถวที่ไม่ผ่าน), error ตรวจไม่สำเร็จ */
 type FileCheck = { status: "pending" | "running" | "done" | "error"; issues: Map<number, RowIssue>; rules: string[]; note?: string; error?: string; truncated?: boolean };
 
@@ -143,8 +180,33 @@ async function checkFile(url: string, idField: string, ids: string[], file: stri
 function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[]; file: string; onFile: (f: string) => void; source: Source }) {
   const [checks, setChecks] = useState<Record<string, FileCheck>>({});
   const [info, setInfo] = useState<Record<string, string>>({});
+  const [onlyC, setOnlyC] = useState(false);
   const running = Object.values(checks).some((c) => c.status === "pending" || c.status === "running");
-  const current = files.find((f) => f.file === file) ?? files[0];
+  // เฉพาะแถวที่ติด C: แสดงเฉพาะแฟ้มที่มีแถวไม่ผ่าน และเฉพาะแถวนั้น
+  const failedFiles = files.filter((f) => (checks[f.file]?.issues.size ?? 0) > 0);
+  const filtering = onlyC && failedFiles.length > 0;
+  const shownFiles = filtering ? failedFiles : files;
+  const current = shownFiles.find((f) => f.file === file) ?? shownFiles[0];
+  const rowIndexes = (f: PreviewFile) => (filtering ? [...(checks[f.file]?.issues.keys() ?? [])].sort((a, b) => a - b) : f.rows.map((_, i) => i));
+
+  /** sheet ต่อแฟ้มตามมุมมองปัจจุบัน (กรองติด C อยู่ = เฉพาะแถวที่ติด C) ตรวจแล้วมีคอลัมน์รหัส C และคำอธิบายนำหน้า */
+  function buildSheets(): XlsxSheet[] {
+    return shownFiles.flatMap((f) => {
+      const c = checks[f.file];
+      const checked = c?.status === "done";
+      const rows = rowIndexes(f).map((i) => {
+        const issue = c?.issues.get(i);
+        const extra = checked
+          ? {
+              "ติด C": issue ? issue.codes.map(cLabel).join(", ") : "",
+              "รายละเอียด C": issue ? [...issue.codes.map((code) => `${cLabel(code)} ${info[code] ?? ""}`.trim()), issue.found].filter(Boolean).join(" | ") : "",
+            }
+          : {};
+        return { ...extra, ...f.rows[i] };
+      });
+      return rows.length ? [{ name: f.file, columns: [...(checked ? ["ติด C", "รายละเอียด C"] : []), ...f.columns], rows }] : [];
+    });
+  }
 
   async function runCheck() {
     const empty = { issues: new Map<number, RowIssue>(), rules: [] as string[] };
@@ -184,8 +246,21 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
               {!running && (failed ? <span className="ml-2 font-medium text-danger">ไม่ผ่าน {formatCount(failed)} แถว</span> : <span className="ml-2 font-medium text-success">ไม่พบจากกฎที่มี</span>)}
             </span>
           )}
+          {failed > 0 && (
+            <label className="flex h-9 cursor-pointer items-center gap-2 whitespace-nowrap">
+              <input type="checkbox" checked={onlyC} onChange={(e) => setOnlyC(e.target.checked)} className={`size-4 cursor-pointer accent-[var(--accent)] ${focusRing}`} />
+              เฉพาะแถวที่ติด C
+            </label>
+          )}
         </div>
-        <ZipButton files={files} n={source.ids.length} prefix={source.zipPrefix} />
+        <div className="flex flex-wrap items-center gap-2">
+          <XlsxButton
+            build={buildSheets}
+            filename={`fdh-${source.zipPrefix}-${todayIso()}-${source.ids.length}${filtering ? "-c" : ""}.xlsx`}
+            label={filtering ? "ส่งออก Excel (เฉพาะที่ติด C)" : "ส่งออก Excel"}
+          />
+          <ZipButton files={files} n={source.ids.length} prefix={source.zipPrefix} />
+        </div>
       </div>
       {notes.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-xs text-warning">
@@ -198,7 +273,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
       )}
       <div className="flex min-h-0 flex-col gap-4 text-sm md:flex-row">
         <nav aria-label="แฟ้ม" className="flex shrink-0 flex-wrap gap-1 md:w-44 md:flex-col">
-          {files.map((f) => {
+          {shownFiles.map((f) => {
             const on = f.file === current.file;
             const c = checks[f.file];
             const label = checkLabel(c);
@@ -212,7 +287,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
               >
                 <span className="flex items-center justify-between gap-3">
                   <span className={on ? "font-semibold" : ""}>{f.file}</span>
-                  <span className="tabular-nums">{formatCount(f.rows.length)}</span>
+                  <span className="tabular-nums">{formatCount(filtering ? (c?.issues.size ?? 0) : f.rows.length)}</span>
                 </span>
                 <CheckBar check={c} />
                 {label && <span className={`mt-0.5 text-xs ${c?.issues.size || c?.status === "error" ? "text-danger" : "text-muted"}`}>{label}</span>}
@@ -222,7 +297,10 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
         </nav>
         <section aria-label={`แฟ้ม ${current.file}`} className="min-w-0 flex-1">
           <h3 className="mb-2 font-semibold">
-            แฟ้ม {current.file} <span className="font-normal text-muted tabular-nums">{formatCount(current.rows.length)} แถว</span>
+            แฟ้ม {current.file}{" "}
+            <span className="font-normal text-muted tabular-nums">
+              {filtering ? `ติด C ${formatCount(check?.issues.size ?? 0)} จาก ${formatCount(current.rows.length)} แถว` : `${formatCount(current.rows.length)} แถว`}
+            </span>
             {check?.status === "done" && check.rules.length > 0 && (
               <span className="ml-2 text-xs font-normal text-muted">ตรวจ {check.rules.map(cLabel).join(", ")}</span>
             )}
@@ -238,7 +316,8 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
                 </tr>
               </thead>
               <tbody>
-                {current.rows.map((r, i) => {
+                {rowIndexes(current).map((i) => {
+                  const r = current.rows[i];
                   const issue = check?.issues.get(i);
                   return (
                     <tr key={i} className={`border-t border-line ${issue ? "bg-c-fail text-c-fail-fg" : "hover:bg-surface-sunken"}`}>
