@@ -10,8 +10,9 @@ import type { IconName } from "./icons";
  */
 
 export type NavSubLink = { label: string; href: string };
-export type NavLink = NavSubLink & { icon: IconName };
-export type NavSection = { label: string; icon: IconName; children: NavSubLink[] };
+/** hidden: ซ่อนจากเมนู (และการค้นหาเมนู) ชั่วคราว หน้ายังเปิดด้วย URL ได้และ breadcrumb ยังใช้ชื่อนี้ */
+export type NavLink = NavSubLink & { icon: IconName; hidden?: boolean };
+export type NavSection = { label: string; icon: IconName; children: NavSubLink[]; hidden?: boolean };
 export type NavItem = NavLink | NavSection;
 
 export const navItems: NavItem[] = [
@@ -20,6 +21,7 @@ export const navItems: NavItem[] = [
   { label: "IPD แยกรายสิทธิ", href: "/ipd/admissions", icon: "bed" },
   // Sections follow the revenue-cycle steps (not the URL module), since users look for a page by the step they are on.
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "บริการและมูลค่า",
     icon: "chart",
     children: [
@@ -29,6 +31,7 @@ export const navItems: NavItem[] = [
     ],
   },
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ก่อนส่งเคลม",
     icon: "alert",
     children: [
@@ -38,6 +41,7 @@ export const navItems: NavItem[] = [
     ],
   },
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ผลการเคลม",
     icon: "document",
     children: [
@@ -47,6 +51,7 @@ export const navItems: NavItem[] = [
     ],
   },
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ลูกหนี้",
     icon: "table",
     children: [
@@ -56,11 +61,13 @@ export const navItems: NavItem[] = [
     ],
   },
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "รับเงิน",
     icon: "wallet",
     children: [{ label: "นำเข้า STM", href: "/fund/stm-import" }],
   },
   {
+    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ตรวจสอบข้อมูล",
     icon: "stethoscope",
     children: [

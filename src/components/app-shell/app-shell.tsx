@@ -327,8 +327,9 @@ function ActiveNavList(props: NavProps) {
 
 function filterItems(query: string): NavItem[] {
   const q = query.trim().toLowerCase();
-  if (!q) return navItems;
-  return navItems.flatMap((item) => {
+  const shown = navItems.filter((item) => !item.hidden);
+  if (!q) return shown;
+  return shown.flatMap((item) => {
     if (item.label.toLowerCase().includes(q)) return [item];
     if (!("children" in item)) return [];
     const children = item.children.filter((c) => c.label.toLowerCase().includes(q));
