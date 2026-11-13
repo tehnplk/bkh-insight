@@ -23,6 +23,10 @@ export type RawVisit = {
   pttype_name: string | null;
   pdx: string | null;
   pdx_name: string | null;
+  /** ovstost.name สถานะใน HOSxP */
+  ovst_status: string | null;
+  /** ovstost.export_code รหัสจำหน่ายมาตรฐาน (TYPEOUT 43 แฟ้ม) */
+  ovst_export: string | null;
   income: number | string | null;
   uc_money: number | string | null;
   auth_code: string | null;
@@ -45,6 +49,10 @@ export type VisitRow = {
   fund: string;
   pdx: string | null;
   pdx_name: string | null;
+  /** สถานะผู้ป่วย (การจำหน่าย) เช่น กลับบ้าน, ส่งต่อ, Admit, ยังไม่จำหน่าย */
+  ovst_status: string | null;
+  /** ชื่อสถานะใน HOSxP (ovstost.name) ไว้แสดงเป็นรายละเอียด */
+  ovst_status_detail: string | null;
   income: number;
   uc_money: number;
   /** เลข authen (PP) จาก visit */
@@ -57,6 +65,16 @@ export type VisitRow = {
 };
 
 export type VisitsPage = GridPage<VisitRow>;
+
+/** ovstost.export_code -> สถานะการจำหน่าย (รหัส TYPEOUT 43 แฟ้ม) */
+const DISCHARGE: Record<string, string> = { "1": "กลับบ้าน", "2": "Admit", "3": "ส่งต่อ", "4": "เสียชีวิต", "7": "ปฏิเสธการรักษา", "8": "หนีกลับ" };
+
+/** code 1 รวมสถานะคิวที่ยังไม่จบ (รอผลตรวจ/รอพบแพทย์/รอรับยา) จึงแยกเป็น "ยังไม่จำหน่าย" ; ไม่บันทึกสถานะ = null */
+export function dischargeLabel(code: string | null, name: string | null): string | null {
+  if (!code && !name) return null;
+  if (code === "1" && name?.startsWith("รอ")) return "ยังไม่จำหน่าย";
+  return (code && DISCHARGE[code]) || name;
+}
 
 const num = (v: number | string | null) => (v == null || v === "" ? null : Number(v));
 
@@ -74,6 +92,8 @@ export function buildRows(raws: RawVisit[], fundOf: (pttype: string | null) => s
     fund: fundOf(r.pttype),
     pdx: r.pdx?.trim() || null,
     pdx_name: r.pdx_name || null,
+    ovst_status: dischargeLabel(r.ovst_export, r.ovst_status),
+    ovst_status_detail: r.ovst_status || null,
     income: num(r.income) ?? 0,
     uc_money: num(r.uc_money) ?? 0,
     auth_code: r.auth_code?.trim() || null,

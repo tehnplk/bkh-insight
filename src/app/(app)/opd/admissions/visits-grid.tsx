@@ -41,7 +41,7 @@ function Codes({ row }: { row: VisitRow }) {
 
 /** รหัส PDx พร้อมชื่อโรค ไม่มี PDx = ขาด */
 function Pdx({ row }: { row: VisitRow }) {
-  if (!row.pdx) return <span className="font-medium text-danger">ขาด</span>;
+  if (!row.pdx) return <span className="rounded bg-c-fail px-1.5 py-0.5 font-medium whitespace-nowrap text-c-fail-fg">ยังไม่มี PDx</span>;
   return (
     <span className="flex max-w-64 items-baseline gap-1.5" title={row.pdx_name ?? undefined}>
       <span className="font-medium tabular-nums">{row.pdx}</span>
@@ -86,8 +86,11 @@ function SelectPage({ rows }: { rows: VisitRow[] }) {
 }
 
 const col = gridColumnHelper<VisitRow>();
+// ทุกคอลัมน์ (ยกเว้นเงิน) กรองจากหัวคอลัมน์ได้ ค่าและรายการมาจาก /api/opd/admissions?facet=<id>
+const filterable = { ...nowrap, filter: true } as const;
+const timeCell = { className: "whitespace-nowrap tabular-nums", filter: true } as const;
 const text = (key: "vn" | "hn" | "patient_name" | "pttype_name" | "dep_name", header: string, sortable = true) =>
-  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: nowrap, enableSorting: sortable });
+  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: filterable, enableSorting: sortable });
 const money = (key: "income" | "uc_money", header: string) =>
   col.accessor(key, { header, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 
@@ -100,14 +103,20 @@ const columns = col.columns([
   text("vn", "VN"),
   text("hn", "HN"),
   text("patient_name", "ชื่อ-สกุล", false),
-  col.accessor("fund", { header: "กองทุน", meta: nowrap, enableSorting: false }),
+  col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
   text("pttype_name", "สิทธิ"),
-  col.display({ id: "codes", header: "Authen/ปิดสิทธิ", cell: (c) => <Codes row={c.row.original} /> }),
-  col.accessor("vstdate", { header: "วันที่มา", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("vsttime", { header: "เวลา", cell: (c) => c.getValue() || dash, meta: { className: "whitespace-nowrap tabular-nums" } }),
+  col.display({ id: "codes", header: "Authen/ปิดสิทธิ", cell: (c) => <Codes row={c.row.original} />, meta: { filter: true } }),
+  col.accessor("vstdate", { header: "วันที่มา", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: { ...timeCell, filter: { format: (v) => formatThaiDate(v) || v } } }),
+  col.accessor("vsttime", { header: "เวลา", cell: (c) => c.getValue() || dash, meta: timeCell }),
   text("dep_name", "แผนก"),
-  col.accessor("pdx", { header: "PDx", cell: (c) => <Pdx row={c.row.original} /> }),
-  col.accessor("rcpt_no", { header: "เลขที่ใบเสร็จ", cell: (c) => c.getValue() || dash, meta: { className: "whitespace-nowrap tabular-nums" }, enableSorting: false }),
+  col.accessor("pdx", { header: "PDx", cell: (c) => <Pdx row={c.row.original} />, meta: { filter: true } }),
+  col.accessor("ovst_status", {
+    header: "สถานะผู้ป่วย",
+    // ชี้ดูชื่อสถานะใน HOSxP (เช่น "Admit แผนกอายุรกรรม", "รอผลตรวจ")
+    cell: (c) => (c.getValue() ? <span title={c.row.original.ovst_status_detail ?? undefined}>{c.getValue()}</span> : dash),
+    meta: filterable,
+  }),
+  col.accessor("rcpt_no", { header: "เลขที่ใบเสร็จ", cell: (c) => c.getValue() || dash, meta: timeCell, enableSorting: false }),
   money("income", "มูลค่า (บาท)"),
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
 ]);
@@ -122,6 +131,7 @@ const renderDetail = (r: VisitRow) => (
       <Fact label="Authen">{r.auth_code}</Fact>
       <Fact label="ปิดสิทธิ">{r.close_code}</Fact>
       <Fact label="สถานะปิดสิทธิ">{CLAIM_LABEL[r.claim_status]}</Fact>
+      <Fact label="สถานะผู้ป่วย">{r.ovst_status && r.ovst_status_detail && r.ovst_status !== r.ovst_status_detail ? `${r.ovst_status} (${r.ovst_status_detail})` : r.ovst_status}</Fact>
       <Fact label="เลขที่ใบเสร็จ">{r.rcpt_no}</Fact>
       <Fact label="PDx">{r.pdx ? `${r.pdx} ${r.pdx_name ?? ""}`.trim() : null}</Fact>
       <Fact label="มูลค่า (บาท)">

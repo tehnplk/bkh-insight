@@ -61,3 +61,54 @@ export function parseGridQuery<C extends string>(
     return { ok: false, error: (e as Error).message };
   }
 }
+
+// ตัวกรองหัวคอลัมน์ (แบบ Excel) ของ DataGrid
+//   cf={"col":["v1","v2"]}  เก็บแถวที่ค่าของ col อยู่ในรายการ ("" = ช่องว่าง) หลายคอลัมน์ = AND
+//   facet=<col>[&facetQ=<text>]  -> FacetPage ค่าที่ไม่ซ้ำของ col ตามตัวกรองอื่นทั้งหมด (ไม่รวม cf ของ col เอง)
+// col ต้องอยู่ใน allowlist ของ route ; ค่าส่งเป็น bind parameter เสมอ
+export const MAX_FILTER_VALUES = 500;
+const MAX_FILTER_VALUE_LENGTH = 200;
+
+export type FacetValue = { value: string; label: string; count: number };
+export type FacetPage = { values: FacetValue[]; truncated: boolean };
+export type ColumnFilters<C extends string> = Partial<Record<C, string[]>>;
+export type ColumnFilterQuery<C extends string> = { filters: ColumnFilters<C>; facet: C | null; facetQ: string };
+
+export function parseColumnFilters<C extends string>(
+  params: URLSearchParams,
+  filterable: readonly C[],
+): { ok: true; query: ColumnFilterQuery<C> } | { ok: false; error: string } {
+  const allowed = new Set<string>(filterable);
+  const facet = params.get("facet") || null;
+  if (facet !== null && !allowed.has(facet)) return { ok: false, error: `facet ได้เฉพาะ: ${filterable.join(", ")}` };
+  const facetQ = (params.get("facetQ") ?? "").trim();
+  if (facetQ.length > MAX_Q_LENGTH) return { ok: false, error: `facetQ ยาวได้ไม่เกิน ${MAX_Q_LENGTH} ตัวอักษร` };
+  const raw = params.get("cf");
+  const filters: ColumnFilters<C> = {};
+  if (raw) {
+    let obj: unknown;
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      return { ok: false, error: "cf ต้องเป็น JSON" };
+    }
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: "cf ต้องเป็น object" };
+    for (const [k, v] of Object.entries(obj)) {
+      if (!allowed.has(k)) return { ok: false, error: `cf กรองได้เฉพาะ: ${filterable.join(", ")}` };
+      if (!Array.isArray(v) || v.length > MAX_FILTER_VALUES || !v.every((x) => typeof x === "string" && x.length <= MAX_FILTER_VALUE_LENGTH)) {
+        return { ok: false, error: `cf.${k} ต้องเป็นรายการข้อความไม่เกิน ${MAX_FILTER_VALUES} ค่า` };
+      }
+      if (v.length) filters[k as C] = [...new Set(v as string[])];
+    }
+  }
+  return { ok: true, query: { filters, facet: facet as C | null, facetQ } };
+}
+
+/** SQL ของตัวกรองหนึ่งคอลัมน์ ("" ในรายการ = ค่าว่าง/NULL) ph(n) = placeholder ตัวที่ n (his "?", insight `$${n}`) */
+export function inFilterSql(expr: string, values: string[], ph: (n: number) => string, start = 1): { sql: string; params: string[] } {
+  const real = values.filter((v) => v !== "");
+  const parts: string[] = [];
+  if (real.length) parts.push(`${expr} IN (${real.map((_, i) => ph(start + i)).join(", ")})`);
+  if (real.length < values.length) parts.push(`${expr} IS NULL OR ${expr} = ''`);
+  return { sql: parts.length ? `(${parts.join(" OR ")})` : "1 = 0", params: real };
+}

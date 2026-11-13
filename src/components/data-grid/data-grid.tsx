@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-table";
 import { DetailModal, type DetailModalProps } from "@/components/detail-modal/detail-modal";
 import { STORAGE_USER_EVENT, storageUser } from "@/lib/persisted-filter";
+import { ColumnFilter } from "./column-filter";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
 const features = tableFeatures({
@@ -28,8 +29,10 @@ const features = tableFeatures({
   rowPaginationFeature,
   rowExpandingFeature,
   expandedRowModel: createExpandedRowModel(),
-  /** className ใส่ให้ทั้ง th และ td เช่น "text-right" สำหรับตัวเลข */
-  columnMeta: metaHelper<{ className?: string }>(),
+  /** className ใส่ให้ทั้ง th และ td เช่น "text-right" สำหรับตัวเลข
+   *  filter: ตัวกรองบนหัวคอลัมน์ (ติ๊กเลือกค่า/ค้นหาค่า) endpoint ต้องรองรับ cf/facet ของคอลัมน์นี้ (parseColumnFilters)
+   *  ใส่ true หรือ { format } แปลงค่าที่ server ส่งเป็นข้อความที่แสดง เช่น วันที่ ISO -> พ.ศ. */
+  columnMeta: metaHelper<{ className?: string; filter?: true | { format?: (v: string) => string } }>(),
   /** cell เรียก info.table.options.meta?.reload() ให้โหลดหน้าปัจจุบันใหม่ เช่น หลังปุ่มในแถวแก้ข้อมูล */
   tableMeta: metaHelper<{ reload: () => void }>(),
 });
@@ -78,7 +81,7 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   reorderable?: boolean;
 };
 
-const API_KEYS = ["page", "pageSize", "sort", "dir", "q"] as const;
+const API_KEYS = ["page", "pageSize", "sort", "dir", "q", "cf"] as const;
 const NO_ROWS: never[] = [];
 const NO_KEYS: readonly string[] = [];
 const SEARCH_DEBOUNCE_MS = 300;
@@ -115,6 +118,18 @@ function parseOrder(raw: string | null): string[] {
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/** cf จาก URL: ค่าผิดรูปแบบ = ไม่มีตัวกรอง (server validate ซ้ำ) */
+function parseCf(raw: string | null): Record<string, string[]> {
+  if (!raw) return {};
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).filter((e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every((x) => typeof x === "string")));
+  } catch {
+    return {};
   }
 }
 
@@ -171,6 +186,22 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   apiParams.delete("pageSize");
   apiParams.set("format", "xlsx");
   const exportHref = `${endpoint}?${apiParams}`;
+
+  // ตัวกรองหัวคอลัมน์ cf={"col":[...]} อยู่ใน URL เหมือน state อื่น
+  const columnFilters = parseCf(sp.get("cf"));
+  const facetBase = new URLSearchParams(apiQuery);
+  for (const k of ["page", "pageSize", "sort", "dir"]) facetBase.delete(k);
+  const facetUrl = (col: string) => (fq: string) => {
+    const u = new URLSearchParams(facetBase);
+    u.set("facet", col);
+    if (fq.trim()) u.set("facetQ", fq.trim());
+    return `${endpoint}?${u}`;
+  };
+  function setColumnFilter(col: string, values: string[]) {
+    const next = { ...columnFilters, [col]: values };
+    if (!values.length) delete next[col];
+    setParams({ cf: Object.keys(next).length ? JSON.stringify(next) : null, page: null });
+  }
 
   const [reload, setReload] = useState(0);
   const requestKey = `${endpoint}?${apiQuery}#${reload}`;
@@ -481,6 +512,17 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                   const dirNow = h.column.getIsSorted();
                   const cls = h.column.columnDef.meta?.className ?? "";
                   const id = h.column.id;
+                  const filterMeta = h.column.columnDef.meta?.filter;
+                  const headerDef = h.column.columnDef.header;
+                  const filterEl = filterMeta && (
+                    <ColumnFilter
+                      label={typeof headerDef === "string" ? headerDef : id}
+                      value={columnFilters[id] ?? []}
+                      onChange={(v) => setColumnFilter(id, v)}
+                      facetUrl={facetUrl(id)}
+                      formatValue={filterMeta === true ? undefined : filterMeta.format}
+                    />
+                  );
                   const drag = reorderable
                     ? {
                         draggable: true,
@@ -532,6 +574,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                       ) : (
                         <table.FlexRender header={h} />
                       )}
+                      {filterEl}
                     </th>
                   );
                 })}
@@ -547,6 +590,11 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           {loading ? "กำลังโหลด…" : `แสดง ${fmt(from)}–${fmt(to)} จาก ${fmt(total)} รายการ`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
+          {Object.keys(columnFilters).length > 0 && (
+            <button type="button" onClick={() => setParams({ cf: null, page: null })} className={`rounded px-1.5 underline-offset-2 hover:text-foreground hover:underline ${focusRing}`}>
+              ล้างตัวกรองคอลัมน์ ({fmt(Object.keys(columnFilters).length)})
+            </button>
+          )}
           {reorderable && order.length > 0 && (
             <button type="button" onClick={() => saveOrder([])} className={`rounded px-1.5 underline-offset-2 hover:text-foreground hover:underline ${focusRing}`}>
               เรียงคอลัมน์ตามเดิม
