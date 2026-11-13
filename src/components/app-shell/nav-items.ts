@@ -21,7 +21,6 @@ export const navItems: NavItem[] = [
   { label: "IPD แยกรายสิทธิ", href: "/ipd/admissions", icon: "bed" },
   // Sections follow the revenue-cycle steps (not the URL module), since users look for a page by the step they are on.
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "บริการและมูลค่า",
     icon: "chart",
     children: [
@@ -31,7 +30,6 @@ export const navItems: NavItem[] = [
     ],
   },
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ก่อนส่งเคลม",
     icon: "alert",
     children: [
@@ -41,7 +39,6 @@ export const navItems: NavItem[] = [
     ],
   },
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ผลการเคลม",
     icon: "document",
     children: [
@@ -51,7 +48,6 @@ export const navItems: NavItem[] = [
     ],
   },
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ลูกหนี้",
     icon: "table",
     children: [
@@ -61,13 +57,11 @@ export const navItems: NavItem[] = [
     ],
   },
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "รับเงิน",
     icon: "wallet",
     children: [{ label: "นำเข้า STM", href: "/fund/stm-import" }],
   },
   {
-    hidden: true, // ซ่อนไว้ก่อน (ผู้ใช้ขอให้เมนูหลักเหลือแค่ภาพรวมกับ OPD/IPD แยกรายสิทธิ) เอาบรรทัดนี้ออกเพื่อแสดงอีกครั้ง
     label: "ตรวจสอบข้อมูล",
     icon: "stethoscope",
     children: [
