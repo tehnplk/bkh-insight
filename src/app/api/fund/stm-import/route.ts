@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { escapeLike, insightExecute, insightQuery, insightTransaction } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse } from "@/lib/xlsx";
 import { MAX_FILE_BYTES, parseStm, StmUnsupportedError, type ParsedStm, type StmRow } from "./stm";
@@ -41,22 +42,40 @@ const SORTABLE = [
 
 // $1 = คำค้น (null หรือ LIKE pattern)
 const WHERE = `WHERE ($1::text IS NULL OR doc_no ILIKE $1 OR file_name ILIKE $1 OR scheme ILIKE $1)`;
-const LIST_SQL = `SELECT id, period_month, run_no, scheme, patient_type, doc_no, file_name, transfer_date, row_count,
+const LIST_COLUMNS = `SELECT id, period_month, run_no, scheme, patient_type, doc_no, file_name, transfer_date, row_count,
   paid_total, deduction, net_total, imported_by, imported_at
-FROM stm_file ${WHERE}`;
+FROM stm_file`;
+// ตัวกรองหัวคอลัมน์ (allowlist) ยกเว้นยอดเงิน
+const FILTER_DEFS: ColumnFilterDefs = {
+  period_month: { expr: "to_char(period_month, 'YYYY-MM-DD')" },
+  scheme: { expr: "scheme" },
+  patient_type: { expr: "patient_type" },
+  doc_no: { expr: "doc_no" },
+  transfer_date: { expr: "to_char(transfer_date, 'YYYY-MM-DD')" },
+  row_count: { expr: "row_count" },
+  imported_by: { expr: "imported_by" },
+  imported_at: { expr: "to_char(imported_at, 'YYYY-MM-DD')" },
+};
+const FILTERABLE = Object.keys(FILTER_DEFS);
 
 export async function GET(request: NextRequest) {
   if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const parsed = parseGridQuery(request.nextUrl.searchParams, SORTABLE);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   const { page, pageSize, sort, dir, q, format } = parsed.query;
+  const cf = parseColumnFilters(request.nextUrl.searchParams, FILTERABLE);
+  if (!cf.ok) return Response.json({ error: cf.error }, { status: 400 });
   const like = q ? `%${escapeLike(q)}%` : null;
+  const cfw = columnFilterWhere(FILTER_DEFS, cf.query.filters, cf.query.facet, "pg", 2);
+  const where = `${WHERE}${cfw.parts.map((p) => ` AND ${p}`).join("")}`;
+  const args = [like, ...cfw.params] as SqlValue[];
+  if (cf.query.facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, "FROM stm_file", { sql: where, params: args }, "pg"));
   // sort มาจาก allowlist จึงใช้เป็นชื่อคอลัมน์ได้ ค่าเริ่มต้นงวดล่าสุดก่อน
-  const select = `${LIST_SQL}
+  const select = `${LIST_COLUMNS} ${where}
 ORDER BY ${sort ?? "period_month"} ${dir === "desc" || !sort ? "DESC" : "ASC"} NULLS LAST, period_month DESC, scheme, patient_type, run_no DESC, id DESC`;
 
   if (format === "xlsx") {
-    const rows = await insightQuery<StmFileRow>(select, [like]);
+    const rows = await insightQuery<StmFileRow>(select, args);
     return xlsxResponse<StmFileRow>("stm-files.xlsx", [
       { key: "period_month", header: "งวด", width: 12 },
       { key: "run_no", header: "ครั้งที่", width: 8, type: "count" },
@@ -76,8 +95,8 @@ ORDER BY ${sort ?? "period_month"} ${dir === "desc" || !sort ? "DESC" : "ASC"} N
 
   const [rows, [{ total }]] = await Promise.all([
     insightQuery<StmFileRow>(`${select}
-LIMIT $2 OFFSET $3`, [like, pageSize, (page - 1) * pageSize]),
-    insightQuery<{ total: number }>(`SELECT count(*)::int AS total FROM stm_file ${WHERE}`, [like]),
+LIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, (page - 1) * pageSize]),
+    insightQuery<{ total: number }>(`SELECT count(*)::int AS total FROM stm_file ${where}`, args),
   ]);
   const body: GridPage<StmFileRow> = { rows, total };
   return Response.json(body);

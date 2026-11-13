@@ -19,13 +19,13 @@ function StatusBadge({ status }: { status: ClaimStatus }) {
 const orDash = (v: string | null) => v || <span className="text-muted">–</span>;
 const col = gridColumnHelper<PendingRow>();
 const columns = col.columns([
-  col.accessor("vstdate", { header: "วันที่", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap" } }),
-  col.accessor("hn", { header: "HN", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("full_name", { header: "ชื่อ-นามสกุล", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("fund_name", { header: "กองทุน", enableSorting: false }), // API ไม่รับ sort=fund_name
-  col.accessor("dep_name", { header: "แผนก" }),
-  col.accessor("authen_code", { header: "authen", cell: (c) => orDash(c.getValue()), enableSorting: false, meta: { className: "whitespace-nowrap" } }),
-  col.accessor("status", { header: "สถานะ", cell: (c) => <StatusBadge status={c.getValue()} />, enableSorting: false }),
+  col.accessor("vstdate", { header: "วันที่", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap", filter: { format: (v) => formatThaiDate(v) || v } } }),
+  col.accessor("hn", { header: "HN", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("full_name", { header: "ชื่อ-นามสกุล", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("fund_name", { header: "กองทุน", enableSorting: false, meta: { filter: true } }), // API ไม่รับ sort=fund_name
+  col.accessor("dep_name", { header: "แผนก", meta: { filter: true } }),
+  col.accessor("authen_code", { header: "authen", cell: (c) => orDash(c.getValue()), enableSorting: false, meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("status", { header: "สถานะ", cell: (c) => <StatusBadge status={c.getValue()} />, enableSorting: false, meta: { filter: true } }),
   col.accessor("amount", { header: "มูลค่า (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } }),
 ]);
 const renderDetail = (row: PendingRow) => <VisitItems vn={row.vn} />;

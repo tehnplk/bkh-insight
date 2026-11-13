@@ -133,18 +133,21 @@ type EntriesPage = GridPage<LedgerEntry> & { summary: { amount: number } };
 const col = gridColumnHelper<LedgerEntry>();
 const nowrap = { className: "whitespace-nowrap" };
 const dash = <span className="text-muted">–</span>;
+// ตัวกรองหัวคอลัมน์จาก /api/fund/ar-ledger/entries?facet=<id> (ยกเว้นจำนวนเงิน)
+const filterable = { ...nowrap, filter: true } as const;
+const dateFilter = { className: "whitespace-nowrap tabular-nums", filter: { format: (v: string) => formatThaiDate(v) || v } } as const;
 const columns = col.columns([
-  col.accessor("entry_date", { header: "วันที่ลงบัญชี", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("kind", { header: "ประเภท", cell: (c) => KIND_LABEL[c.getValue()], meta: nowrap }),
-  col.accessor("patient_type", { header: "OP/IP", meta: nowrap }),
-  col.accessor("vn", { header: "VN/AN", cell: (c) => c.getValue() ?? c.row.original.an, meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("ref", { header: "เลขที่ลูกหนี้", cell: (c) => (c.row.original.patient_type === "OP" ? c.getValue() : dash), meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("ref_date", { header: "วันตั้งหนี้/จำหน่าย", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.accessor("pttype", { header: "สิทธิ", cell: (c) => c.getValue() ?? dash, meta: nowrap }),
-  col.accessor("hipdata_code", { header: "กองทุน", cell: (c) => c.getValue() ?? dash, meta: nowrap }),
-  col.accessor("hospmain", { header: "หน่วยบริการประจำ", cell: (c) => c.getValue() ?? dash, meta: nowrap }),
+  col.accessor("entry_date", { header: "วันที่ลงบัญชี", cell: (c) => formatThaiDate(c.getValue()), meta: dateFilter }),
+  col.accessor("kind", { header: "ประเภท", cell: (c) => KIND_LABEL[c.getValue()], meta: filterable }),
+  col.accessor("patient_type", { header: "OP/IP", meta: filterable }),
+  col.accessor("vn", { header: "VN/AN", cell: (c) => c.getValue() ?? c.row.original.an, meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
+  col.accessor("ref", { header: "เลขที่ลูกหนี้", cell: (c) => (c.row.original.patient_type === "OP" ? c.getValue() : dash), meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
+  col.accessor("ref_date", { header: "วันตั้งหนี้/จำหน่าย", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateFilter }),
+  col.accessor("pttype", { header: "สิทธิ", cell: (c) => c.getValue() ?? dash, meta: filterable }),
+  col.accessor("hipdata_code", { header: "กองทุน", cell: (c) => c.getValue() ?? dash, meta: filterable }),
+  col.accessor("hospmain", { header: "หน่วยบริการประจำ", cell: (c) => c.getValue() ?? dash, meta: filterable }),
   col.accessor("amount", { header: "จำนวนเงิน (บาท)", cell: (c) => <Money value={Number(c.getValue())} />, meta: { className: num } }),
-  col.accessor("note", { header: "เหตุผล", enableSorting: false, cell: (c) => c.getValue() ?? dash }),
+  col.accessor("note", { header: "เหตุผล", enableSorting: false, cell: (c) => c.getValue() ?? dash, meta: { filter: true } }),
 ]);
 const renderSummary = ({ total, summary }: EntriesPage) => (
   <p className="text-muted tabular-nums">

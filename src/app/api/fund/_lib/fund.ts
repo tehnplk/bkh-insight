@@ -91,6 +91,7 @@ export function fundFilterDef(lk: Lookups, pttypeExpr: string) {
   return {
     expr: pttypeExpr,
     value: (raw: string | null) => fundOf(lk, raw),
+    labelOf: (code: string) => (lk.fundName(code) === code ? code : `${code} ${lk.fundName(code)}`),
     where: (values: string[], ph: (n: number) => string, start: number) => {
       const set = new Set(values);
       const codes = [...lk.pttype].filter(([, v]) => set.has(v.fund)).map(([code]) => code);

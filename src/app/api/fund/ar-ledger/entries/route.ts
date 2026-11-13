@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, insightQuery } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse } from "@/lib/xlsx";
 import { badRequest, isAuthed, unauthorized } from "../../_lib/fund";
@@ -29,6 +30,21 @@ const ACCOUNT = /^\d{10}\.\d{3,5}$/;
 const WHERE = `WHERE entry_date BETWEEN $1 AND $2 AND account_code IS NOT DISTINCT FROM $3
   AND ($4::text IS NULL OR ref ILIKE $4 OR vn ILIKE $4 OR an ILIKE $4 OR pttype ILIKE $4 OR hipdata_code ILIKE $4 OR hospmain ILIKE $4)`;
 
+// ตัวกรองหัวคอลัมน์ (allowlist) บน ar_ledger
+const FILTER_DEFS: ColumnFilterDefs = {
+  entry_date: { expr: "to_char(entry_date, 'YYYY-MM-DD')" },
+  kind: { expr: "kind", labels: KIND_LABEL },
+  patient_type: { expr: "patient_type" },
+  vn: { expr: "COALESCE(vn, an)" },
+  ref: { expr: "ref" },
+  ref_date: { expr: "to_char(ref_date, 'YYYY-MM-DD')" },
+  pttype: { expr: "pttype" },
+  hipdata_code: { expr: "hipdata_code" },
+  hospmain: { expr: "hospmain" },
+  note: { expr: "note" },
+};
+const FILTERABLE = Object.keys(FILTER_DEFS);
+
 // รายการในเดือนของบัญชีเดียว ?month=YYYY-MM&account=<รหัสบัญชี|none>
 export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
@@ -41,10 +57,17 @@ export async function GET(request: NextRequest) {
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
-  const args = [range.from, range.to, account, q ? `%${escapeLike(q)}%` : null];
+  const cf = parseColumnFilters(params, FILTERABLE);
+  if (!cf.ok) return badRequest(cf.error);
+  const { filters, facet, facetQ } = cf.query;
+  const base = [range.from, range.to, account, q ? `%${escapeLike(q)}%` : null] as SqlValue[];
+  const cfw = columnFilterWhere(FILTER_DEFS, filters, facet, "pg", base.length + 1);
+  const where = `${WHERE}${cfw.parts.map((p) => ` AND ${p}`).join("")}`;
+  const args = [...base, ...cfw.params];
+  if (facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, facet, facetQ, "FROM ar_ledger", { sql: where, params: args }, "pg"));
   // sort มาจาก allowlist จึงใช้เป็นชื่อคอลัมน์ได้
   const select = `SELECT id, entry_date, kind, ref, vn, an, patient_type, ref_date, pttype, hipdata_code, hospmain, amount, note
-FROM ar_ledger ${WHERE}
+FROM ar_ledger ${where}
 ORDER BY ${sort ?? "entry_date"} ${dir === "desc" ? "DESC" : "ASC"} NULLS LAST, id`;
 
   if (format === "xlsx") {
@@ -67,8 +90,8 @@ ORDER BY ${sort ?? "entry_date"} ${dir === "desc" ? "DESC" : "ASC"} NULLS LAST, 
 
   const [rows, [{ total, amount }]] = await Promise.all([
     insightQuery<LedgerEntry>(`${select}
-LIMIT $5 OFFSET $6`, [...args, pageSize, (page - 1) * pageSize]),
-    insightQuery<{ total: number; amount: string | null }>(`SELECT count(*)::int AS total, SUM(amount) AS amount FROM ar_ledger ${WHERE}`, args),
+LIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, (page - 1) * pageSize]),
+    insightQuery<{ total: number; amount: string | null }>(`SELECT count(*)::int AS total, SUM(amount) AS amount FROM ar_ledger ${where}`, args),
   ]);
   const body: GridPage<LedgerEntry> & { summary: { amount: number } } = { rows, total, summary: { amount: Number(amount ?? 0) } };
   return Response.json(body);

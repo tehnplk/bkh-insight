@@ -25,19 +25,20 @@ const SUMMARY_ORDER: Status[] = ["imported", "duplicate", "unsupported", "error"
 const dash = <span className="text-muted">–</span>;
 const col = gridColumnHelper<RepFileRow>();
 const columns = col.columns([
-  col.accessor("file_date", { header: "วันที่ไฟล์", cell: (c) => (c.getValue() ? formatThaiDate(c.getValue()!) : dash), meta: { className: "whitespace-nowrap" } }),
-  col.accessor("file_name", { header: "ชื่อไฟล์", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("rep_type", { header: "ประเภท", meta: { className: "whitespace-nowrap" } }),
-  col.accessor("row_count", { header: "จำนวนแถว", cell: (c) => formatCount(c.getValue()), meta: { className: num } }),
-  col.accessor("passed", { header: "ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num } }),
-  col.accessor("failed", { header: "ไม่ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num } }),
+  col.accessor("file_date", { header: "วันที่ไฟล์", cell: (c) => (c.getValue() ? formatThaiDate(c.getValue()!) : dash), meta: { className: "whitespace-nowrap", filter: { format: (v) => formatThaiDate(v) || v } } }),
+  col.accessor("file_name", { header: "ชื่อไฟล์", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("rep_type", { header: "ประเภท", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("row_count", { header: "จำนวนแถว", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
+  col.accessor("passed", { header: "ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num, filter: true } }),
+  col.accessor("failed", { header: "ไม่ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num, filter: true } }),
   col.accessor("paid_total", { header: "ชดเชยรวม (บาท)", cell: (c) => (c.getValue() === null ? dash : formatBaht(Number(c.getValue()))), meta: { className: num } }),
   col.accessor("imported_at", {
     header: "นำเข้าเมื่อ",
     cell: (c) => `${formatThaiDate(c.getValue())} ${c.getValue().slice(11, 16)}`,
-    meta: { className: "whitespace-nowrap tabular-nums" },
+    // กรองตามวันที่นำเข้า (ค่า YYYY-MM-DD)
+    meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } },
   }),
-  col.accessor("imported_by", { header: "ผู้นำเข้า", cell: (c) => c.getValue() ?? dash, meta: { className: "whitespace-nowrap" } }),
+  col.accessor("imported_by", { header: "ผู้นำเข้า", cell: (c) => c.getValue() ?? dash, meta: { className: "whitespace-nowrap", filter: true } }),
 ]);
 
 const renderDetail = (r: RepFileRow) => <RepFileDetailView id={r.id} />;

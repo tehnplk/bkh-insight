@@ -3,7 +3,8 @@ import type { NextRequest } from "next/server";
 import { revalidateTag } from "next/cache";
 import { auth } from "@/auth";
 import { escapeLike, insightQuery, insightTransaction } from "@/lib/db";
-import { parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
+import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
 import { MAX_FILE_BYTES, parseFileName, parseRep, type RepRow } from "./rep";
 import { UC_DASHBOARD_TAG } from "../uc-dashboard/dashboard";
@@ -35,26 +36,47 @@ export type RepImportResult = {
 const SORTABLE = ["file_date", "file_name", "rep_type", "row_count", "passed", "failed", "paid_total", "imported_at", "imported_by"] as const;
 
 // ยอดผ่าน/ไม่ผ่าน/ชดเชย จากชีต Summary ของไฟล์ $1 = คำค้น (null หรือ LIKE pattern)
-const LIST_SQL = `SELECT f.id, f.file_date, f.file_name, f.rep_type, f.row_count, s.passed, s.failed, s.paid_total, f.imported_at, f.imported_by
-FROM rep_file f
+const LIST_FROM = `FROM rep_file f
 LEFT JOIN LATERAL (
   SELECT sum(passed)::int AS passed, sum(failed)::int AS failed, sum(paid_total) AS paid_total
   FROM rep_summary WHERE rep_file_id = f.id
-) s ON true
-WHERE ($1::text IS NULL OR f.file_name ILIKE $1 OR f.rep_type ILIKE $1)`;
+) s ON true`;
+const LIST_WHERE = "WHERE ($1::text IS NULL OR f.file_name ILIKE $1 OR f.rep_type ILIKE $1)";
+// ตัวกรองหัวคอลัมน์ (allowlist) ยกเว้นยอดเงิน
+const FILTER_DEFS: ColumnFilterDefs = {
+  file_date: { expr: "to_char(f.file_date, 'YYYY-MM-DD')" },
+  file_name: { expr: "f.file_name" },
+  rep_type: { expr: "f.rep_type" },
+  row_count: { expr: "f.row_count" },
+  passed: { expr: "s.passed" },
+  failed: { expr: "s.failed" },
+  imported_at: { expr: "to_char(f.imported_at, 'YYYY-MM-DD')" },
+  imported_by: { expr: "f.imported_by" },
+};
+const FILTERABLE = Object.keys(FILTER_DEFS);
 
 export async function GET(request: NextRequest) {
   if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const parsed = parseGridQuery(request.nextUrl.searchParams, SORTABLE);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   const { page, pageSize, sort, dir, q, format } = parsed.query;
+  const cf = parseColumnFilters(request.nextUrl.searchParams, FILTERABLE);
+  if (!cf.ok) return Response.json({ error: cf.error }, { status: 400 });
   const like = q ? `%${escapeLike(q)}%` : null;
+  const cfw = columnFilterWhere(FILTER_DEFS, cf.query.filters, cf.query.facet, "pg", 2);
+  const where = `${LIST_WHERE}${cfw.parts.map((p) => ` AND ${p}`).join("")}`;
+  const args: (SqlValue | null)[] = [like, ...cfw.params];
+  if (cf.query.facet) {
+    return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, LIST_FROM, { sql: where, params: args as SqlValue[] }, "pg"));
+  }
   // sort มาจาก allowlist จึงใช้เป็นชื่อคอลัมน์ได้
-  const select = `${LIST_SQL}
+  const select = `SELECT f.id, f.file_date, f.file_name, f.rep_type, f.row_count, s.passed, s.failed, s.paid_total, f.imported_at, f.imported_by
+${LIST_FROM}
+${where}
 ORDER BY ${sort ?? "imported_at"} ${dir === "desc" || !sort ? "DESC" : "ASC"} NULLS LAST, f.id DESC`;
 
   if (format === "xlsx") {
-    const rows = await insightQuery<RepFileRow>(select, [like]);
+    const rows = await insightQuery<RepFileRow>(select, args);
     return xlsxResponse<RepFileRow>("rep-files.xlsx", [
       { key: "file_date", header: "วันที่ไฟล์", width: 12 },
       { key: "file_name", header: "ชื่อไฟล์", width: 44 },
@@ -70,9 +92,9 @@ ORDER BY ${sort ?? "imported_at"} ${dir === "desc" || !sort ? "DESC" : "ASC"} NU
 
   const [rows, [{ total }]] = await Promise.all([
     insightQuery<RepFileRow>(`${select}
-LIMIT $2 OFFSET $3`, [like, pageSize, (page - 1) * pageSize]),
-    insightQuery<{ total: number }>(`SELECT count(*)::int AS total FROM rep_file f
-WHERE ($1::text IS NULL OR f.file_name ILIKE $1 OR f.rep_type ILIKE $1)`, [like]),
+LIMIT $${args.length + 1} OFFSET $${args.length + 2}`, [...args, pageSize, (page - 1) * pageSize]),
+    insightQuery<{ total: number }>(`SELECT count(*)::int AS total ${LIST_FROM}
+${where}`, args),
   ]);
   const body: GridPage<RepFileRow> = { rows, total };
   return Response.json(body);

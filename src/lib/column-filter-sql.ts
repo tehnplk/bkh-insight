@@ -16,7 +16,13 @@ export type SqlValue = string | number;
 export type Dialect = "mysql" | "pg";
 export type ColumnFilterDef =
   | { expr: string; label?: string; labels?: Record<string, string>; display?: (v: string) => string }
-  | { expr: string; value: (raw: string | null) => string; where: (values: string[], ph: Placeholder, start: number) => { sql: string; params: SqlValue[] } };
+  | {
+      expr: string;
+      value: (raw: string | null) => string;
+      where: (values: string[], ph: Placeholder, start: number) => { sql: string; params: SqlValue[] };
+      /** ชื่อที่แสดงของค่า (ไม่ใส่ = ค่าเอง) */
+      labelOf?: (value: string) => string;
+    };
 export type ColumnFilterDefs = Record<string, ColumnFilterDef>;
 
 const PH: Record<Dialect, Placeholder> = { mysql: () => "?", pg: (n) => `$${n}` };
@@ -78,7 +84,7 @@ export async function loadFacet(
       const v = def.value(r.v == null ? null : String(r.v));
       sum.set(v, (sum.get(v) ?? 0) + Number(r.n));
     }
-    return pick([...sum].map(([value, count]) => ({ value, label: value, count })));
+    return pick([...sum].map(([value, count]) => ({ value, label: def.labelOf?.(value) ?? value, count })));
   }
 
   // ค้นใน SQL ได้เมื่อค่าที่แสดงคือค่า/label ตรงๆ (ไม่มีการแปลงชื่อในโค้ด)
