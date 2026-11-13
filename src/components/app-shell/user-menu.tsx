@@ -9,6 +9,7 @@ export async function UserMenu() {
   return (
     <ProfileMenu
       name={session.user.name}
+      userKey={session.user.userId ?? `super:${session.user.name}`}
       admin={session.user.role === "admin"}
       signOut={async () => {
         "use server";

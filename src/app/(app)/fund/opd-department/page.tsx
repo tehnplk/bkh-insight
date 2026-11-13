@@ -7,7 +7,7 @@ const title = <h1 className="text-title text-balance">มูลค่าตา�
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       {/* แถวหัวข้ออยู่ใน OpdDepartment เพราะตัวเลือกแผนก/สิทธิมาจาก response เดียวกับตาราง (useSearchParams ต้องอยู่ใต้ Suspense) */}
       <Suspense
         fallback={

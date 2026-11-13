@@ -41,14 +41,14 @@ export const isoDate = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 export type DateRange = { start: string; end: string; startMs: number; endMs: number; days: number };
 
-/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน MAX_RANGE_DAYS (31) วัน (นับรวมวันแรกและวันสุดท้าย) */
-export function parseRange(params: URLSearchParams): { ok: true; range: DateRange } | { ok: false; error: string } {
+/** start/end แบบ YYYY-MM-DD ที่เป็นวันจริง start <= end และยาวไม่เกิน maxDays (ค่าเริ่มต้น MAX_RANGE_DAYS 31) วัน (นับรวมวันแรกและวันสุดท้าย) */
+export function parseRange(params: URLSearchParams, maxDays = MAX_RANGE_DAYS): { ok: true; range: DateRange } | { ok: false; error: string } {
   const startMs = toUtc(params.get("start"));
   const endMs = toUtc(params.get("end"));
   if (startMs === null || endMs === null) return { ok: false, error: "start และ end ต้องเป็นวันที่รูปแบบ YYYY-MM-DD" };
   if (startMs > endMs) return { ok: false, error: "start ต้องไม่เกิน end" };
   const days = (endMs - startMs) / DAY_MS + 1;
-  if (days > MAX_RANGE_DAYS) return { ok: false, error: `ช่วงวันที่ยาวได้ไม่เกิน ${MAX_RANGE_DAYS} วัน` };
+  if (days > maxDays) return { ok: false, error: `ช่วงวันที่ยาวได้ไม่เกิน ${maxDays} วัน` };
   return { ok: true, range: { start: isoDate(startMs), end: isoDate(endMs), startMs, endMs, days } };
 }
 

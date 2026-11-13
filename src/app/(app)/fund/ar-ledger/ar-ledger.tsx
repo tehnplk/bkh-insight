@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import type { GridPage } from "@/lib/grid-query";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
+import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
 import type { AccountBalance, ArLedgerSummary } from "@/app/api/fund/ar-ledger/route";
@@ -152,6 +153,31 @@ const renderSummary = ({ total, summary }: EntriesPage) => (
   </p>
 );
 
+const detailTitle = (r: LedgerEntry) => `${r.an ? `AN ${r.an}` : r.vn ? `VN ${r.vn}` : r.ref} · ${r.patient_type}`;
+
+function LedgerDetail({ row, account }: { row: LedgerEntry; account: ReactNode }) {
+  return (
+    <div className="text-sm">
+      <Facts>
+        <Fact label="วันที่ลงบัญชี">{formatThaiDate(row.entry_date)}</Fact>
+        <Fact label="ประเภท">{KIND_LABEL[row.kind]}</Fact>
+        {row.patient_type === "OP" && <Fact label="เลขที่ลูกหนี้">{row.ref}</Fact>}
+        <Fact label="วันตั้งหนี้/จำหน่าย">{formatThaiDate(row.ref_date)}</Fact>
+        <Fact label="สิทธิ">{row.pttype}</Fact>
+        <Fact label="กองทุน">{row.hipdata_code}</Fact>
+        <Fact label="หน่วยบริการประจำ">{row.hospmain}</Fact>
+        <Fact label="บัญชี">{account}</Fact>
+        <Fact label="จำนวนเงิน (บาท)"><span className="font-semibold"><Money value={Number(row.amount)} /></span></Fact>
+        <Fact label="เหตุผล">{row.note}</Fact>
+      </Facts>
+      {(row.vn || row.an) && (
+        // ยอดของ adjust/cancel/reverse ไม่ใช่ยอดหนี้ทั้งก้อน จึงเทียบส่วนต่างเฉพาะแถวตั้งหนี้
+        <DebtorItems vn={row.vn} an={row.an} debtor={row.kind === "set" ? Number(row.amount) : undefined} />
+      )}
+    </div>
+  );
+}
+
 export function ArLedger() {
   const { month, account, set } = useUrlParams(["month", "account"]);
   const { data, error, loading, retry } = useJson<ArLedgerSummary>(`/api/fund/ar-ledger${month ? `?${new URLSearchParams({ month })}` : ""}`);
@@ -164,6 +190,14 @@ export function ArLedger() {
   const d = shown;
   const selected = d?.rows.find((r) => accountKey(r) === account);
   const lastFailed = d?.lastSync?.error && !result ? d.lastSync : null;
+  const accountCode = selected?.code ?? (account === NONE ? "ไม่ระบุบัญชี" : account);
+  const accountLabel = (
+    <>
+      {accountCode}
+      {selected?.name && <span className="ml-2 font-normal text-muted">{selected.name}</span>}
+    </>
+  );
+  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} />;
 
   return (
     <div className="flex flex-col gap-5">
@@ -233,10 +267,7 @@ export function ArLedger() {
           )}
           {account && (
             <section className="flex flex-col gap-2">
-              <h2 className="text-title">
-                {selected?.code ?? (account === NONE ? "ไม่ระบุบัญชี" : account)}
-                {selected?.name && <span className="ml-2 font-normal text-muted">{selected.name}</span>}
-              </h2>
+              <h2 className="text-title">{accountLabel}</h2>
               <DataGrid<LedgerEntry, EntriesPage>
                 key={gridKey}
                 endpoint="/api/fund/ar-ledger/entries"
@@ -245,6 +276,10 @@ export function ArLedger() {
                 getRowId={(r) => r.id}
                 renderSummary={renderSummary}
                 exportPlacement="summary"
+                renderDetail={renderDetail}
+                detailMode="modal"
+                detailTitle={detailTitle}
+                detailSize="medium"
               />
             </section>
           )}

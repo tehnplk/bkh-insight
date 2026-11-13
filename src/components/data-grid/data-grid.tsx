@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   columnFilteringFeature,
@@ -18,6 +18,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { DetailModal, type DetailModalProps } from "@/components/detail-modal/detail-modal";
+import { STORAGE_USER_EVENT, storageUser } from "@/lib/persisted-filter";
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
 const features = tableFeatures({
@@ -67,6 +68,14 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   renderSummary?: (data: R) => ReactNode;
   /** ตำแหน่งปุ่มส่งออก Excel: "toolbar" (ค่าเริ่มต้น ชิดขวาแถวช่องค้นหา) หรือ "summary" (ชิดขวาแถบสรุป ใช้ได้เมื่อมี renderSummary ไม่มีจะกลับไปอยู่ toolbar) */
   exportPlacement?: "toolbar" | "summary";
+  /** ปุ่มเพิ่มเติมวางหน้าปุ่มส่งออก Excel ในแถบสรุป (ใช้เมื่อ exportPlacement="summary" และมี renderSummary) */
+  summaryActions?: ReactNode;
+  /** "compact" = ช่องค้นหาแคบลง (เมื่อแถวตัวกรองแน่น) ค่าเริ่มต้น "default" */
+  searchSize?: "default" | "compact";
+  /** ไอคอนของปุ่มเปิดรายละเอียดหน้าแถว (detailMode="modal") ไม่ส่ง = ไอคอนเปิดหน้าต่าง */
+  detailIcon?: ReactNode;
+  /** ผู้ใช้ลากหัวคอลัมน์ (หรือ Alt+←/→ บนหัวคอลัมน์) เพื่อย้ายลำดับได้ จำไว้ใน localStorage ต่อหน้า */
+  reorderable?: boolean;
 };
 
 const API_KEYS = ["page", "pageSize", "sort", "dir", "q"] as const;
@@ -80,6 +89,37 @@ const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const btnBase = `inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
 const btn = `${btnBase} border-line bg-surface text-foreground hover:bg-hover`;
 const btnPrimary = `${btnBase} border-transparent bg-accent text-accent-fg hover:bg-accent/90`;
+
+// ลำดับคอลัมน์เก็บใน localStorage อ่านผ่าน useSyncExternalStore (server/hydration = ลำดับตั้งต้น)
+const ORDER_EVENT = "bkh-grid-cols";
+function subscribeOrder(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(ORDER_EVENT, onChange);
+  window.addEventListener(STORAGE_USER_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(ORDER_EVENT, onChange);
+    window.removeEventListener(STORAGE_USER_EVENT, onChange);
+  };
+}
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function parseOrder(raw: string | null): string[] {
+  try {
+    const v: unknown = JSON.parse(raw ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** id ของคอลัมน์ (display ใช้ id, accessor ใช้ accessorKey) ใช้จัดลำดับ */
+const columnId = (c: { id?: string }) => c.id ?? String((c as { accessorKey?: unknown }).accessorKey ?? "");
 
 function Icon({ d, className = "size-4" }: { d: string; className?: string }) {
   return (
@@ -104,6 +144,10 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   liveSearch = false,
   renderSummary,
   exportPlacement = "toolbar",
+  summaryActions,
+  searchSize = "default",
+  detailIcon,
+  reorderable = false,
 }: DataGridProps<T, R>) {
   const router = useRouter();
   const pathname = usePathname();
@@ -217,11 +261,43 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   }
   const goToPage = (p: number) => setParams({ page: p > 1 ? p : null });
 
+  // ลำดับคอลัมน์ที่ผู้ใช้จัดเอง (id) ว่าง = ตามที่หน้ากำหนด ; จำต่อผู้ใช้ต่อหน้า (ผู้ใช้จาก ProfileMenu)
+  const orderKey = () => `bkh:grid-cols:${storageUser()}:${pathname}`;
+  const orderRaw = useSyncExternalStore(subscribeOrder, () => (reorderable ? readStorage(orderKey()) : null), () => null);
+  const order = useMemo(() => parseOrder(orderRaw), [orderRaw]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const orderedColumns = useMemo(() => {
+    if (!order.length) return columns;
+    const rank = (c: (typeof columns)[number]) => {
+      const i = order.indexOf(columnId(c));
+      return i < 0 ? order.length : i; // คอลัมน์ใหม่ที่ยังไม่เคยจัด ต่อท้าย
+    };
+    return [...columns].sort((a, b) => rank(a) - rank(b));
+  }, [columns, order]);
+  function saveOrder(next: string[]) {
+    try {
+      if (next.length) localStorage.setItem(orderKey(), JSON.stringify(next));
+      else localStorage.removeItem(orderKey());
+      window.dispatchEvent(new Event(ORDER_EVENT));
+    } catch {
+      // shortcut: storage ใช้ไม่ได้ (private mode) = ย้ายคอลัมน์ไม่ได้ ถ้าต้องการให้เก็บใน state แทน
+    }
+  }
+  /** ย้ายคอลัมน์ id ไปที่ตำแหน่งของ targetId */
+  function moveColumn(id: string, targetId: string) {
+    const ids = orderedColumns.map(columnId);
+    const from = ids.indexOf(id);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    saveOrder(ids);
+  }
+
   const sorting: SortingState = sort ? [{ id: sort, desc: dir === "desc" }] : [];
   const table = useTable({
     features,
     data: data?.rows ?? NO_ROWS,
-    columns,
+    columns: orderedColumns,
     getRowId,
     state: { sorting, globalFilter: q, pagination: { pageIndex: page - 1, pageSize } },
     manualPagination: true,
@@ -323,7 +399,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                   {detailMode === "expand" ? (
                     <Icon d="M8 5l5 5-5 5" className={`size-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                   ) : (
-                    <Icon d="M11 4h5v5M16 4l-7 7M14 12v3a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h3" />
+                    (detailIcon ?? <Icon d="M11 4h5v5M16 4l-7 7M14 12v3a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h3" />)
                   )}
                 </button>
               </td>
@@ -352,7 +428,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           {toolbar}
           {filters}
-          <form role="search" onSubmit={onSearch} className="flex min-w-0 flex-1 basis-60 gap-2 sm:max-w-md">
+          <form role="search" onSubmit={onSearch} className={`flex min-w-0 flex-1 gap-2 ${searchSize === "compact" ? "basis-40 sm:max-w-52" : "basis-60 sm:max-w-md"}`}>
             <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
               <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
               <input
@@ -382,7 +458,12 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           <div className={`flex min-h-5 min-w-0 flex-wrap items-center gap-x-4 gap-y-1 transition-opacity ${data && (loading || error) ? "opacity-50" : ""}`}>
             {data ? renderSummary(data) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
           </div>
-          {exportInSummary && <div className="ml-auto">{exportLink}</div>}
+          {exportInSummary && (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {summaryActions}
+              {exportLink}
+            </div>
+          )}
         </div>
       )}
 
@@ -396,14 +477,45 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                     <span className="sr-only">รายละเอียด</span>
                   </th>
                 )}
-                {hg.headers.map((h) => {
+                {hg.headers.map((h, i) => {
                   const dirNow = h.column.getIsSorted();
                   const cls = h.column.columnDef.meta?.className ?? "";
+                  const id = h.column.id;
+                  const drag = reorderable
+                    ? {
+                        draggable: true,
+                        title: "ลากเพื่อย้ายคอลัมน์ (Alt+← / Alt+→)",
+                        // หัวที่ไม่มีปุ่ม sort ต้องโฟกัสได้เพื่อย้ายด้วยคีย์บอร์ด
+                        tabIndex: h.column.getCanSort() ? undefined : 0,
+                        onDragStart: (e: DragEvent) => {
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", id);
+                          setDragId(id);
+                        },
+                        onDragOver: (e: DragEvent) => {
+                          if (dragId) e.preventDefault();
+                        },
+                        onDrop: (e: DragEvent) => {
+                          e.preventDefault();
+                          if (dragId) moveColumn(dragId, id);
+                          setDragId(null);
+                        },
+                        onDragEnd: () => setDragId(null),
+                        onKeyDown: (e: KeyboardEvent) => {
+                          if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+                          const target = hg.headers[i + (e.key === "ArrowLeft" ? -1 : 1)];
+                          if (!target) return;
+                          e.preventDefault();
+                          moveColumn(id, target.column.id);
+                        },
+                      }
+                    : {};
                   return (
                     <th
                       key={h.id}
+                      {...drag}
                       aria-sort={dirNow === "asc" ? "ascending" : dirNow === "desc" ? "descending" : undefined}
-                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${cls}`}
+                      className={`px-3 py-2.5 font-medium whitespace-nowrap ${reorderable ? `cursor-grab ${focusRing}` : ""} ${dragId === id ? "opacity-40" : ""} ${cls}`}
                     >
                       {h.column.getCanSort() ? (
                         <button
@@ -435,6 +547,11 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           {loading ? "กำลังโหลด…" : `แสดง ${fmt(from)}–${fmt(to)} จาก ${fmt(total)} รายการ`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
+          {reorderable && order.length > 0 && (
+            <button type="button" onClick={() => saveOrder([])} className={`rounded px-1.5 underline-offset-2 hover:text-foreground hover:underline ${focusRing}`}>
+              เรียงคอลัมน์ตามเดิม
+            </button>
+          )}
           <label className="flex items-center gap-2">
             แถวต่อหน้า
             <select

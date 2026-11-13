@@ -5,7 +5,7 @@ export const metadata = { title: "ตัวอย่าง DataGrid" };
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <h1 className="text-title text-balance">รายชื่อผู้ป่วยใน</h1>
       <div className="mt-6">
         {/* useSearchParams ต้องอยู่ใต้ Suspense */}

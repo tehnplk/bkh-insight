@@ -1,10 +1,10 @@
 import type { IconName } from "./icons";
 
 /*
- * Sidebar menu. Add your module here:
- *   - a single page:  { label: "ชื่อเมนู", href: "/{dev_name}/{module}", icon: "chart" }
+ * Sidebar menu. Sections are work steps, not URL modules: put a new page in the step it serves.
+ *   - a single page:  { label: "ชื่อเมนู", href: "/{module}/{task}", icon: "chart" }
  *   - a section with sub-pages (collapsible; a flyout when the sidebar is collapsed):
- *       { label: "ชื่อหมวด", icon: "folder", children: [{ label: "...", href: "/{dev_name}/{module}" }] }
+ *       { label: "ชื่อหมวด", icon: "folder", children: [{ label: "...", href: "/{module}/{task}" }] }
  * Icon names come from icons.tsx (add a new SVG there if none fits).
  * Admin pages (/admin/*) are not listed here: they live in the profile menu (profile-menu.tsx), shown to admins only.
  */
@@ -16,20 +16,49 @@ export type NavItem = NavLink | NavSection;
 
 export const navItems: NavItem[] = [
   { label: "ภาพรวม", href: "/", icon: "home" },
+  { label: "OPD แยกรายสิทธิ", href: "/opd/admissions", icon: "stethoscope" },
+  { label: "IPD แยกรายสิทธิ", href: "/ipd/admissions", icon: "bed" },
+  // Sections follow the revenue-cycle steps (not the URL module), since users look for a page by the step they are on.
   {
-    label: "จัดเก็บรายได้",
-    icon: "wallet",
+    label: "บริการและมูลค่า",
+    icon: "chart",
     children: [
       { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
+    ],
+  },
+  {
+    label: "ก่อนส่งเคลม",
+    icon: "alert",
+    children: [
+      { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
+      { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
+      { label: "16 แฟ้มมาตรฐาน", href: "/fdh/files" },
+    ],
+  },
+  {
+    label: "ผลการเคลม",
+    icon: "document",
+    children: [
+      { label: "นำเข้า REP", href: "/fund/rep-import" },
       { label: "ภาพรวมการเคลม", href: "/fund/claim-overview" },
+      { label: "คิวแก้ C/Deny", href: "/fund/claim-errors" },
+    ],
+  },
+  {
+    label: "ลูกหนี้",
+    icon: "table",
+    children: [
       { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
-      { label: "นำเข้า REP", href: "/fund/rep-import" },
-      { label: "นำเข้า STM", href: "/fund/stm-import" },
     ],
+  },
+  {
+    label: "รับเงิน",
+    icon: "wallet",
+    children: [{ label: "นำเข้า STM", href: "/fund/stm-import" }],
   },
   {
     label: "ตรวจสอบข้อมูล",
@@ -39,11 +68,6 @@ export const navItems: NavItem[] = [
       { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
       { label: "ผู้รับบริการที่เข้าเกณฑ์ DM Type-2", href: "/visit/dm-remission" },
     ],
-  },
-  {
-    label: "FDH",
-    icon: "document",
-    children: [{ label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" }],
   },
 ];
 
@@ -55,5 +79,6 @@ export const adminSection: NavSection = {
   children: [
     { label: "ผู้ใช้งาน", href: "/admin/users" },
     { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
+    { label: "ตั้งค่ารหัสมาตรฐาน", href: "/admin/mapcode" },
   ],
 };

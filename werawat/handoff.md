@@ -1,9 +1,18 @@
-# Handoff: werawat (อัปเดต 10 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 13 พ.ย. 2569)
 
 ## สถานะ
 - PR #29 (ลูกหนี้เฟส 1, รายการค่าใช้จ่ายใน uc-debtor) deploy แล้ว
-- PR ถัดไป (10 พ.ย. 2569): นำเข้า STM, ตั้งลูกหนี้อัตโนมัติ 01:00, โมดูล FDH, UC นอกสังกัด สธ., คอลัมน์ "ส่งเข้าแผนก" ใน `/fund/opd-department`
+- PR #30 (main `7cc67a2`, 10 พ.ย. 2569) deploy แล้ว: นำเข้า STM, ตั้งลูกหนี้อัตโนมัติ 01:00, โมดูล FDH, UC นอกสังกัด สธ., คอลัมน์ "ส่งเข้าแผนก" ใน `/fund/opd-department`
+- timer ติดตั้งบน server แล้ว (enable, รอบแรก 11 พ.ย. 2569 01:00) ต้องเช็คว่ารันสำเร็จ: `journalctl -u bkh-insight-ar-sync.service` หรือ `ar_sync_log`
+- ยังไม่มีใครเห็นคอลัมน์ "ส่งเข้าแผนก" ในหน้าจอจริง (9 พ.ย. 2569 คลินิกพรีเมียม ควรเป็น 41 visit / 113,337.02)
 - server timezone `Asia/Bangkok` ; nginx `client_max_body_size 32m`
+
+## รอบ 13 พ.ย. 2569 (PR #31)
+- เมนูจัดตามขั้นตอนงาน ; หน้า fluid ทั้งหมด ; สิทธิ์ -> สิทธิ (ยกเว้น migration ที่ merge แล้ว)
+- ใหม่: `/fund/claim-errors`, `/fund/claim-status`, `/fdh/files` (16 แฟ้ม .txt), `/admin/mapcode` (Drug catalog สปสช. migration `202611131500_drug_catalog_nhso.sql` รันแล้ว ตารางยังว่าง)
+- `/ipd/admissions` และ `/opd/admissions` (OPD/IPD แยกรายสิทธิ): เลือกแถว -> modal 16 แฟ้ม (`FdhPreviewModal`) ตรวจ C + zip
+- OPD: เลขที่ใบเสร็จจาก `rcpt_print` (status OK, แสดง เล่ม/เลขที่) ตัวกรอง `unclosed=1` ; DataGrid `reorderable` จำลำดับคอลัมน์ต่อผู้ใช้ (`bkh:grid-cols:<user>:<path>`)
+- ค้าง: วันที่ใน txt (YYYYMMDD ตามสเปก?), DID ใน DRU (icode vs 24 หลัก), DRUGREMARK ของยา NED ว่างทุกแถว, Drug/Lab catalog สกส.
 
 ## งานในรอบนี้
 1. `/fund/stm-import` นำเข้า statement (UC และ OFC layout) migration `202611101000_stm_import.sql` (รันลงฐานแล้ว): `stm_file`, `stm_summary`, `stm_row`, `ar_ledger.stm_row_id` (FK กันลบไฟล์ที่ใช้ตัดหนี้แล้ว)

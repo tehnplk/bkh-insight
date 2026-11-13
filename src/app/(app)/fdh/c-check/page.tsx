@@ -6,7 +6,7 @@ export const metadata = { title: TITLE };
 
 export default function Page() {
   return (
-    <div className="max-w-7xl">
+    <div>
       <h1 className="text-title text-balance">{TITLE}</h1>
       <div className="mt-4">
         {/* หมวด แฟ้ม และช่วงวันที่อยู่ใน URL (useSearchParams) ต้องอยู่ใต้ Suspense */}

@@ -5,7 +5,7 @@ export const metadata = { title: "ผู้รับบริการที่�
 
 export default function Page() {
   return (
-    <div className="max-w-6xl">
+    <div>
       <h1 className="text-title text-balance">ผู้รับบริการที่เข้าเกณฑ์ DM Type-2</h1>
       <div className="mt-6">
         {/* DataGrid และ DateRangeFilter ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}

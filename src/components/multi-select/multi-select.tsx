@@ -20,6 +20,8 @@ export type MultiSelectProps = {
   onChange: (values: string[]) => void;
   /** ข้อความบนปุ่มเมื่อไม่ได้เลือก (ค่าเริ่มต้น "ทั้งหมด") */
   allLabel?: string;
+  /** ซ่อนป้าย (ยังอ่านได้ด้วย screen reader) แล้วแสดงเป็น hint ตอนชี้แทน ใช้เมื่อแถวตัวกรองแน่น */
+  hideLabel?: boolean;
 };
 
 const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -31,7 +33,7 @@ const matches = (o: MultiSelectOption, q: string) =>
 // ปุ่มสรุปค่าที่เลือก + รายการ checkbox แบ่งกลุ่มใน native popover (top layer, Esc/คลิกนอกกรอบปิด และคืน focus ให้ปุ่ม)
 // เลือกในรายการเป็นร่าง แล้วส่ง onChange ครั้งเดียวตอนปิด หน้าที่โหลดข้อมูลตาม URL จึงไม่ยิง query ทุกครั้งที่ติ๊ก
 // คีย์บอร์ด: เปิดแล้ว focus อยู่ที่ช่องค้นหา, ลูกศรขึ้น/ลงเลื่อนระหว่าง checkbox, Space ติ๊ก, Esc ปิด
-export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั้งหมด" }: MultiSelectProps) {
+export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั้งหมด", hideLabel = false }: MultiSelectProps) {
   const id = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -106,8 +108,8 @@ export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั
   const summary = value.length === 0 ? allLabel : value.length === 1 ? labelOf(value[0]) : `${labelOf(sorted(value)[0])} +${value.length - 1}`;
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <span id={`${id}-label`} className="text-muted">
+    <div className="flex min-w-0 items-center gap-2" title={hideLabel ? label : undefined}>
+      <span id={`${id}-label`} className={hideLabel ? "sr-only" : "text-muted"}>
         {label}
       </span>
       <div className="flex h-9 min-w-0 items-center rounded-md border border-line bg-surface">

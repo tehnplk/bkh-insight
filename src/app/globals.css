@@ -37,6 +37,12 @@
   --warning: #a15c07;
   --warning-soft: #fff7e6;
   --warning-line: #f5d79e;
+  /* ตรวจ C (modal 16 แฟ้ม /ipd/admissions): ปุ่มส้ม, แถบความคืบหน้าส้มอ่อน, แถวที่ติด C แดงเข้มตัวอักษรขาว */
+  --check: #ea580c;
+  --check-fg: #ffffff;
+  --check-soft: #fdba74;
+  --c-fail: #cf190c;
+  --c-fail-fg: #ffffff;
   --success: #157a3b;
   --success-soft: #ecfbf1;
   --success-line: #b4ebc6;
@@ -78,6 +84,11 @@
   --warning: #f3c76a;
   --warning-soft: #2a2010;
   --warning-line: #5a4518;
+  --check: #ea580c;
+  --check-fg: #ffffff;
+  --check-soft: #9a4a1c;
+  --c-fail: #cf190c;
+  --c-fail-fg: #ffffff;
   --success: #7fdca0;
   --success-soft: #12281a;
   --success-line: #22502f;
@@ -113,6 +124,11 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-warning-line: var(--warning-line);
+  --color-check: var(--check);
+  --color-check-fg: var(--check-fg);
+  --color-check-soft: var(--check-soft);
+  --color-c-fail: var(--c-fail);
+  --color-c-fail-fg: var(--c-fail-fg);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-success-line: var(--success-line);
