@@ -713,6 +713,10 @@ export function AdmissionsGrid({
         summaryActions={<PreviewButton onOpen={() => setPreviewOpen(true)} />}
         searchSize="compact"
         detailIcon={<ReceiptText aria-hidden className="size-4" />}
+        reorderable
+        hideable
+        fitScreen
+        pinColumns={4}
       />
     </SelectionContext.Provider>
   );

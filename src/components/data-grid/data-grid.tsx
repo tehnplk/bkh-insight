@@ -21,7 +21,7 @@ import { DetailModal, type DetailModalProps } from "@/components/detail-modal/de
 import { STORAGE_USER_EVENT, storageUser } from "@/lib/persisted-filter";
 import { ColumnFilter } from "./column-filter";
 import { ColumnChooser } from "./column-chooser";
-import { DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
+import { ALL_PAGE_SIZE, DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
 const features = tableFeatures({
   columnFilteringFeature,
@@ -180,7 +180,9 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
 
   // state ของ grid อยู่ใน URL ทั้งหมด (refresh/แชร์ link ได้หน้าเดิม) server เป็นคน validate
   const page = Math.max(1, Number(sp.get("page")) || 1);
-  const pageSize = Number(sp.get("pageSize")) || DEFAULT_PAGE_SIZE;
+  // pageSize=all = แสดงทั้งหมด (server ให้ไม่เกิน ALL_PAGE_SIZE แถว)
+  const showAll = sp.get("pageSize") === "all";
+  const pageSize = showAll ? ALL_PAGE_SIZE : Number(sp.get("pageSize")) || DEFAULT_PAGE_SIZE;
   const sort = sp.get("sort");
   const dir = sp.get("dir") === "desc" ? "desc" : "asc";
   const q = sp.get("q") ?? "";
@@ -690,6 +692,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       <div className="flex flex-wrap items-center justify-between gap-3 text-muted">
         <p role="status" className="tabular-nums">
           {loading ? "กำลังโหลด…" : `แสดง ${fmt(from)}–${fmt(to)} จาก ${fmt(total)} รายการ`}
+          {!loading && showAll && total > ALL_PAGE_SIZE && <span className="ml-2 text-warning">{`แสดงได้ครั้งละ ${fmt(ALL_PAGE_SIZE)} แถว ดูต่อที่หน้าถัดไปหรือส่งออก Excel`}</span>}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {Object.keys(columnFilters).length > 0 && (
@@ -705,7 +708,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           <label className="flex items-center gap-2">
             แถวต่อหน้า
             <select
-              value={pageSize}
+              value={showAll ? "all" : pageSize}
               onChange={(e) => setParams({ pageSize: Number(e.target.value) === DEFAULT_PAGE_SIZE ? null : e.target.value, page: null })}
               className={`h-9 rounded-md border border-line bg-surface px-2 text-foreground ${focusRing}`}
             >
@@ -714,6 +717,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                   {n}
                 </option>
               ))}
+              <option value="all">ทั้งหมด</option>
             </select>
           </label>
           <nav aria-label="เลือกหน้า" className="flex items-center gap-1">

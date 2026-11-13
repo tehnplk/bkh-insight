@@ -7,6 +7,8 @@
 export const MAX_PAGE_SIZE = 100;
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
 export const DEFAULT_PAGE_SIZE = 20;
+/** pageSize=all ("ทั้งหมด") = หน้าเดียวไม่เกินจำนวนนี้ (แสดงในตารางทีเดียวมากกว่านี้ browser ช้า ใช้ส่งออก Excel แทน) */
+export const ALL_PAGE_SIZE = 5_000;
 const MAX_PAGE = 100_000;
 const MAX_Q_LENGTH = 100;
 
@@ -50,7 +52,7 @@ export function parseGridQuery<C extends string>(
       ok: true,
       query: {
         page: int(params.get("page"), "page", 1, MAX_PAGE, 1),
-        pageSize: int(params.get("pageSize"), "pageSize", 1, MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE),
+        pageSize: params.get("pageSize") === "all" ? ALL_PAGE_SIZE : int(params.get("pageSize"), "pageSize", 1, MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE),
         sort: sort as C | null,
         dir,
         q,
