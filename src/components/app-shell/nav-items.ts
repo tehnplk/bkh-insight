@@ -19,6 +19,7 @@ export const navItems: NavItem[] = [
   { label: "ภาพรวม", href: "/", icon: "home" },
   { label: "OPD แยกรายสิทธิ", href: "/opd/admissions", icon: "stethoscope" },
   { label: "IPD แยกรายสิทธิ", href: "/ipd/admissions", icon: "bed" },
+  { label: "เส้นทางเคลม", href: "/fund/claim-pipeline", icon: "pulse" },
   // Sections follow the revenue-cycle steps (not the URL module), since users look for a page by the step they are on.
   {
     label: "เตรียมข้อมูลมาตรฐาน",
