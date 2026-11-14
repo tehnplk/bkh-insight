@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/claim-pipeline/pipeline.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classify, inGroup, sortRows, summarize } from "./pipeline.ts";
+import { REASONS_AT, STEP_LABEL, classify, inGroup, markClosed, sortRows, summarize, viewOf } from "./pipeline.ts";
 
 const ctx = { today: "2026-11-14", repFileDate: "2026-10-14" };
 const his = (o = {}) => ({ key: "V1", hn: "1", date: "2026-08-10", pttype: "89", pttype_name: "UC", debtor: 100, claim: "closed", ...o });
@@ -57,4 +57,30 @@ test("funnel counts cumulative steps, amounts and reasons; groups match", () => 
   assert.deepEqual(rows.filter((r) => inGroup(r, "rep")).map((r) => r.key), ["2", "3"]);
   assert.deepEqual(rows.filter((r) => inGroup(r, "none")).map((r) => r.key), ["1"]);
   assert.deepEqual(sortRows([...rows], "step", "desc").map((r) => r.key), ["3", "2", "1"]);
+});
+
+test("visits closed via /fund/close-privilege count as closed", () => {
+  const cases = [his({ key: "1", claim: "authen_only" }), his({ key: "2", claim: "none" })];
+  const marked = markClosed(cases, new Set(["1"]));
+  assert.deepEqual(marked.map((c) => c.claim), ["closed", "none"]);
+  assert.deepEqual(at(classify("op", marked[0], undefined, undefined, ctx)), ["closed", "rep_missing"]);
+  assert.equal(markClosed(cases, new Set()), cases);
+});
+
+test("OFC OP: stage 2 = EDC Approval Code; REP still passes it; LGO and OFC IP keep old logic", () => {
+  const ofc = (o) => his({ pttype: "A1", pttype_name: "OFC", ...o });
+  assert.deepEqual(at(classify("op", ofc({ claim: "approved" }), undefined, undefined, ctx)), ["closed", "rep_missing"]);
+  assert.deepEqual(at(classify("op", ofc({ claim: "approved" }), rep(), 80, ctx)), ["paid", null]);
+  const none = classify("op", ofc({ claim: "no_approve" }), undefined, undefined, ctx);
+  assert.deepEqual(at(none), ["served", "no_approve"]);
+  assert.ok(inGroup(none, "no_approve") && !inGroup(none, "none"));
+  assert.deepEqual(at(classify("op", ofc({ claim: "no_approve" }), rep({ status: "c" }), undefined, ctx)), ["rep", "c"]);
+  assert.equal(summarize([none]).reasons.no_approve.count, 1);
+
+  assert.equal(viewOf("op", "OFC"), "ofc");
+  assert.equal(viewOf("ip", "OFC"), "ip");
+  assert.equal(viewOf("op", "LGO"), "op");
+  assert.equal(STEP_LABEL.ofc.closed, "มี Approval Code แล้ว");
+  assert.deepEqual(REASONS_AT.ofc.closed, ["no_approve"]);
+  assert.deepEqual(REASONS_AT[viewOf("op", "LGO")].closed, ["authen_only", "none"]);
 });
