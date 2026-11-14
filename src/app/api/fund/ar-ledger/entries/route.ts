@@ -5,13 +5,13 @@ import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } fr
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse } from "@/lib/xlsx";
 import { badRequest, isAuthed, unauthorized } from "../../_lib/fund";
-import { KIND_LABEL, monthRange, type Kind, type PatientType } from "../../ar-sync/ledger";
+import { KIND_LABEL, monthRange, type LedgerKind, type PatientType } from "../../ar-sync/ledger";
 
 /** แถวของ /api/fund/ar-ledger/entries */
 export type LedgerEntry = {
   id: string;
   entry_date: string;
-  kind: Kind;
+  kind: LedgerKind;
   ref: string;
   vn: string | null;
   an: string | null;

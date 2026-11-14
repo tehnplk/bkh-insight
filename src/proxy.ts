@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextFetchEvent } from "next/server";
 import { auth, plkhealthEnabled } from "@/auth";
+import { logAccess } from "@/lib/access-log";
 
 // /admin and /api/admin, whole path segments only (/administrator is not admin).
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/;
@@ -8,7 +9,7 @@ const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/;
 // lets through needs a session: pages redirect to /login, /api/* gets 401 JSON. Everything under /admin and
 // /api/admin also needs role "admin" (from the JWT, no DB read): pages redirect to /, /api/admin/* gets 403.
 // The admin layout and each admin route handler check again; the proxy is not the only gate.
-export const proxy = auth((req) => {
+export const proxy = auth((req, event) => {
   const { pathname, search } = req.nextUrl;
   // Only reached without ?error= / ?logged_out= (see matcher): go straight to SSO, keeping callbackUrl.
   // With either param /login renders its message and a retry button, so a failed or just-ended sign-in cannot loop.
@@ -17,6 +18,9 @@ export const proxy = auth((req) => {
   }
   const isApi = pathname.startsWith("/api/");
   if (req.auth) {
+    // บันทึกการเข้าถึงข้อมูล (PDPA) ทุก /api/* ที่มี session หลังตอบแล้ว (ไม่หน่วง request)
+    // auth() ส่ง argument ที่สองของ proxy (NextFetchEvent) ต่อให้ตรง แต่ type ประกาศเป็น context ของ route handler
+    if (isApi) (event as unknown as NextFetchEvent).waitUntil(logAccess(req.auth.user, req.method, pathname, search.slice(1)));
     if (!ADMIN_PATH.test(pathname) || req.auth.user.role === "admin") return;
     if (isApi) return Response.json({ error: "forbidden" }, { status: 403 });
     return NextResponse.redirect(new URL("/", req.nextUrl));

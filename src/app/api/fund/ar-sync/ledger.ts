@@ -215,7 +215,9 @@ export const nextMonth = (month: string) => {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
 };
 
-export const KIND_LABEL: Record<Kind, string> = { set: "ตั้งหนี้", adjust: "ปรับปรุง", cancel: "ยกเลิก", reverse: "กลับรายการ" };
+/** ประเภทแถวทั้งหมดใน ar_ledger: Kind ของ ar-sync + settle/diff ของการตัดหนี้ด้วย STM */
+export type LedgerKind = Kind | "settle" | "diff";
+export const KIND_LABEL: Record<LedgerKind, string> = { set: "ตั้งหนี้", adjust: "ปรับปรุง", cancel: "ยกเลิก", reverse: "กลับรายการ", settle: "รับชำระ", diff: "ส่วนต่าง" };
 
 /** เดือนที่เลือกได้ ตั้งแต่ ต.ค. 2568 ถึงเดือนของ today (ใหม่ไปเก่า) */
 export function ledgerMonths(today: string): string[] {
