@@ -1,13 +1,6 @@
-import { Suspense } from "react";
-import { ClaimCodes } from "./claim-codes";
+import { redirect } from "next/navigation";
 
-export const metadata = { title: "ความพร้อมรหัสเบิก" };
-
+// ย้ายไป /catalog/claim-codes (หมวด "เตรียมข้อมูลมาตรฐาน") คงไว้ให้ bookmark เดิมยังใช้ได้
 export default function Page() {
-  return (
-    // useUrlParams ใช้ useSearchParams ต้องอยู่ใต้ Suspense
-    <Suspense fallback={<p className="text-sm text-muted">กำลังโหลด…</p>}>
-      <ClaimCodes />
-    </Suspense>
-  );
+  redirect("/catalog/claim-codes");
 }

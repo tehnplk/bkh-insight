@@ -15,7 +15,7 @@ FROM drug_catalog_nhso WHERE hosp_drug_code = ANY($1::text[])`;
 /**
  * POST { ans, file } ตรวจ C หนึ่งแฟ้มของ admission ที่เลือก (หน้าเรียกทีละแฟ้มเพื่อแสดงความคืบหน้า)
  * IPD/PAT/INS: กฎ SQL ของหน้าตรวจ C (skill fdh-pre-validate) บนช่วงวันจำหน่ายของ AN ที่เลือก แล้วกรองเฉพาะ AN/HN ที่เลือก
- * DRU: เทียบ icode กับ HOSPDRUGCODE ของ Drug Catalog ที่นำเข้าใน /admin/mapcode ; แฟ้มอื่นยังไม่มีกฎ
+ * DRU: เทียบ icode กับ HOSPDRUGCODE ของ Drug Catalog ที่นำเข้าใน /catalog/standard-codes ; แฟ้มอื่นยังไม่มีกฎ
  */
 export async function POST(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();

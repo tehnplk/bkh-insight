@@ -6,7 +6,7 @@ import { OPI_BY_DATE, inList, isAuthed, unauthorized } from "@/app/api/fund/_lib
 import { addDays } from "@/app/api/fund/ar-sync/ledger";
 import { KIND_SCOPE, PROBLEM_TEXT, assess, type ClaimKind, type HisItem, type ItemRow, type RefCode, type Usage } from "./readiness";
 
-/** response ของ GET /api/fdh/claim-codes?kind=INST|PP (format=xlsx&part=fix|missing|ok ส่งไฟล์) */
+/** response ของ GET /api/catalog/claim-codes?kind=INST|PP (format=xlsx&part=fix|missing|ok ส่งไฟล์) */
 export type ClaimCodesData = {
   kind: ClaimKind;
   /** ที่มาของรายการอ้างอิง */

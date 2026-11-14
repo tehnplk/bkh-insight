@@ -1,4 +1,4 @@
-// รัน: node --test src/app/api/admin/mapcode/drug-nhso.test.mjs
+// รัน: node --test src/app/api/catalog/drug-nhso/drug-nhso.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DRUG_NHSO_HEADERS, parseDmy, parseDrugNhso } from "./drug-nhso.ts";
