@@ -7,22 +7,30 @@ import { formatCount } from "@/lib/number-format";
 import { FilterChip, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { Segmented } from "@/app/(app)/quality/pending/segmented";
 import {
-  DATE_LABEL, FDH_TYPES, FILE_ORDER, RULE_CODE_COUNT, TYPE_LABEL, cLabel,
-  type CaseRow, type FdhType, type SummaryFile, type SummaryResponse, type ValidateResponse,
+  DATE_LABEL, FDH_TYPES, FILE_ORDER, RULE_CODE_COUNT, STP_RULES, TYPE_LABEL, cLabel, codeLevel,
+  type CaseRow, type FdhType, type Level, type SummaryFile, type SummaryResponse, type ValidateResponse,
 } from "@/app/api/fdh/c-check/files";
 
 const TYPE_OPTIONS = FDH_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }));
 const dash = <span className="text-muted">–</span>;
 const th = "px-3 py-2 font-medium";
 const td = "px-3 py-1.5 align-top";
+const LEVEL: Record<Level, { label: string; className: string }> = {
+  error: { label: "ผิดพลาด", className: "bg-danger-soft text-danger" },
+  warn: { label: "เตือน", className: "bg-warning-soft text-warning" },
+  info: { label: "ข้อมูล", className: "bg-surface-sunken text-muted" },
+};
+const STP_COUNT = Object.keys(STP_RULES).length;
 
-/** badge จำนวนเคส: มีเคส = สีแดง, 0 = จาง, ยังไม่มีกฎ = ไม่แสดง */
+/** badge จำนวนเคส: มีเคส = สีตามระดับสูงสุดที่พบ (ผิดพลาด/เตือน/ข้อมูล), 0 = จาง, ยังไม่มีกฎ = ไม่แสดง */
 function CaseBadge({ info, loading }: { info?: SummaryFile; loading: boolean }) {
   if (loading) return <span className="h-4 w-6 animate-pulse rounded bg-hover" aria-hidden="true" />;
   if (!info || info.cases === null) return null;
+  const level = LEVEL[info.level ?? "error"];
   return (
     <span
-      className={`min-w-6 rounded px-1.5 text-center text-xs tabular-nums ${info.cases ? "bg-danger-soft font-semibold text-danger" : "text-muted"}`}
+      title={info.cases ? `ระดับสูงสุด: ${level.label}` : undefined}
+      className={`min-w-6 rounded px-1.5 text-center text-xs tabular-nums ${info.cases ? `${level.className} font-semibold` : "text-muted"}`}
     >
       {formatCount(info.cases)}
     </span>
@@ -85,6 +93,7 @@ function CodeTable({ data, code, onCode }: { data: ValidateResponse; code: strin
         <thead className="bg-surface text-left text-grid-head text-muted">
           <tr>
             <th scope="col" className={th}>รหัส</th>
+            <th scope="col" className={th}>ระดับ</th>
             <th scope="col" className={th}>เงื่อนไข</th>
             <th scope="col" className={`${th} ${num}`}>จำนวน</th>
             <th scope="col" className={th}>แนวทางแก้</th>
@@ -106,6 +115,9 @@ function CodeTable({ data, code, onCode }: { data: ValidateResponse; code: strin
                     {cLabel(s.c_code)}
                   </button>
                 </th>
+                <td className={`${td} whitespace-nowrap`}>
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${LEVEL[codeLevel(s.c_code)].className}`}>{LEVEL[codeLevel(s.c_code)].label}</span>
+                </td>
                 <td className={`${td} min-w-48`}>{s.detail ?? <span className="text-muted">ไม่มีคำอธิบาย</span>}</td>
                 <td className={`${td} ${num} font-semibold`}>{formatCount(s.n)}</td>
                 <td className={`${td} min-w-48 text-muted`}>{s.fix ?? dash}</td>
@@ -187,6 +199,7 @@ function Limits() {
   return (
     <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted">
       <li>ตรวจได้ {RULE_CODE_COUNT} รหัส จากรหัส C ของ สปสช. เกือบ 700 รหัส ส่วนใหญ่เป็นข้อมูลผู้ป่วย (PAT) และผู้ป่วยใน (IPD) ไม่พบจึงไม่ได้แปลว่าจะไม่ติด C</li>
+      <li>กฎ STP-… ({STP_COUNT} รหัส) ตรวจเฉพาะสิทธิ STP ตามรหัสตีกลับ (R) ของกองทุน ระดับเตือนและข้อมูลยังไม่ยืนยันว่ากองทุนตีกลับจริง</li>
       <li>รหัสที่ต้องเทียบกับฐานของ สปสช. ตรวจจากฝั่งโรงพยาบาลไม่ได้ เช่น C305 (Approve Code ไม่ตรง), C349 (ไม่พบ Authentication), C999 (ไม่พบสิทธิ)</li>
       <li>C160/C161 ตรวจไม่ได้ เพราะ HOSxP ของเราไม่มีข้อมูลประเภทบริการ (SVCTYPE)</li>
       <li>ค่าว่างถูกแทนด้วยค่าเริ่มต้นก่อนตรวจ (เพศ, ประเภทและสถานะการจำหน่าย) C103, C111, C112 จึงแทบไม่ขึ้น แม้ใน HOSxP จะว่างจริง</li>

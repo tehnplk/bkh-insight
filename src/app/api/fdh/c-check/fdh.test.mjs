@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fdh/c-check/fdh.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FDH_TYPES, FILE_ORDER, RULE_CODE_COUNT, cLabel, isFile, parseType } from "./files.ts";
+import { FDH_TYPES, FILE_ORDER, RULE_CODE_COUNT, STP_RULES, cLabel, codeLevel, compareCode, isFile, parseType } from "./files.ts";
 import { CASE_LIMIT, RULES, casesSql, countDef, maskCid, maskFound, ruleCodes, ruleSummarySql } from "./checks.ts";
 
 const H = "WITH p AS (SELECT CAST(? AS DATE) AS s, CAST(? AS DATE) AS e)";
@@ -21,6 +21,12 @@ test("type and file whitelist", () => {
   assert.ok(isFile("ip", "LVD"));
   for (const bad of [null, "", "ins", "INS'", "fdh_ins"]) assert.ok(!isFile("op", bad));
   assert.equal(cLabel("116"), "C116");
+  assert.equal(cLabel("STP-R175"), "STP-R175");
+  assert.deepEqual(["STP-R111", "STP-AUTH", "116", "STP-R108", "105"].sort(compareCode), ["105", "116", "STP-AUTH", "STP-R108", "STP-R111"]);
+  assert.equal(codeLevel("116"), "error");
+  assert.equal(codeLevel("STP-R175"), "error");
+  assert.equal(codeLevel("STP-R112"), "warn");
+  assert.equal(codeLevel("STP-AUTH"), "info");
 });
 
 test("every file has one count statement starting with the date params", () => {
@@ -45,16 +51,20 @@ test("ruleCodes match the codes written in each block, C160/C161 are off", () =>
   for (const t of FDH_TYPES) {
     for (const [file, rule] of Object.entries(RULES[t])) {
       assert.ok(FILE_ORDER[t].includes(file), `${t}/${file}`);
-      const inSql = [...rule.sql.matchAll(/SELECT '(\d+)'(?: AS c_code)?, '([A-Z]+)'/g)];
+      const inSql = [...rule.sql.matchAll(/SELECT '([\w-]+)'(?: AS c_code)?, '([A-Z]+)'/g)];
       assert.deepEqual(inSql.map((m) => m[1]), rule.codes, `${t}/${file}`);
       assert.ok(inSql.every((m) => m[2] === file), `${t}/${file} fdh_file`);
       rule.codes.forEach((c) => all.add(c));
     }
   }
-  assert.equal(all.size, RULE_CODE_COUNT);
+  const stp = [...all].filter((c) => c.startsWith("STP-"));
+  assert.equal(all.size - stp.length, RULE_CODE_COUNT);
+  // กฎ STP ทุกตัวมีคำอธิบาย/วิธีแก้ และทุกคำอธิบายมีกฎ
+  assert.deepEqual(stp.sort(), Object.keys(STP_RULES).sort());
+  assert.ok(!ruleSummarySql("ip").includes("STP-R112"), "R112 เป็นกฎ OP เท่านั้น");
   assert.ok(!all.has("160") && !all.has("161"));
-  assert.deepEqual(ruleCodes("op", "INS"), ["127"]);
-  assert.deepEqual(ruleCodes("ip", "INS"), ["125"]);
+  assert.deepEqual(ruleCodes("op", "INS"), ["127", "STP-R175", "STP-AUTH"]);
+  assert.deepEqual(ruleCodes("ip", "INS"), ["125", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("op", "CHA"), []);
   assert.ok(!ruleSummarySql("ip").includes("SVCTYPE"));
 });

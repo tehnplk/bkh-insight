@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
-import { isFile, parseType, type ValidateResponse } from "../files";
+import { STP_RULES, compareCode, isFile, parseType, type ValidateResponse } from "../files";
 import { casesSql, countDef, maskFound, ruleCodes, ruleSummarySql } from "../checks";
 
 type Raw = { c_code: string; hn: string | null; an: string | null; seq: string | null; found: string | number | null };
@@ -35,8 +35,11 @@ export async function GET(request: NextRequest) {
     ]);
     const byCode = new Map(info.map((i) => [i.code, i]));
     const summary = grouped
-      .map((g) => ({ c_code: g.c_code, detail: byCode.get(g.c_code)?.description ?? null, fix: byCode.get(g.c_code)?.fix ?? null, n: Number(g.n) }))
-      .sort((a, b) => Number(a.c_code) - Number(b.c_code));
+      .map((g) => {
+        const c = byCode.get(g.c_code), stp = STP_RULES[g.c_code];
+        return { c_code: g.c_code, detail: c?.description ?? stp?.detail ?? null, fix: c?.fix ?? stp?.fix ?? null, n: Number(g.n) };
+      })
+      .sort((a, b) => compareCode(a.c_code, b.c_code));
     const total = summary.reduce((s, c) => s + c.n, 0);
 
     const body: ValidateResponse = {

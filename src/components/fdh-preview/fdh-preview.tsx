@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { todayIso } from "@/lib/thai-date";
-import { cLabel } from "@/app/api/fdh/c-check/files";
+import { cLabel, codeLevel, type Level } from "@/app/api/fdh/c-check/files";
 import type { CheckFinding, CheckResult } from "@/app/api/ipd/fdh-check/check";
 // shortcut: btn/focusRing/Skeleton/LoadError ยังอยู่ในโมดูล fund ย้ายไป src/components พร้อมกันเมื่อจัดระเบียบ fund/_components/ui
 import { Skeleton, btn, focusRing } from "@/app/(app)/fund/_components/ui";
@@ -71,6 +71,12 @@ function ZipButton({ files, n, prefix }: { files: FdhPreview["files"]; n: number
 
 type PreviewFile = FdhPreview["files"][number];
 type RowIssue = { codes: string[]; found?: string };
+/** ระดับสูงสุดของแถว: error = ติด C ; warn = อาจถูกตีกลับ ; info = ข้อมูล ไม่นับเป็นติด C (กฎ STP) */
+const rowLevel = (x: RowIssue): Level =>
+  x.codes.some((c) => codeLevel(c) === "error") ? "error" : x.codes.some((c) => codeLevel(c) === "warn") ? "warn" : "info";
+/** badge รหัสตามระดับ */
+const CODE_TONE: Record<Level, string> = { error: "bg-c-fail text-c-fail-fg", warn: "bg-warning-soft text-warning", info: "bg-surface-sunken text-muted" };
+const LEVEL_NOTE: Record<Level, string> = { error: "", warn: " (เตือน ยังไม่ยืนยันว่าตีกลับ)", info: " (ข้อมูล ไม่นับเป็นติด C)" };
 type XlsxSheet = { name: string; columns: string[]; rows: Record<string, string | number | null | undefined>[] };
 
 /** ส่งออก Excel หนึ่ง sheet ต่อแฟ้ม (สร้างที่ server จากข้อมูลที่แสดงอยู่ รวมผลตรวจ C) */
@@ -110,6 +116,10 @@ function XlsxButton({ build, filename, label }: { build: () => XlsxSheet[]; file
 }
 /** ผลตรวจหนึ่งแฟ้ม: pending รอคิว, running กำลังตรวจ, done เสร็จ (issues = แถวที่ไม่ผ่าน), error ตรวจไม่สำเร็จ */
 type FileCheck = { status: "pending" | "running" | "done" | "error"; issues: Map<number, RowIssue>; rules: string[]; note?: string; error?: string; truncated?: boolean };
+/** จำนวนแถวที่ระดับสูงสุดเป็น lvl */
+const countLevel = (c: FileCheck | undefined, lvl: Level) => [...(c?.issues.values() ?? [])].filter((x) => rowLevel(x) === lvl).length;
+/** แถวที่ต้องดู (ติด C หรือเตือน) ไม่รวมแถวที่มีแต่ระดับข้อมูล */
+const flagged = (c?: FileCheck) => [...(c?.issues ?? [])].filter(([, x]) => rowLevel(x) !== "info").map(([i]) => i);
 
 /**
  * จับคู่ผลตรวจเข้าแถวของแฟ้มที่แสดง: row = ลำดับแถว (DRU ที่ SQL ตรวจเรียงเหมือนแฟ้ม) ; PAT ใช้ HN ;
@@ -143,15 +153,17 @@ function mapIssues(file: PreviewFile, findings: CheckFinding[]): Map<number, Row
 /** แถบความคืบหน้าของแฟ้มในรายการซ้าย */
 function CheckBar({ check }: { check?: FileCheck }) {
   if (!check) return null;
-  // ระหว่างรอ/กำลังตรวจ = ส้มอ่อน ; เสร็จแล้ว ไม่พบ C = เขียว, พบ C หรือตรวจไม่สำเร็จ = แดง, ไม่มีกฎ = เทา
+  // ระหว่างรอ/กำลังตรวจ = ส้มอ่อน ; เสร็จแล้ว ไม่พบ C = เขียว, พบ C หรือตรวจไม่สำเร็จ = แดง, มีแต่เตือน = เหลือง, ไม่มีกฎ = เทา
   const tone =
     check.status === "pending" || check.status === "running"
       ? "bg-check-soft"
-      : check.status === "error" || check.issues.size
+      : check.status === "error" || countLevel(check, "error")
         ? "bg-c-fail"
-        : check.rules.length
-          ? "bg-success"
-          : "bg-line";
+        : countLevel(check, "warn")
+          ? "bg-warning"
+          : check.rules.length
+            ? "bg-success"
+            : "bg-line";
   const width = check.status === "pending" ? "w-0" : check.status === "running" ? "w-1/2 motion-safe:animate-pulse" : "w-full";
   return (
     <span aria-hidden="true" className="mt-1 block h-1 w-full overflow-hidden rounded-full bg-surface-sunken">
@@ -166,7 +178,8 @@ function checkLabel(check?: FileCheck) {
   if (check.status === "running") return "กำลังตรวจ";
   if (check.status === "error") return "ตรวจไม่สำเร็จ";
   if (!check.rules.length) return check.note ? "ตรวจไม่ได้" : "ไม่มีกฎ";
-  return check.issues.size ? `ไม่ผ่าน ${formatCount(check.issues.size)} แถว` : "ผ่าน";
+  const errors = countLevel(check, "error"), warns = countLevel(check, "warn");
+  return errors ? `ไม่ผ่าน ${formatCount(errors)} แถว` : warns ? `เตือน ${formatCount(warns)} แถว` : "ผ่าน";
 }
 
 /** ตรวจ C ทีละแฟ้มตามลำดับ (แสดงความคืบหน้าต่อแฟ้ม) */
@@ -182,12 +195,12 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
   const [info, setInfo] = useState<Record<string, string>>({});
   const [onlyC, setOnlyC] = useState(false);
   const running = Object.values(checks).some((c) => c.status === "pending" || c.status === "running");
-  // เฉพาะแถวที่ติด C: แสดงเฉพาะแฟ้มที่มีแถวไม่ผ่าน และเฉพาะแถวนั้น
-  const failedFiles = files.filter((f) => (checks[f.file]?.issues.size ?? 0) > 0);
+  // เฉพาะแถวที่ติด C/เตือน: แสดงเฉพาะแฟ้มที่มีแถวเหล่านั้น และเฉพาะแถวนั้น (แถวที่มีแต่ระดับข้อมูลไม่นับ)
+  const failedFiles = files.filter((f) => flagged(checks[f.file]).length > 0);
   const filtering = onlyC && failedFiles.length > 0;
   const shownFiles = filtering ? failedFiles : files;
   const current = shownFiles.find((f) => f.file === file) ?? shownFiles[0];
-  const rowIndexes = (f: PreviewFile) => (filtering ? [...(checks[f.file]?.issues.keys() ?? [])].sort((a, b) => a - b) : f.rows.map((_, i) => i));
+  const rowIndexes = (f: PreviewFile) => (filtering ? flagged(checks[f.file]).sort((a, b) => a - b) : f.rows.map((_, i) => i));
 
   /** sheet ต่อแฟ้มตามมุมมองปัจจุบัน (กรองติด C อยู่ = เฉพาะแถวที่ติด C) ตรวจแล้วมีคอลัมน์รหัส C และคำอธิบายนำหน้า */
   function buildSheets(): XlsxSheet[] {
@@ -224,7 +237,8 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
   }
 
   const done = Object.values(checks).filter((c) => c.status === "done" || c.status === "error").length;
-  const failed = Object.values(checks).reduce((n, c) => n + c.issues.size, 0);
+  const failed = Object.values(checks).reduce((n, c) => n + countLevel(c, "error"), 0);
+  const warned = Object.values(checks).reduce((n, c) => n + countLevel(c, "warn"), 0);
   const check = checks[current.file];
   const notes = Object.entries(checks).filter(([, c]) => c.note || c.error || c.truncated);
 
@@ -243,13 +257,15 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
           {Object.keys(checks).length > 0 && (
             <span role="status" className="text-muted tabular-nums">
               ตรวจแล้ว {formatCount(done)}/{formatCount(files.length)} แฟ้ม
-              {!running && (failed ? <span className="ml-2 font-medium text-danger">ไม่ผ่าน {formatCount(failed)} แถว</span> : <span className="ml-2 font-medium text-success">ไม่พบจากกฎที่มี</span>)}
+              {!running && failed > 0 && <span className="ml-2 font-medium text-danger">ไม่ผ่าน {formatCount(failed)} แถว</span>}
+              {!running && warned > 0 && <span className="ml-2 font-medium text-warning">เตือน {formatCount(warned)} แถว</span>}
+              {!running && !failed && !warned && <span className="ml-2 font-medium text-success">ไม่พบจากกฎที่มี</span>}
             </span>
           )}
-          {failed > 0 && (
+          {failed + warned > 0 && (
             <label className="flex h-9 cursor-pointer items-center gap-2 whitespace-nowrap">
               <input type="checkbox" checked={onlyC} onChange={(e) => setOnlyC(e.target.checked)} className={`size-4 cursor-pointer accent-[var(--accent)] ${focusRing}`} />
-              เฉพาะแถวที่ติด C
+              เฉพาะแถวที่ติด C/เตือน
             </label>
           )}
         </div>
@@ -257,7 +273,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
           <XlsxButton
             build={buildSheets}
             filename={`fdh-${source.zipPrefix}-${todayIso()}-${source.ids.length}${filtering ? "-c" : ""}.xlsx`}
-            label={filtering ? "ส่งออก Excel (เฉพาะที่ติด C)" : "ส่งออก Excel"}
+            label={filtering ? "ส่งออก Excel (เฉพาะที่ติด C/เตือน)" : "ส่งออก Excel"}
           />
           <ZipButton files={files} n={source.ids.length} prefix={source.zipPrefix} />
         </div>
@@ -287,10 +303,12 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
               >
                 <span className="flex items-center justify-between gap-3">
                   <span className={on ? "font-semibold" : ""}>{f.file}</span>
-                  <span className="tabular-nums">{formatCount(filtering ? (c?.issues.size ?? 0) : f.rows.length)}</span>
+                  <span className="tabular-nums">{formatCount(filtering ? flagged(c).length : f.rows.length)}</span>
                 </span>
                 <CheckBar check={c} />
-                {label && <span className={`mt-0.5 text-xs ${c?.issues.size || c?.status === "error" ? "text-danger" : "text-muted"}`}>{label}</span>}
+                {label && (
+                  <span className={`mt-0.5 text-xs ${countLevel(c, "error") || c?.status === "error" ? "text-danger" : countLevel(c, "warn") ? "text-warning" : "text-muted"}`}>{label}</span>
+                )}
               </button>
             );
           })}
@@ -299,7 +317,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
           <h3 className="mb-2 font-semibold">
             แฟ้ม {current.file}{" "}
             <span className="font-normal text-muted tabular-nums">
-              {filtering ? `ติด C ${formatCount(check?.issues.size ?? 0)} จาก ${formatCount(current.rows.length)} แถว` : `${formatCount(current.rows.length)} แถว`}
+              {filtering ? `ติด C/เตือน ${formatCount(flagged(check).length)} จาก ${formatCount(current.rows.length)} แถว` : `${formatCount(current.rows.length)} แถว`}
             </span>
             {check?.status === "done" && check.rules.length > 0 && (
               <span className="ml-2 text-xs font-normal text-muted">ตรวจ {check.rules.map(cLabel).join(", ")}</span>
@@ -319,14 +337,17 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
                 {rowIndexes(current).map((i) => {
                   const r = current.rows[i];
                   const issue = check?.issues.get(i);
+                  const level = issue && rowLevel(issue);
+                  // ทั้งแถวเป็นสีเฉพาะ error (แดง) / warn (เหลือง) ; info แสดงแค่ badge จาง
+                  const rowTone = level === "error" ? "bg-c-fail text-c-fail-fg" : level === "warn" ? "bg-warning-soft" : "hover:bg-surface-sunken";
                   return (
-                    <tr key={i} className={`border-t border-line ${issue ? "bg-c-fail text-c-fail-fg" : "hover:bg-surface-sunken"}`}>
+                    <tr key={i} className={`border-t border-line ${rowTone}`}>
                       {check?.status === "done" && (
                         <td className="px-2.5 py-1 whitespace-nowrap" title={issue?.found}>
                           {issue ? (
                             <span className="flex gap-1">
                               {issue.codes.map((code) => (
-                                <span key={code} title={info[code]} className="rounded border border-c-fail-fg px-1 text-xs font-semibold">{cLabel(code)}</span>
+                                <span key={code} title={`${info[code] ?? ""}${LEVEL_NOTE[codeLevel(code)]}`} className={`rounded border border-current px-1 text-xs font-semibold ${CODE_TONE[codeLevel(code)]}`}>{cLabel(code)}</span>
                               ))}
                             </span>
                           ) : (
@@ -347,7 +368,8 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
             <ul className="mt-2 flex flex-col gap-0.5 text-xs text-muted">
               {[...new Set([...check.issues.values()].flatMap((x) => x.codes))].map((code) => (
                 <li key={code}>
-                  <span className="rounded bg-c-fail px-1 font-medium text-c-fail-fg">{cLabel(code)}</span> {info[code] ?? ""}
+                  <span className={`rounded px-1 font-medium ${CODE_TONE[codeLevel(code)]}`}>{cLabel(code)}</span> {info[code] ?? ""}
+                  {LEVEL_NOTE[codeLevel(code)]}
                 </li>
               ))}
             </ul>

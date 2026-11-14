@@ -130,6 +130,10 @@ function DrugNhsoTab({ canImport }: { canImport: boolean }) {
         getRowId={(r) => r.hosp_drug_code}
         renderSummary={renderSummary}
         exportPlacement="summary"
+        reorderable
+        hideable
+        fitScreen
+        pinColumns={3}
       />
     </div>
   );

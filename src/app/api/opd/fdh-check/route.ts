@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { badRequest, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
 import { CASE_LIMIT, casesSql, maskFound, ruleCodes } from "@/app/api/fdh/c-check/checks";
+import { STP_RULES } from "@/app/api/fdh/c-check/files";
 import { opDruCheckSql } from "@/app/api/fdh/files/sql";
 import { DRUG_CATALOG_CODES, checkDru, type CatalogVersion, type CheckResult, type DruCheckRow } from "@/app/api/ipd/fdh-check/check";
 import { parseOpdSelection } from "../fdh-files";
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest) {
     if (found.length) {
       const info = await insightQuery<{ code: string; description: string | null }>(C_INFO_SQL, [found]).catch(() => []);
       for (const i of info) if (i.description) result.info[i.code] = i.description;
+      // กฎ STP ไม่อยู่ใน rep_error_code
+      for (const c of found) if (!result.info[c] && STP_RULES[c]) result.info[c] = STP_RULES[c].detail;
     }
     return Response.json(result);
   } catch (e) {
