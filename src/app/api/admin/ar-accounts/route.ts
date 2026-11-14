@@ -4,7 +4,16 @@ import { insightQuery } from "@/lib/db";
 import { loadLookups, UNKNOWN_FUND } from "@/app/api/fund/_lib/fund";
 import type { PatientType } from "@/app/api/fund/ar-sync/ledger";
 
-export type ArAccount = { code: string; name: string };
+export type ArAccount = {
+  code: string;
+  name: string;
+  /** บัญชีรายได้คู่ และบัญชีส่วนต่าง (ได้รับต่ำกว่า = Dr, สูงกว่า = Cr) สำหรับสมุดรายวัน */
+  revenue_code: string | null;
+  diff_under_code: string | null;
+  diff_over_code: string | null;
+  /** ตัดหนี้ด้วย STM ได้ (บัญชีที่จ่ายรายครั้ง) */
+  settles_by_stm: boolean;
+};
 export type ArAccountMap = {
   id: string;
   hipdata_code: string | null;
@@ -25,6 +34,8 @@ export type ArAccountsData = {
   unassigned: Unassigned[];
   funds: Option[];
   pttypes: (Option & { fund: string })[];
+  /** บัญชีที่มีรายการใน ledger */
+  used: string[];
 };
 
 // proxy.ts กันไว้แล้ว แต่ route ใต้ /api/admin ต้องเช็คเองซ้ำ (เหมือน /api/admin/users)
@@ -39,8 +50,8 @@ const bad = (error: string) => Response.json({ error }, { status: 400 });
 export async function GET() {
   const { error } = await adminSession();
   if (error) return error;
-  const [accounts, maps, unassigned, lk] = await Promise.all([
-    insightQuery<ArAccount>("SELECT code, name FROM ar_account ORDER BY code"),
+  const [accounts, maps, unassigned, lk, used] = await Promise.all([
+    insightQuery<ArAccount>("SELECT code, name, revenue_code, diff_under_code, diff_over_code, settles_by_stm FROM ar_account ORDER BY code"),
     insightQuery<ArAccountMap>(
       `SELECT id, hipdata_code, pttype, patient_type, account_code, updated_by, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at
 FROM ar_account_map ORDER BY hipdata_code NULLS LAST, pttype, patient_type DESC`,
@@ -51,6 +62,7 @@ FROM ar_ledger WHERE account_code IS NULL
 GROUP BY patient_type, pttype, hipdata_code HAVING SUM(amount) <> 0 ORDER BY SUM(amount) DESC`,
     ),
     loadLookups(),
+    insightQuery<{ code: string }>("SELECT DISTINCT account_code AS code FROM ar_ledger WHERE account_code IS NOT NULL"),
   ]);
   const fundCodes = [...new Set([...lk.pttype.values()].map((p) => p.fund))].filter((f) => f !== UNKNOWN_FUND).sort();
   const body: ArAccountsData = {
@@ -58,6 +70,7 @@ GROUP BY patient_type, pttype, hipdata_code HAVING SUM(amount) <> 0 ORDER BY SUM
     maps,
     unassigned,
     funds: fundCodes.map((code) => ({ code, name: lk.fundName(code) })),
+    used: used.map((u) => u.code),
     pttypes: [...lk.pttype].map(([code, p]) => ({ code, name: p.name, fund: p.fund })).sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true })),
   };
   return Response.json(body);

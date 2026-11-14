@@ -36,6 +36,7 @@ export const navItems: NavItem[] = [
       { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
       { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
       { label: "16 แฟ้มมาตรฐาน", href: "/fdh/files" },
+      { label: "ความพร้อมรหัสเบิก", href: "/fdh/claim-codes" },
     ],
   },
   {
@@ -80,6 +81,8 @@ export const adminSection: NavSection = {
   children: [
     { label: "ผู้ใช้งาน", href: "/admin/users" },
     { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
+    { label: "กองทุนย่อยลูกหนี้", href: "/admin/ar-funds" },
+    { label: "บันทึกการเข้าถึง", href: "/admin/access-log" },
     { label: "ตั้งค่ารหัสมาตรฐาน", href: "/admin/mapcode" },
   ],
 };

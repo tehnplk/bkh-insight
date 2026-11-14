@@ -8,6 +8,8 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
+import { DataFreshness } from "../_components/freshness";
+import { AdjustRequestForm, AdjustRequests, Journal } from "./ar-ledger-extras";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
 import type { AccountBalance, ArLedgerSummary } from "@/app/api/fund/ar-ledger/route";
@@ -42,7 +44,7 @@ function groupByFiscalYear(months: string[]) {
 function syncResult(log: SyncLog) {
   const c = log.counts;
   const n = (k: string) => formatCount(c[k] ?? 0);
-  return `ตั้งหนี้ใหม่ OPD ${n("opd_set")} IPD ${n("ipd_set")} · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${n("ipd_reverse")}`;
+  return `ตั้งหนี้ใหม่ OPD ${n("opd_set")} IPD ${n("ipd_set")} · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${n("ipd_reverse")} · รับชำระตาม STM ${n("stm_settle")}${c.stm_unmatched ? ` (STM ที่ไม่พบลูกหนี้ที่ตัดได้ ${n("stm_unmatched")})` : ""}`;
 }
 
 function SyncButton({ onDone }: { onDone: (log: SyncLog | null, error?: string) => void }) {
@@ -177,6 +179,7 @@ function LedgerDetail({ row, account }: { row: LedgerEntry; account: ReactNode }
         // ยอดของ adjust/cancel/reverse ไม่ใช่ยอดหนี้ทั้งก้อน จึงเทียบส่วนต่างเฉพาะแถวตั้งหนี้
         <DebtorItems vn={row.vn} an={row.an} debtor={row.kind === "set" ? Number(row.amount) : undefined} />
       )}
+      <AdjustRequestForm patientType={row.patient_type} debtRef={row.ref} />
     </div>
   );
 }
@@ -222,9 +225,6 @@ export function ArLedger() {
                 ))}
               </select>
             </label>
-            <span className="text-xs text-muted tabular-nums">
-              {d.lastSuccessAt ? `ดึงล่าสุด ${thaiDateTime(d.lastSuccessAt)}` : "ยังไม่เคยดึงยอด"}
-            </span>
             <SyncButton
               onDone={(log, err) => {
                 setResult({ log, error: err });
@@ -236,6 +236,7 @@ export function ArLedger() {
         )}
       </div>
 
+      <DataFreshness />
       {result && (
         <p role={result.error ? "alert" : "status"} className={`text-sm ${result.error ? "text-danger" : "text-muted"}`}>
           {result.error ? `ดึงยอดไม่สำเร็จ: ${result.error} · กดดึงยอดล่าสุดอีกครั้งได้ รายการที่ลงแล้วจะไม่ลงซ้ำ` : result.log && syncResult(result.log)}
@@ -286,6 +287,8 @@ export function ArLedger() {
               />
             </section>
           )}
+          <Journal month={d.month} monthText={monthLabel(d.month)} />
+          <AdjustRequests />
         </div>
       )}
     </div>

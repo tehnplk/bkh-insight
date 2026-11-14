@@ -5,7 +5,7 @@ import { formatCount } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate, todayIso } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson } from "@/app/(app)/fund/_components/ui";
 import { UC_OP_ACCOUNTS, ledgerMonths, type PatientType } from "@/app/api/fund/ar-sync/ledger";
-import type { ArAccountsData, Unassigned } from "@/app/api/admin/ar-accounts/route";
+import type { ArAccount, ArAccountsData, Unassigned } from "@/app/api/admin/ar-accounts/route";
 import type { SyncLog } from "@/app/api/fund/ar-sync/sync";
 
 const SELECT_CLASS = `h-9 min-w-0 rounded-md border border-line bg-surface pr-8 pl-3 ${focusRing}`;
@@ -380,6 +380,81 @@ function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload
   );
 }
 
+/* ---------- บัญชีคู่ (สมุดรายวัน) และการตัดหนี้ด้วย STM ---------- */
+
+type SettingDraft = Pick<ArAccount, "code" | "revenue_code" | "diff_under_code" | "diff_over_code" | "settles_by_stm">;
+const INPUT = `h-8 w-36 rounded-md border border-line bg-surface px-2 tabular-nums ${focusRing}`;
+
+function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () => void }) {
+  const [draft, setDraft] = useState<SettingDraft>();
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  const used = new Set(data.used);
+  // บัญชีที่มีรายการใน ledger หรือตั้งค่าไว้แล้ว (ผังบัญชีมี ~70 บัญชี ส่วนใหญ่ไม่ได้ใช้)
+  const rows = data.accounts.filter((a) => used.has(a.code) || a.revenue_code || a.settles_by_stm);
+
+  function save() {
+    if (!draft) return;
+    setError(undefined);
+    startTransition(async () => {
+      const r = await send("/api/admin/ar-accounts/settings", { method: "POST", body: JSON.stringify(draft) });
+      if (!r.ok) return setError(r.error);
+      setDraft(undefined);
+      reload();
+    });
+  }
+  const code = (v: string | null) => (v ? <span className="tabular-nums">{v}</span> : <span className="text-warning">ยังไม่กำหนด</span>);
+  const input = (k: "revenue_code" | "diff_under_code" | "diff_over_code", label: string) => (
+    <input aria-label={label} value={draft?.[k] ?? ""} onChange={(e) => setDraft({ ...draft!, [k]: e.target.value })} className={INPUT} />
+  );
+
+  return (
+    <Section title="บัญชีคู่และการตัดหนี้ด้วย STM">
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <Table
+        head={
+          <>
+            <th className={TH}>บัญชีลูกหนี้</th>
+            <th className={TH}>รายได้คู่</th>
+            <th className={TH}>ส่วนต่าง ได้รับต่ำกว่า (Dr)</th>
+            <th className={TH}>ส่วนต่าง ได้รับสูงกว่า (Cr)</th>
+            <th className={TH}>ตัดหนี้ด้วย STM</th>
+            <th className={TH}><span className="sr-only">จัดการ</span></th>
+          </>
+        }
+      >
+        {rows.map((a) => {
+          const editing = draft?.code === a.code;
+          return (
+            <tr key={a.code} className="border-t border-line hover:bg-surface-sunken">
+              <td className={TD}><span className="whitespace-nowrap tabular-nums">{a.code}</span> <span className="text-muted">{a.name}</span></td>
+              <td className={TD}>{editing ? input("revenue_code", `รายได้คู่ของ ${a.code}`) : code(a.revenue_code)}</td>
+              <td className={TD}>{editing ? input("diff_under_code", `ส่วนต่างได้รับต่ำกว่าของ ${a.code}`) : a.diff_under_code ? code(a.diff_under_code) : <span className="text-muted">–</span>}</td>
+              <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างได้รับสูงกว่าของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : <span className="text-muted">–</span>}</td>
+              <td className={TD}>
+                {editing ? (
+                  <input type="checkbox" aria-label={`ตัดหนี้ ${a.code} ด้วย STM`} checked={draft.settles_by_stm} onChange={(e) => setDraft({ ...draft, settles_by_stm: e.target.checked })} className="size-4 accent-accent" />
+                ) : a.settles_by_stm ? "ตัด" : <span className="text-muted">ไม่ตัด</span>}
+              </td>
+              <td className={`${TD} text-right whitespace-nowrap`}>
+                {editing ? (
+                  <>
+                    <button type="button" onClick={save} disabled={pending} className={`${primary} h-7`}>{pending ? "กำลังบันทึก…" : "บันทึก"}</button>{" "}
+                    <button type="button" onClick={() => setDraft(undefined)} className={`${btn} h-7 px-2.5`}>ยกเลิก</button>
+                  </>
+                ) : (
+                  <button type="button" aria-label={`แก้ไขบัญชีคู่ ${a.code}`} onClick={() => setDraft(a)} className={`${btn} h-7 px-2.5`}>แก้ไข</button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </Table>
+      <p className="text-xs text-muted">ส่วนต่างใช้เมื่อตัดหนี้ด้วย STM แล้วยอดที่ได้รับไม่เท่าลูกหนี้ บัญชีที่ไม่ตัดด้วย STM (เช่น .201 เหมาจ่ายรายหัว) ยอดจะคงอยู่จนกว่าจะตัดด้วยวิธีอื่น</p>
+    </Section>
+  );
+}
+
 export function ArAccounts() {
   const { data, error, retry } = useJson<ArAccountsData>("/api/admin/ar-accounts");
   const [shown, setShown] = useState<ArAccountsData>();
@@ -393,7 +468,10 @@ export function ArAccounts() {
       ) : !shown ? (
         <Skeleton rows={6} />
       ) : (
-        <Maps data={shown} reload={retry} />
+        <>
+          <Maps data={shown} reload={retry} />
+          <AccountSettings data={shown} reload={retry} />
+        </>
       )}
     </>
   );
