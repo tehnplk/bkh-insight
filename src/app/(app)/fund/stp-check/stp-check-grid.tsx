@@ -116,6 +116,10 @@ export function StpCheckGrid() {
       getRowId={(r) => r.id}
       renderSummary={renderSummary}
       exportPlacement="summary"
+      reorderable
+      hideable
+      fitScreen
+      pinColumns={3}
     />
   );
 }

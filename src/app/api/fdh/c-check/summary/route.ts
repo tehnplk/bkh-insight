@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
 import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
-import { FILE_ORDER, parseType, type SummaryResponse } from "../files";
+import { FILE_ORDER, codeLevel, parseType, type Level, type SummaryResponse } from "../files";
 import { RULES, countDef, ruleSummarySql } from "../checks";
 
 type Count = Record<string, string | number | null>;
+const RANK: Level[] = ["info", "warn", "error"];
 
 /** GET ?type=op|ip&start=&end= จำนวนแถวและจำนวนเคสที่ติดกฎของทุกแฟ้มในหมวด (left tab + badge) */
 export async function GET(request: NextRequest) {
@@ -26,14 +27,19 @@ export async function GET(request: NextRequest) {
     ]);
     const bySql = new Map(statements.map((sql, i) => [sql, counts[i][0]]));
     const cases = new Map<string, number>();
-    for (const r of rules) cases.set(r.fdh_file, (cases.get(r.fdh_file) ?? 0) + Number(r.n));
+    const level = new Map<string, Level>();
+    for (const r of rules) {
+      cases.set(r.fdh_file, (cases.get(r.fdh_file) ?? 0) + Number(r.n));
+      const l = codeLevel(r.c_code), cur = level.get(r.fdh_file);
+      if (!cur || RANK.indexOf(l) > RANK.indexOf(cur)) level.set(r.fdh_file, l);
+    }
 
     const body: SummaryResponse = {
       type,
       files: files.map((file) => {
         const { sql, col } = countDef(type, file);
         // SUM() ของ mysql2 คืน string
-        return { file, rows: Number(bySql.get(sql)?.[col] ?? 0), cases: RULES[type][file] ? (cases.get(file) ?? 0) : null };
+        return { file, rows: Number(bySql.get(sql)?.[col] ?? 0), cases: RULES[type][file] ? (cases.get(file) ?? 0) : null, level: level.get(file) };
       }),
     };
     return Response.json(body);

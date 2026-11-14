@@ -57,6 +57,103 @@ const COUNT: Record<FdhType, Record<string, CountDef>> = { op: OP_COUNT, ip: IP_
 
 // ---- กฎตรวจ C: PREFIX ต่อหมวด + block ต่อแฟ้ม คืน c_code, fdh_file, hn, an, seq, found ----
 
+// กฎเฉพาะกองทุน STP (รหัส STP-… ใน files.ts): CTE ต่อท้าย PREFIX เฉพาะ visit/admission สิทธิ STP (มีน้อย CTE stp จึงประเมินซ้ำได้)
+// ไม่แตะ opitemrece ตามช่วงวันที่ (join ด้วย vn/an) ; ห้ามเปลี่ยน filter กองทุน
+const STP_OP = `stp AS (
+  SELECT v.hn AS HN, '' AS AN, v.vn AS SEQ,
+         COALESCE(v.hospmain, (SELECT hospitalcode FROM opdconfig LIMIT 1)) AS HOSPMAIN,
+         COALESCE(v.hospsub, v.hospmain, (SELECT hospitalcode FROM opdconfig LIMIT 1)) AS HOSPSUB,
+         COALESCE(NULLIF(vp.auth_code, ''), '') AS PERMITNO,
+         CASE WHEN v.ovstost IN ('03', '04') THEN '3' ELSE '1' END AS UUC,
+         COALESCE(NULLIF(vp.nhso_ucae_type_code, ''), '') AS UCAE
+  FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e
+  INNER JOIN patient pt ON pt.hn = v.hn
+  LEFT JOIN visit_pttype vp ON vp.vn = v.vn AND vp.pttype = v.pttype
+  WHERE v.pttype IN (SELECT pttype FROM pttype WHERE hipdata_code = 'STP') AND (v.an IS NULL OR v.an = '')
+),
+adp_s AS (
+  SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, COALESCE(nd.nhso_adp_type_id, 3) AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+         ROUND(op.qty, 2) AS QTY, ROUND(op.unitprice, 2) AS RATE, ROUND(op.sum_price, 2) AS TOTAL
+  FROM stp s JOIN opitemrece op ON op.vn = s.SEQ INNER JOIN nondrugitems nd ON nd.icode = op.icode
+  WHERE (op.an IS NULL OR op.an = '') AND op.income NOT IN (3, 4)
+),
+dru_s AS (
+  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ROUND(op.unitprice, 2) AS DRUGPRICE, ROUND(op.sum_price, 2) AS TOTAL,
+         CASE WHEN op.an IS NOT NULL AND op.an <> '' AND op.income = 3 THEN '1' ELSE '2' END AS USE_STATUS
+  FROM stp s JOIN opitemrece op ON op.vn = s.SEQ INNER JOIN drugitems d ON d.icode = op.icode
+  WHERE (op.an IS NULL OR op.an = '') AND op.income IN (3, 4)
+),
+cha_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
+         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(op.sum_price), 2) AS AMOUNT
+  FROM stp s JOIN opitemrece op ON op.vn = s.SEQ LEFT JOIN income inc ON inc.income = op.income
+  WHERE (op.an IS NULL OR op.an = '')
+  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
+  HAVING ROUND(SUM(op.sum_price), 2) > 0
+),
+cht_s AS (
+  SELECT s.HN, s.AN, s.SEQ, ROUND(vs.income, 2) AS TOTAL FROM stp s JOIN vn_stat vs ON vs.vn = s.SEQ
+),
+dx_s AS (
+  SELECT s.HN, s.AN, s.SEQ, od.icd10 AS DIAG, COALESCE(od.diagtype, '1') AS DXTYPE
+  FROM stp s JOIN ovstdiag od ON od.vn = s.SEQ
+),
+aer_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS REFMAINI, COALESCE(rout.refer_hospcode, '') AS REFMAINO,
+         rin.vn IS NOT NULL AS HAS_IN, rout.vn IS NOT NULL AS HAS_OUT
+  FROM stp s JOIN er_regist er ON er.vn = s.SEQ LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn
+),
+orf_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(ro.refer_hospcode, ro.hospcode) AS REFER FROM stp s JOIN referout ro ON ro.vn = s.SEQ
+)`;
+
+const STP_IP = `stp AS (
+  SELECT DISTINCT v.hn AS HN, a.AN AS AN, '' AS SEQ,
+         COALESCE(v.hospmain, (SELECT hospitalcode FROM opdconfig LIMIT 1)) AS HOSPMAIN,
+         COALESCE(v.hospsub, v.hospmain, (SELECT hospitalcode FROM opdconfig LIMIT 1)) AS HOSPSUB,
+         COALESCE(NULLIF(ap.auth_code, ''), '') AS PERMITNO
+  FROM a INNER JOIN ovst v ON v.an = a.AN
+  INNER JOIN patient pt ON pt.hn = v.hn
+  LEFT JOIN ipt_pttype ap ON ap.an = a.AN AND ap.pttype = v.pttype
+  WHERE v.pttype IN (SELECT pttype FROM pttype WHERE hipdata_code = 'STP')
+),
+adp_s AS (
+  SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, COALESCE(nd.nhso_adp_type_id, 3) AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+         ROUND(op.qty, 2) AS QTY, ROUND(op.unitprice, 2) AS RATE, ROUND(op.sum_price, 2) AS TOTAL
+  FROM stp s JOIN opitemrece op ON op.an = s.AN INNER JOIN nondrugitems nd ON nd.icode = op.icode
+  WHERE op.income NOT IN (3, 4)
+),
+dru_s AS (
+  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ROUND(op.unitprice, 2) AS DRUGPRICE, ROUND(op.sum_price, 2) AS TOTAL,
+         CASE WHEN op.an IS NOT NULL AND op.an <> '' AND op.income = 3 THEN '1' ELSE '2' END AS USE_STATUS
+  FROM stp s JOIN opitemrece op ON op.an = s.AN INNER JOIN drugitems d ON d.icode = op.icode
+  WHERE op.income IN (3, 4)
+),
+cha_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
+         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(op.sum_price), 2) AS AMOUNT
+  FROM stp s JOIN opitemrece op ON op.an = s.AN LEFT JOIN income inc ON inc.income = op.income
+  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
+  HAVING ROUND(SUM(op.sum_price), 2) > 0
+),
+cht_s AS (
+  SELECT s.HN, s.AN, s.SEQ, ROUND(ans.income, 2) AS TOTAL FROM stp s JOIN an_stat ans ON ans.an = s.AN
+),
+dx_s AS (
+  SELECT s.HN, s.AN, s.SEQ, id.icd10 AS DIAG, COALESCE(id.diagtype, '1') AS DXTYPE
+  FROM stp s JOIN iptdiag id ON id.an = s.AN
+),
+aer_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS REFMAINI, COALESCE(rout.refer_hospcode, '') AS REFMAINO,
+         rin.vn IS NOT NULL AS HAS_IN, rout.vn IS NOT NULL AS HAS_OUT
+  FROM stp s INNER JOIN ovst v ON v.an = s.AN INNER JOIN er_regist er ON er.vn = v.vn
+  LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn
+),
+orf_s AS (
+  SELECT s.HN, s.AN, s.SEQ, COALESCE(ro.refer_hospcode, ro.hospcode) AS REFER
+  FROM stp s JOIN ipt i ON i.an = s.AN JOIN referout ro ON ro.vn = i.vn
+)`;
+
 const PREFIX: Record<FdhType, string> = {
   op: `${H},
 ph AS (SELECT DISTINCT v.hn FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e),
@@ -68,7 +165,8 @@ ins AS (
   LEFT JOIN pttype t ON t.pttype = v.pttype
   LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype
   WHERE v.an IS NULL OR v.an = ''
-)`,
+),
+${STP_OP}`,
   // ไม่มี SVCTYPE: HOSxP ของเราไม่มีข้อมูลประเภทบริการ จึงปิด C160/C161
   // ADM_W: ipt.bw เป็นกรัม แต่ 16 แฟ้มส่งเป็นกิโลกรัม (C114/C153 ใช้ กก.) ปัด 3 ตำแหน่งไม่ให้ค่าขอบ 0.5/6 เพี้ยน
   ip: `${H},
@@ -91,7 +189,8 @@ ins AS (
   INNER JOIN patient pt ON pt.hn = v.hn
   LEFT JOIN pttype t ON t.pttype = v.pttype
   LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype
-)`,
+),
+${STP_IP}`,
 };
 
 // pt.cid ต้องอยู่ใน block ไม่ใช่ CTE (db-cli ปิดค่า cid เป็น MD5 ทำให้พิสูจน์ผิด)
@@ -137,6 +236,31 @@ UNION ALL SELECT '121', 'IPD', HN, AN, '', CONCAT(DATEADM, ' ', TIMEADM, ' > ', 
 UNION ALL SELECT '151', 'IPD', a.HN, a.AN, '', CONCAT('overlaps AN ', b.AN) FROM a JOIN aw b ON b.HN = a.HN AND b.AN > a.AN
   WHERE a.DATEADM < b.DATEDSC AND b.DATEADM < a.DATEDSC`;
 
+// block STP ต่อแฟ้ม (ใช้ CTE stp/*_s) rf/dx = ชื่อแฟ้มส่งต่อ/วินิจฉัยของหมวด ; IP ไม่มี STP-R112 (block OPD)
+const stpBlocks = (rf: string, dx: string) => ({
+  INS: `SELECT 'STP-R175' AS c_code, 'INS' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT(HOSPMAIN, '/', HOSPSUB) AS found FROM stp WHERE TRIM(COALESCE(HOSPMAIN, '')) = '' OR TRIM(COALESCE(HOSPSUB, '')) = ''
+UNION ALL SELECT 'STP-AUTH', 'INS', HN, AN, SEQ, PERMITNO FROM stp WHERE PERMITNO = '' OR BINARY PERMITNO NOT REGEXP '^[A-Z]{2}[0-9]{10}$'`,
+  OPD: "SELECT 'STP-R112' AS c_code, 'OPD' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, UCAE AS found FROM stp WHERE UUC = '1' AND UCAE NOT IN ('A', 'E', 'I', 'O')",
+  AER: `SELECT 'STP-R111' AS c_code, 'AER' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT(REFMAINI, '/', REFMAINO) AS found FROM aer_s WHERE (HAS_IN AND TRIM(REFMAINI) = '') OR (HAS_OUT AND TRIM(REFMAINO) = '')
+UNION ALL SELECT 'STP-R113', 'AER', HN, AN, SEQ, CONCAT(REFMAINI, '/', REFMAINO) FROM aer_s WHERE (REFMAINI <> '' AND TRIM(REFMAINI) NOT REGEXP '^[0-9]{5}$') OR (REFMAINO <> '' AND TRIM(REFMAINO) NOT REGEXP '^[0-9]{5}$')`,
+  RF: `SELECT 'STP-R113' AS c_code, '${rf}' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, REFER AS found FROM orf_s WHERE TRIM(COALESCE(REFER, '')) <> '' AND TRIM(REFER) NOT REGEXP '^[0-9]{5}$'`,
+  ADP: `SELECT 'STP-R108' AS c_code, 'ADP' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT_WS('/', QTY, RATE, TOTAL) AS found FROM adp_s WHERE QTY IS NULL OR QTY <= 0 OR RATE IS NULL OR RATE <= 0 OR TOTAL IS NULL OR TOTAL <= 0
+UNION ALL SELECT 'STP-R188', 'ADP', HN, AN, SEQ, CODE FROM adp_s WHERE CODE NOT IN ('55999', '57999') GROUP BY HN, AN, SEQ, DATEOPD, ADPTYPE, CODE HAVING COUNT(*) > 1
+UNION ALL SELECT 'STP-R292', 'ADP', HN, AN, SEQ, QTY FROM adp_s WHERE CODE = 'S1801' AND (QTY < 1 OR QTY > 2)
+UNION ALL SELECT 'STP-R180', 'ADP', x.HN, x.AN, x.SEQ, x.CODE FROM adp_s x WHERE x.CODE = 'S1802' AND NOT EXISTS (SELECT 1 FROM adp_s y WHERE y.CODE = 'S1801' AND y.AN = x.AN AND y.SEQ = x.SEQ) GROUP BY x.HN, x.AN, x.SEQ, x.CODE
+UNION ALL SELECT 'STP-R194', 'ADP', HN, AN, SEQ, COUNT(*) FROM adp_s WHERE CODE = 'S1801' GROUP BY HN, AN, SEQ HAVING COUNT(*) > 1`,
+  DRU: "SELECT 'STP-R108' AS c_code, 'DRU' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT_WS('/', AMOUNT, DRUGPRICE, TOTAL) AS found FROM dru_s WHERE AMOUNT IS NULL OR AMOUNT <= 0 OR DRUGPRICE IS NULL OR DRUGPRICE <= 0 OR TOTAL IS NULL OR TOTAL <= 0",
+  CHT: "SELECT 'STP-R186' AS c_code, 'CHT' AS fdh_file, c.HN AS hn, c.AN AS an, c.SEQ AS seq, CONCAT(c.TOTAL, ' <> ', COALESCE(h.S, 0)) AS found FROM cht_s c LEFT JOIN (SELECT AN, SEQ, SUM(AMOUNT) AS S FROM cha_s GROUP BY AN, SEQ) h ON h.AN = c.AN AND h.SEQ = c.SEQ WHERE ABS(c.TOTAL - COALESCE(h.S, 0)) >= 0.01",
+  DX: `SELECT 'STP-R191' AS c_code, '${dx}' AS fdh_file, s.HN AS hn, s.AN AS an, s.SEQ AS seq, '' AS found FROM stp s WHERE NOT EXISTS (SELECT 1 FROM dx_s d WHERE d.AN = s.AN AND d.SEQ = s.SEQ AND d.DXTYPE = '1' AND TRIM(d.DIAG) <> '')
+UNION ALL SELECT 'STP-R136', '${dx}', HN, AN, SEQ, DIAG FROM dx_s WHERE DXTYPE = '1' AND DIAG LIKE 'H54%'
+UNION ALL SELECT 'STP-R116', '${dx}', d.HN, d.AN, d.SEQ, MIN(d.DIAG) FROM dx_s d WHERE LEFT(d.DIAG, 1) IN ('S', 'T') AND NOT EXISTS (SELECT 1 FROM dx_s x WHERE x.AN = d.AN AND x.SEQ = d.SEQ AND x.DXTYPE = '5') GROUP BY d.HN, d.AN, d.SEQ`,
+});
+const STP_OP_BLOCKS = stpBlocks("ORF", "ODX");
+const STP_IP_BLOCKS = stpBlocks("IRF", "IDX");
+const STP_INS = ["STP-R175", "STP-AUTH"];
+const STP_ADP = ["STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"];
+const STP_DX = ["STP-R191", "STP-R136", "STP-R116"];
+
 type Rule = { codes: string[]; sql: string };
 const PAT_RULE: Rule = { codes: ["101", "102", "103", "104", "116"], sql: PAT_BLOCK };
 
@@ -145,15 +269,28 @@ export const RULES: Record<FdhType, Record<string, Rule>> = {
   op: {
     PAT: PAT_RULE,
     OPD: {
-      codes: ["105"],
-      sql: "SELECT '105' AS c_code, 'OPD' AS fdh_file, v.hn AS hn, '' AS an, v.vn AS seq, v.hn AS found FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e WHERE v.hn IS NULL OR TRIM(v.hn) = ''",
+      codes: ["105", "STP-R112"],
+      sql: `SELECT '105' AS c_code, 'OPD' AS fdh_file, v.hn AS hn, '' AS an, v.vn AS seq, v.hn AS found FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e WHERE v.hn IS NULL OR TRIM(v.hn) = ''
+UNION ALL ${STP_OP_BLOCKS.OPD}`,
     },
-    INS: { codes: ["127"], sql: insBlock("127") },
+    INS: { codes: ["127", ...STP_INS], sql: `${insBlock("127")}\nUNION ALL ${STP_OP_BLOCKS.INS}` },
+    AER: { codes: ["STP-R111", "STP-R113"], sql: STP_OP_BLOCKS.AER },
+    ORF: { codes: ["STP-R113"], sql: STP_OP_BLOCKS.RF },
+    ADP: { codes: STP_ADP, sql: STP_OP_BLOCKS.ADP },
+    DRU: { codes: ["STP-R108"], sql: STP_OP_BLOCKS.DRU },
+    CHT: { codes: ["STP-R186"], sql: STP_OP_BLOCKS.CHT },
+    ODX: { codes: STP_DX, sql: STP_OP_BLOCKS.DX },
   } satisfies Partial<Record<OpFile, Rule>>,
   ip: {
     PAT: PAT_RULE,
     IPD: { codes: ["106", "107", "108", "109", "110", "111", "112", "114", "153", "120", "121", "151"], sql: IPD_BLOCK },
-    INS: { codes: ["125"], sql: insBlock("125") },
+    INS: { codes: ["125", ...STP_INS], sql: `${insBlock("125")}\nUNION ALL ${STP_IP_BLOCKS.INS}` },
+    AER: { codes: ["STP-R111", "STP-R113"], sql: STP_IP_BLOCKS.AER },
+    IRF: { codes: ["STP-R113"], sql: STP_IP_BLOCKS.RF },
+    ADP: { codes: STP_ADP, sql: STP_IP_BLOCKS.ADP },
+    DRU: { codes: ["STP-R108"], sql: STP_IP_BLOCKS.DRU },
+    CHT: { codes: ["STP-R186"], sql: STP_IP_BLOCKS.CHT },
+    IDX: { codes: STP_DX, sql: STP_IP_BLOCKS.DX },
   } satisfies Partial<Record<IpFile, Rule>>,
 };
 

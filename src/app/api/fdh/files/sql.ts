@@ -11,8 +11,10 @@ const AI = "FROM p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e";
 const q = (select: string, rest: string) => `${H}\nSELECT ${select}\n${rest}${PAGE}`;
 
 // SELECT list ที่ OP กับ IP ใช้ร่วมกัน (ข้อความเหมือนกันทุกตัวอักษร)
-const INS = `v.hn AS \`HN\`, COALESCE(t.hipdata_code, t.pcode, 'UCS') AS \`INSCL\`, COALESCE(t.pttype, '') AS \`SUBTYPE\`, pt.cid AS \`CID\`, ${HCODE} AS \`HCODE\`, DATE_FORMAT(pp.expire_date, '%Y-%m-%d') AS \`DATEEXP\`, COALESCE(v.hospmain, ${HCODE}) AS \`HOSPMAIN\`, COALESCE(v.hospsub, v.hospmain, ${HCODE}) AS \`HOSPSUB\`, COALESCE(t.pcode, '') AS \`GOVCODE\`, COALESCE(t.name, '') AS \`GOVNAME\`, COALESCE(v.pttypeno, '') AS \`PERMITNO\`, '' AS \`DOCNO\`, COALESCE(pt.father_cid, pt.mother_cid, pt.cid) AS \`OWNRPID\`, COALESCE(pt.fathername, pt.mathername, CONCAT(pt.fname, ' ', pt.lname)) AS \`OWNNAME\`, COALESCE(v.an, '') AS \`AN\`, v.vn AS \`SEQ\`, COALESCE(t.nhso_subinscl, '') AS \`SUBINSCL\`, '1' AS \`RELINSCL\`, '1' AS \`HTYPE\``;
-const INS_JOIN = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype";
+const INS = `v.hn AS \`HN\`, COALESCE(t.hipdata_code, t.pcode, 'UCS') AS \`INSCL\`, COALESCE(t.pttype, '') AS \`SUBTYPE\`, pt.cid AS \`CID\`, ${HCODE} AS \`HCODE\`, DATE_FORMAT(pp.expire_date, '%Y-%m-%d') AS \`DATEEXP\`, COALESCE(v.hospmain, ${HCODE}) AS \`HOSPMAIN\`, COALESCE(v.hospsub, v.hospmain, ${HCODE}) AS \`HOSPSUB\`, COALESCE(t.pcode, '') AS \`GOVCODE\`, COALESCE(t.name, '') AS \`GOVNAME\`, CASE WHEN t.hipdata_code = 'STP' THEN COALESCE(NULLIF(ap.auth_code, ''), '') ELSE COALESCE(v.pttypeno, '') END AS \`PERMITNO\`, '' AS \`DOCNO\`, COALESCE(pt.father_cid, pt.mother_cid, pt.cid) AS \`OWNRPID\`, COALESCE(pt.fathername, pt.mathername, CONCAT(pt.fname, ' ', pt.lname)) AS \`OWNNAME\`, COALESCE(v.an, '') AS \`AN\`, v.vn AS \`SEQ\`, COALESCE(t.nhso_subinscl, '') AS \`SUBINSCL\`, '1' AS \`RELINSCL\`, '1' AS \`HTYPE\``;
+// PERMITNO ของ STP = Authen Code ของสิทธิใน visit/admission (ap) ว่างก็ส่งว่าง ไม่ใช้ pttypeno แทน
+const INS_JOIN_OP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN visit_pttype ap ON ap.vn = v.vn AND ap.pttype = v.pttype";
+const INS_JOIN_IP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN ipt_pttype ap ON ap.an = v.an AND ap.pttype = v.pttype";
 const PAT = `${HCODE} AS \`HCODE\`, pt.hn AS \`HN\`, LPAD(COALESCE(pt.chwpart, '00'), 2, '0') AS \`CHANGWAT\`, LPAD(COALESCE(pt.amppart, '00'), 2, '0') AS \`AMPHUR\`, DATE_FORMAT(pt.birthday, '%Y-%m-%d') AS \`DOB\`, COALESCE(pt.sex, '1') AS \`SEX\`, COALESCE(pt.marrystatus, '9') AS \`MARRIAGE\`, LPAD(COALESCE(pt.occupation, '000'), 3, '0') AS \`OCCUPA\`, LPAD(COALESCE(pt.nationality, '099'), 3, '0') AS \`NATION\`, pt.cid AS \`PERSON_ID\`, CONCAT(COALESCE(pt.pname, ''), COALESCE(pt.fname, ''), ' ', COALESCE(pt.lname, '')) AS \`NAMEPAT\`, COALESCE(pt.pname, '') AS \`TITLE\`, COALESCE(pt.fname, '') AS \`FNAME\`, COALESCE(pt.lname, '') AS \`LNAME\`, CASE WHEN LENGTH(pt.cid) = 13 THEN '1' ELSE '2' END AS \`IDTYPE\``;
 const CLINIC = "CONCAT('0', LPAD(COALESCE(v.spclty, '01'), 2, '0'), '00')";
 const CHA = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE\`, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS \`CHRGITEM\`, ROUND(SUM(op.sum_price), 2) AS \`AMOUNT\`, pt.cid AS \`PERSON_ID\`, COALESCE(op.vn, '') AS \`SEQ\``;
@@ -34,7 +36,7 @@ const IP_ITEMS = `${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an`;
 const NOT_OPD = "v.an IS NULL OR v.an = ''"; // แฟ้ม OP ตัด visit ที่ admit
 
 const OP_SQL = {
-  INS: q(INS, `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${INS_JOIN}\nWHERE ${NOT_OPD}\nORDER BY v.vstdate, v.vn, pp.patient_pttype_id`),
+  INS: q(INS, `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${INS_JOIN_OP}\nWHERE ${NOT_OPD}\nORDER BY v.vstdate, v.vn, pp.patient_pttype_id`),
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT v.hn FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
   // DETAIL: '\\r' '\\n' ใน JS = '\r' '\n' ใน SQL (MySQL แปลงเป็น CR/LF เอง)
   OPD: q(
@@ -67,7 +69,7 @@ const OP_SQL = {
 
 // IP: ทุกแฟ้มยึด admission ที่จำหน่ายในช่วง (AI) ; IPD: SVCTYPE = '1' ทุก admission (ไม่มี w.is_icu), ADM_W แปลงกรัมเป็นกิโลกรัม
 const IP_SQL = {
-  INS: q(INS, `${AI} INNER JOIN ovst v ON v.an = a.an ${INS_JOIN}\nORDER BY a.dchdate, a.an, v.vn, pp.patient_pttype_id`),
+  INS: q(INS, `${AI} INNER JOIN ovst v ON v.an = a.an ${INS_JOIN_IP}\nORDER BY a.dchdate, a.an, v.vn, pp.patient_pttype_id`),
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT a.hn FROM p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
   IPD: q(
     "i.hn AS `HN`, i.an AS `AN`, DATE_FORMAT(i.regdate, '%Y-%m-%d') AS `DATEADM`, DATE_FORMAT(i.regtime, '%H%i') AS `TIMEADM`, DATE_FORMAT(i.dchdate, '%Y-%m-%d') AS `DATEDSC`, DATE_FORMAT(i.dchtime, '%H%i') AS `TIMEDSC`, COALESCE(i.dchstts, '1') AS `DISCHS`, COALESCE(i.dchtype, '1') AS `DISCHT`, COALESCE(w.ward_export_code, w.sss_code, w.ward, '01') AS `WARDDSC`, LPAD(COALESCE(i.spclty, '01'), 2, '0') AS `DEPT`, ROUND(COALESCE(i.bw, 0) / 1000, 3) AS `ADM_W`, '1' AS `UUC`, '1' AS `SVCTYPE`",
