@@ -1,4 +1,4 @@
-// รัน: node --test src/app/api/fdh/claim-codes/readiness.test.mjs
+// รัน: node --test src/app/api/catalog/claim-codes/readiness.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assess, problemOf } from "./readiness.ts";

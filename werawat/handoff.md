@@ -1,6 +1,21 @@
-# Handoff: werawat (อัปเดต 13 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 14 พ.ย. 2569)
 
-## งานถัดไป (เริ่มพรุ่งนี้): เคลมผู้มีปัญหาสถานะ (สท./STP) และต่างด้าว (NRH) ถึงส่งผ่าน FDH
+## รอบ 14 พ.ย. 2569 (PR #34 merge แล้ว, deploy แล้ว main `c1cb251`)
+- ใหม่ (รายละเอียดอยู่ใน AGENTS.md หัวข้อสมุดลูกหนี้ และ skill `uc-ar-subaccounts` ข้อ 7):
+  - `/admin/ar-funds`: กติกากองทุนย่อย `ar_fund_rule` (items/rights/icd, pttype, ICD ช่วง+PDX, รายการจำเป็น) + กิจกรรมย่อย `ar_fund_activity` ; ตรวจเทียบ REP รายเดือนพร้อมเหตุผล, อัตราได้รับรายรายการ, รายการพบบ่อยในเคสได้รับ/ไม่ได้รับ (ปุ่มเพิ่มเข้ากติกา)
+  - ar-sync ตัดหนี้ด้วย STM (`settle.ts`: settle + diff ปิดหนี้ทั้งก้อน) เฉพาะ `ar_account.settles_by_stm` (.202 .209 .216 .217 .222 .401 .402 ; ไม่ตัด .201 .203 .204) — STM ที่มีตอนนี้ (UCS OP 1 ไฟล์) จับได้แต่ .201/.203 จึงยังไม่มีแถวตัดหนี้
+  - `/fund/ar-ledger`: สมุดรายวัน Dr/Cr + Excel, คำขอปรับปรุงลูกหนี้ (ขอจาก modal แถว, admin อีกคนอนุมัติ), แถบความสดของข้อมูล ; `/admin/ar-accounts`: บัญชีรายได้คู่/ส่วนต่าง/ตัดด้วย STM
+  - `access_log` (proxy บันทึกทุก /api/*) ดูที่ `/admin/access-log`
+  - `/fdh/claim-codes` ความพร้อมรหัสเบิก: INST 376 รหัสจากประกาศ สปสช. 2568 (`claim_code`) ; PP = `nhso_adp_code` ประเภท 4 + FP/1B0 ของ HOSxP ; ผล: INST ต้องแก้ 68 รายการ (มีรหัสในประกาศที่มีรายการใน HOSxP 38/376, ET tube 3001/3002 ไม่อยู่ในประกาศแล้ว), PP ต้องแก้ 4 (HPV ไม่มีรหัส)
+- พิสูจน์แหล่งยอดแล้ว: `rcpt_debt` ตรง opitemrece paidst 02 99.1% (ต่อ VN) ; `an_stat.uc_money` ตรง 662/664 AN → ไม่ต้องเปลี่ยนแหล่งยอด
+- GH_TOKEN ใหม่ (bkhadmin) ใช้ได้แล้ว แต่ยังไม่เคยลอง `gh pr create` ด้วย token นี้
+- ค้าง/ต่อได้:
+  - ตั้งกิจกรรมย่อยของ PP แทนหมวด 21 (หมวด 21 นับ 503 ราย vs REP 150) ใช้ตาราง "เคสได้รับ/ไม่ได้รับ" ช่วยเลือก ; HC/AE ยังไม่มีเงื่อนไข
+  - ส่งรายการ "ต้องแก้" จาก `/fdh/claim-codes` (Excel) ให้ admin HOSxP ; INST ประกาศแก้ไขหลัง 2568 ต้องเพิ่มด้วย migration ใหม่ ; รายการ PP ทางการ (ไฟล์รหัส) ยังหาไม่ได้
+  - ยังไม่ได้ทดสอบบันทึกจริง: กิจกรรม/กติกา, บัญชีคู่, คำขอปรับปรุง+อนุมัติ (ต้องใช้ admin 2 คน) ; `access_log` ยังไม่มีการลบข้อมูลเก่า
+  - งาน STP/NRH (หัวข้อถัดไป) ยังไม่เริ่ม
+
+## งานถัดไป: เคลมผู้มีปัญหาสถานะ (สท./STP) และต่างด้าว (NRH) ถึงส่งผ่าน FDH
 - deploy แล้วถึง PR #33 (main `0c769f2`): ตัวกรองหัวคอลัมน์ทุกหน้า DataGrid, แถวต่อหน้า "ทั้งหมด", OPD/IPD แยกรายสิทธิ (พอดีจอ ตรึง/ย้าย/ซ่อนคอลัมน์), modal 16 แฟ้ม กรองเฉพาะติด C + Excel
 - ข้อมูลจริงในระบบ (ตรวจด้วย db-cli 13 พ.ย. 2569):
   - pttype `ST` (สิทธิเบิกกลุ่มงานประกันสุขภาพ สธ.) และ `65` → hipdata `STP` ; `99` (ต่างด้าวขึ้นทะเบียน) และ `64` (แรงงานต่างด้าวเบิกส่วนกลาง) → `NRH` ; ปีงบ 2569: ST 52 visit, 99 260 visit
@@ -62,6 +77,6 @@
 
 ## คำสั่งตรวจ
 - `npx tsc --noEmit` ; `npm run lint`
-- `node --test src/app/api/fund/ar-sync/ledger.test.mjs src/app/api/fund/uc-debtor/items/items.test.mjs src/app/api/fund/rep-import/*.test.mjs src/app/api/fund/stm-import/stm.test.mjs src/app/api/fdh/c-check/fdh.test.mjs`
+- `node --test src/app/api/fund/ar-sync/ledger.test.mjs src/app/api/fund/uc-debtor/items/items.test.mjs src/app/api/fund/rep-import/*.test.mjs src/app/api/fund/stm-import/stm.test.mjs src/app/api/fdh/c-check/fdh.test.mjs src/app/api/fund/ar-sync/settle.test.mjs src/app/api/fund/ar-journal/journal.test.mjs src/app/api/admin/ar-funds/rules.test.mjs src/app/api/fdh/claim-codes/readiness.test.mjs`
 - deploy: `cd /var/www/bkh-insight && git pull --ff-only && npm ci (ถ้า lockfile เปลี่ยน) && npm run db:migrate && npm run build && sudo systemctl restart bkh-insight`
 - timer: `systemctl list-timers bkh-insight-ar-sync.timer` ; `journalctl -u bkh-insight-ar-sync.service`

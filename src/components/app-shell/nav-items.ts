@@ -21,6 +21,14 @@ export const navItems: NavItem[] = [
   { label: "IPD แยกรายสิทธิ", href: "/ipd/admissions", icon: "bed" },
   // Sections follow the revenue-cycle steps (not the URL module), since users look for a page by the step they are on.
   {
+    label: "เตรียมข้อมูลมาตรฐาน",
+    icon: "folder",
+    children: [
+      { label: "ความพร้อมรหัสเบิก", href: "/catalog/claim-codes" },
+      { label: "รหัสมาตรฐาน", href: "/catalog/standard-codes" },
+    ],
+  },
+  {
     label: "บริการและมูลค่า",
     icon: "chart",
     children: [
@@ -36,7 +44,6 @@ export const navItems: NavItem[] = [
       { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
       { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
       { label: "16 แฟ้มมาตรฐาน", href: "/fdh/files" },
-      { label: "ความพร้อมรหัสเบิก", href: "/fdh/claim-codes" },
     ],
   },
   {
@@ -83,6 +90,5 @@ export const adminSection: NavSection = {
     { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
     { label: "กองทุนย่อยลูกหนี้", href: "/admin/ar-funds" },
     { label: "บันทึกการเข้าถึง", href: "/admin/access-log" },
-    { label: "ตั้งค่ารหัสมาตรฐาน", href: "/admin/mapcode" },
   ],
 };

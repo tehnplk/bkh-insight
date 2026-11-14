@@ -6,7 +6,7 @@ import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import type { GridPage } from "@/lib/grid-query";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import type { CatalogFileInfo, DrugNhsoImportResult, DrugNhsoItem } from "@/app/api/admin/mapcode/drug-nhso";
+import type { CatalogFileInfo, DrugNhsoImportResult, DrugNhsoItem } from "@/app/api/catalog/drug-nhso/drug-nhso";
 import { Money, Notice, btn, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { Segmented } from "@/app/(app)/quality/pending/segmented";
 
@@ -24,7 +24,7 @@ const dateCell = { className: "whitespace-nowrap tabular-nums" };
 const textOr = (v: string | null) => v || dash;
 
 const col = gridColumnHelper<DrugNhsoItem>();
-// ตัวกรองหัวคอลัมน์จาก /api/admin/mapcode/drug-nhso?facet=<id> (ยกเว้นราคา)
+// ตัวกรองหัวคอลัมน์จาก /api/catalog/drug-nhso?facet=<id> (ยกเว้นราคา)
 const filterable = { ...nowrap, filter: true } as const;
 const codeFilter = { ...dateCell, filter: true } as const;
 const dateFilter = { ...dateCell, filter: { format: (v: string) => formatThaiDate(v) || v } } as const;
@@ -69,7 +69,7 @@ function DrugNhsoUpload({ onImported }: { onImported: () => void }) {
     setState({ busy: true });
     const form = new FormData();
     form.set("file", file);
-    const res = await fetch("/api/admin/mapcode/drug-nhso", { method: "POST", body: form }).catch(() => null);
+    const res = await fetch("/api/catalog/drug-nhso", { method: "POST", body: form }).catch(() => null);
     const result: DrugNhsoImportResult = (await res?.json().catch(() => null)) ?? { status: "error", file: file.name, errors: [`นำเข้าไม่สำเร็จ${res ? ` (HTTP ${res.status})` : ""}`] };
     setState({ busy: false, result });
     if (result.status === "imported") onImported();
@@ -118,14 +118,14 @@ function DrugNhsoUpload({ onImported }: { onImported: () => void }) {
   );
 }
 
-function DrugNhsoTab() {
+function DrugNhsoTab({ canImport }: { canImport: boolean }) {
   const [gridKey, setGridKey] = useState(0);
   return (
     <div className="flex flex-col gap-4">
-      <DrugNhsoUpload onImported={() => setGridKey((k) => k + 1)} />
+      {canImport && <DrugNhsoUpload onImported={() => setGridKey((k) => k + 1)} />}
       <DataGrid<DrugNhsoItem, DrugPage>
         key={gridKey}
-        endpoint="/api/admin/mapcode/drug-nhso"
+        endpoint="/api/catalog/drug-nhso"
         columns={columns}
         getRowId={(r) => r.hosp_drug_code}
         renderSummary={renderSummary}
@@ -135,7 +135,8 @@ function DrugNhsoTab() {
   );
 }
 
-export function Mapcode() {
+/** canImport: ผู้ดูแลระบบนำเข้าไฟล์ได้ (API เช็ค role ซ้ำ) ผู้ใช้อื่นดูอย่างเดียว */
+export function Mapcode({ canImport }: { canImport: boolean }) {
   const { tab, set } = useUrlParams(["tab", "q", "sort", "dir"] as const);
   const current: Tab = isTab(tab) ? tab : "drug-nhso";
   return (
@@ -143,7 +144,7 @@ export function Mapcode() {
       {/* เปลี่ยนแท็บ = ล้างคำค้นและ sort ของ DataGrid (set ล้าง page ให้แล้ว) เพราะคนละตาราง */}
       <Segmented label="ชนิดรหัสมาตรฐาน" options={TABS} value={current} onChange={(t) => set({ tab: t === "drug-nhso" ? null : t, q: null, sort: null, dir: null })} />
       {current === "drug-nhso" ? (
-        <DrugNhsoTab />
+        <DrugNhsoTab canImport={canImport} />
       ) : (
         <Notice title="ยังไม่รองรับการนำเข้า" detail="รอไฟล์ตัวอย่างจริงเพื่อตรวจหัวคอลัมน์ก่อนเขียนตัวนำเข้า" />
       )}

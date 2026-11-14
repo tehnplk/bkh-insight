@@ -5,9 +5,9 @@ import { escapeLike, insightQuery, insightTransaction } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
-import { MAX_CATALOG_BYTES, parseDrugNhso, type CatalogFileInfo, type DrugNhsoImportResult, type DrugNhsoItem } from "../drug-nhso";
+import { MAX_CATALOG_BYTES, parseDrugNhso, type CatalogFileInfo, type DrugNhsoImportResult, type DrugNhsoItem } from "./drug-nhso";
 
-// proxy.ts กันไว้แล้ว แต่ route ใต้ /api/admin ต้องเช็คเองซ้ำ (เหมือน /api/admin/users)
+// ดู (GET) ได้ทุกคนที่ login ; นำเข้าไฟล์ (POST) เฉพาะ admin เช็คที่นี่ เพราะ path นี้ไม่อยู่ใต้ /api/admin ที่ proxy กันให้
 async function adminSession() {
   const session = await auth();
   if (!session) return { error: Response.json({ error: "unauthorized" }, { status: 401 }) };
@@ -101,8 +101,7 @@ const FILTERABLE = Object.keys(FILTER_DEFS);
 
 /** GET + พารามิเตอร์ DataGrid: รายการยาปัจจุบันจากไฟล์ล่าสุด และข้อมูลไฟล์ที่นำเข้า */
 export async function GET(request: Request) {
-  const { error } = await adminSession();
-  if (error) return error;
+  if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const searchParams = new URL(request.url).searchParams;
   const grid = parseGridQuery<SortKey>(searchParams, SORTABLE);
   if (!grid.ok) return Response.json({ error: grid.error }, { status: 400 });

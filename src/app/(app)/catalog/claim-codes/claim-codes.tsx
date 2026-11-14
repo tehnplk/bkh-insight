@@ -5,8 +5,8 @@ import { Search } from "lucide-react";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
-import type { ClaimCodesData } from "@/app/api/fdh/claim-codes/route";
-import { KIND_SCOPE, PROBLEM_TEXT, type ClaimKind, type ItemRow } from "@/app/api/fdh/claim-codes/readiness";
+import type { ClaimCodesData } from "@/app/api/catalog/claim-codes/route";
+import { KIND_SCOPE, PROBLEM_TEXT, type ClaimKind, type ItemRow } from "@/app/api/catalog/claim-codes/readiness";
 
 const TH = "px-3 py-2.5 font-medium";
 const TD = "px-3 py-1.5 align-top";
@@ -33,7 +33,7 @@ function Section({ title, count, tone, kind, part, children }: { title: string; 
           {title} <span className={tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-muted"}>{formatCount(count)}</span>
         </h2>
         {count > 0 && (
-          <a href={`/api/fdh/claim-codes?${new URLSearchParams({ kind, format: "xlsx", part })}`} download className={btn}>
+          <a href={`/api/catalog/claim-codes?${new URLSearchParams({ kind, format: "xlsx", part })}`} download className={btn}>
             ส่งออก Excel
           </a>
         )}
@@ -86,7 +86,7 @@ function ItemTable({ rows, showProblem }: { rows: ItemRow[]; showProblem: boolea
 export function ClaimCodes() {
   const { kind: raw, set } = useUrlParams(["kind"]);
   const kind: ClaimKind = raw === "PP" ? "PP" : "INST";
-  const { data, error, loading, retry } = useJson<ClaimCodesData>(`/api/fdh/claim-codes?${new URLSearchParams({ kind })}`);
+  const { data, error, loading, retry } = useJson<ClaimCodesData>(`/api/catalog/claim-codes?${new URLSearchParams({ kind })}`);
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
   const d = data && data.kind === kind ? data : undefined;
