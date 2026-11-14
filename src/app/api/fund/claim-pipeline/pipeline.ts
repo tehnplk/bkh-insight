@@ -4,19 +4,26 @@ export type PipelineType = "op" | "ip";
 /** ขั้นตามลำดับ รายหนึ่งอยู่ที่ขั้นสุดท้ายที่ผ่านต่อเนื่องมา (ตกขั้นไหนไม่นับขั้นถัดไป) */
 export const STEPS = ["served", "closed", "rep", "a", "paid"] as const;
 export type Step = (typeof STEPS)[number];
-export const REASONS = ["authen_only", "none", "unlocked", "rep_wait", "rep_missing", "c", "deny", "stm_wait"] as const;
+export const REASONS = ["authen_only", "none", "no_approve", "unlocked", "rep_wait", "rep_missing", "c", "deny", "stm_wait"] as const;
 export type Reason = (typeof REASONS)[number];
 /** กลุ่มที่เลือกดูรายชื่อได้ (param stage): ขั้น = รายที่ไปถึงขั้นนั้น, สาเหตุ = รายที่ตกด้วยสาเหตุนั้น, overdue = ไม่มี REP เกินกำหนดส่ง */
 export const GROUPS = [...STEPS, ...REASONS, "overdue"] as const;
 export type Group = (typeof GROUPS)[number];
 
-export const STEP_LABEL: Record<PipelineType, Record<Step, string>> = {
+/** มุมมองของขั้นและสาเหตุ: OP ของข้าราชการ (OFC) ขั้น 2 คือ Approval Code จากเครื่อง EDC แทนการปิดสิทธิ สปสช. ; IP เหมือนกันทุกกองทุน */
+export type View = PipelineType | "ofc";
+export const EDC_FUND = "OFC";
+export const viewOf = (type: PipelineType, fund: string): View => (type === "op" && fund === EDC_FUND ? "ofc" : type);
+
+export const STEP_LABEL: Record<View, Record<Step, string>> = {
   op: { served: "ให้บริการ", closed: "ปิดสิทธิแล้ว", rep: "มี REP", a: "REP ผ่าน (A)", paid: "เงินเข้า" },
+  ofc: { served: "ให้บริการ", closed: "มี Approval Code แล้ว", rep: "มี REP", a: "REP ผ่าน (A)", paid: "เงินเข้า" },
   ip: { served: "จำหน่าย", closed: "ล็อกการเงินแล้ว", rep: "มี REP", a: "REP ผ่าน (A)", paid: "เงินเข้า" },
 };
 export const REASON_LABEL: Record<Reason, string> = {
   authen_only: "Authen แล้วยังไม่ปิดสิทธิ",
   none: "ยังไม่ Authen",
+  no_approve: "ยังไม่มี Approval Code",
   unlocked: "ยังไม่ล็อกการเงิน",
   rep_wait: "รอ REP",
   rep_missing: "ไม่พบ REP",
@@ -25,8 +32,9 @@ export const REASON_LABEL: Record<Reason, string> = {
   stm_wait: "รอ Statement",
 };
 /** สาเหตุที่ทำให้ไม่ถึงแต่ละขั้น (แสดงใต้ขั้นนั้น) */
-export const REASONS_AT: Record<PipelineType, Partial<Record<Step, readonly Reason[]>>> = {
+export const REASONS_AT: Record<View, Partial<Record<Step, readonly Reason[]>>> = {
   op: { closed: ["authen_only", "none"], rep: ["rep_wait", "rep_missing"], a: ["c", "deny"], paid: ["stm_wait"] },
+  ofc: { closed: ["no_approve"], rep: ["rep_wait", "rep_missing"], a: ["c", "deny"], paid: ["stm_wait"] },
   ip: { closed: ["unlocked"], rep: ["rep_wait", "rep_missing"], a: ["c", "deny"], paid: ["stm_wait"] },
 };
 
@@ -36,7 +44,7 @@ export const SUBMIT_DEADLINE_DAYS: Record<PipelineType, number> = { op: 15, ip: 
 // ถ้ามีวันที่ส่งเคลมจริง (FDH) ให้เทียบกับวันที่ส่งแทน
 export const REP_LAG_DAYS = 30;
 
-/** รายจาก HOSxP: claim = สถานะปิดสิทธิ (OP) หรือ closed/unlocked จาก ipt.finance_lock (IP) */
+/** รายจาก HOSxP: claim = สถานะปิดสิทธิ (OP), approved/no_approve จาก Approval Code EDC (OP ของ OFC) หรือ closed/unlocked จาก ipt.finance_lock (IP) */
 export type HisCase = {
   key: string;
   hn: string;
@@ -44,7 +52,7 @@ export type HisCase = {
   pttype: string | null;
   pttype_name: string;
   debtor: number | null;
-  claim: "closed" | "authen_only" | "none" | "unlocked";
+  claim: "closed" | "authen_only" | "none" | "approved" | "no_approve" | "unlocked";
 };
 /** REP ล่าสุดของราย ค่าเงินจาก pg เป็น string */
 export type RepLatest = {
@@ -100,7 +108,7 @@ export function classify(
     overdue: !rep && days > SUBMIT_DEADLINE_DAYS[type],
   };
   // มี REP = ส่งเคลมถึง สปสช. แล้ว นับว่าผ่านขั้นปิดสิทธิ/ล็อกการเงิน แม้ HOSxP ไม่มีบันทึก (ส.ค. 2569 OP UCS ไม่ปิดสิทธิ 2,799 ราย ส่วนใหญ่มี REP)
-  if (claim !== "closed" && !rep) return { ...row, step: "served", reason: claim };
+  if (claim !== "closed" && claim !== "approved" && !rep) return { ...row, step: "served", reason: claim };
   if (!rep) {
     const waiting = !ctx.repFileDate || utc(c.date) > utc(ctx.repFileDate) - REP_LAG_DAYS * DAY_MS;
     return { ...row, step: "closed", reason: waiting ? "rep_wait" : "rep_missing" };
@@ -109,6 +117,10 @@ export function classify(
   if (!(stmPaid && stmPaid > 0)) return { ...row, step: "a", reason: "stm_wait" };
   return { ...row, step: "paid", reason: null };
 }
+
+/** ราย OP ที่ปิดสิทธิผ่าน /fund/close-privilege (nhso_close_log ไม่ย้อนเข้า HOSxP) นับเป็นปิดสิทธิแล้ว */
+export const markClosed = <T extends Pick<HisCase, "key" | "claim">>(cases: T[], closed: Set<string>): T[] =>
+  closed.size ? cases.map((c) => (closed.has(c.key) ? { ...c, claim: "closed" } : c)) : cases;
 
 const rank = (s: Step) => STEPS.indexOf(s);
 

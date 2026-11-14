@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { escapeLike, insightQuery } from "@/lib/db";
+import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
@@ -16,6 +16,7 @@ export type AdminUser = {
   job_position: string | null;
   organizations: Organization[]; // set at sign-in from the SSO profile (src/auth.ts)
   login_count: number; // +1 per SSO sign-in (src/auth.ts), counted from 0 when the column was added
+  his_doctor_code: string | null; // doctor.code in HOSxP, used as the recorder when closing privileges (/fund/close-privilege)
 };
 export type Organization = { org_code: string | null; org_name: string | null; job_position: string | null };
 
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
   const args = [like, ...cfw.params] as SqlValue[];
   if (cf.query.facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, "FROM users", { sql: where, params: args }, "pg"));
   // sort is from the allowlist, so it is safe as an identifier.
-  const select = `SELECT id, provider_id, pname, fname, lname, role, is_approve, job_position, organizations, login_count
+  const select = `SELECT id, provider_id, pname, fname, lname, role, is_approve, job_position, organizations, login_count, his_doctor_code
 FROM users
 ${where}
 ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
@@ -86,6 +87,7 @@ ORDER BY ${sort ?? "id"} ${dir === "desc" ? "DESC" : "ASC"}, id`;
       { key: "role", header: "role", width: 10 },
       { key: "is_approve", header: "อนุมัติ", width: 10 },
       { key: "login_count", header: "จำนวนครั้งที่เข้าใช้งาน", width: 18, type: "count" },
+      { key: "his_doctor_code", header: "รหัสแพทย์ HOSxP", width: 14 },
     ], rows);
   }
 
@@ -102,9 +104,10 @@ ${where}`, args),
 
 const ID = /^[1-9]\d{0,17}$/; // positive, fits bigint
 const ROLES = ["user", "admin"]; // same as the users_role_check constraint
+const DOCTOR_CODE = /^[0-9A-Za-z]{1,10}$/; // same as the users.his_doctor_code check
 
 // One change per request, logged with the admin's name from the session (never from the body):
-//   { id: "12", approve: true | false }  or  { id: "12", role: "user" | "admin" }
+//   { id: "12", approve: true | false }  or  { id: "12", role: "user" | "admin" }  or  { id: "12", his_doctor_code: "123" | null }
 // A role change takes effect at that user's next sign-in (the role lives in their JWT).
 export async function POST(request: Request) {
   const { error, name, userId } = await adminSession();
@@ -113,8 +116,33 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const id = body?.id;
   if (typeof id !== "string" || !ID.test(id)) return Response.json({ error: "id ต้องเป็นจำนวนเต็มบวก" }, { status: 400 });
-  if (("approve" in body) === ("role" in body)) {
-    return Response.json({ error: "ส่ง approve หรือ role อย่างใดอย่างหนึ่ง" }, { status: 400 });
+  if (["approve", "role", "his_doctor_code"].filter((k) => k in body).length !== 1) {
+    return Response.json({ error: "ส่ง approve, role หรือ his_doctor_code อย่างใดอย่างหนึ่ง" }, { status: 400 });
+  }
+
+  // { id, his_doctor_code: "123" | null }: code must exist in HOSxP doctor with a 13-digit cid (never returned)
+  if ("his_doctor_code" in body) {
+    const code = typeof body.his_doctor_code === "string" ? body.his_doctor_code.trim() : body.his_doctor_code;
+    if (code !== null && code !== "") {
+      if (typeof code !== "string" || !DOCTOR_CODE.test(code)) {
+        return Response.json({ error: "รหัสแพทย์เป็นตัวอักษรหรือตัวเลขไม่เกิน 10 ตัว" }, { status: 400 });
+      }
+      const [d] = await hisQuery<{ recorder_person_id: string | null }>("SELECT cid AS recorder_person_id FROM doctor WHERE code = ? LIMIT 1", [code]);
+      if (!d) return Response.json({ error: `ไม่พบรหัสแพทย์ ${code} ใน HOSxP` }, { status: 400 });
+      if (!/^\d{13}$/.test(String(d.recorder_person_id ?? "").trim())) {
+        return Response.json({ error: `รหัสแพทย์ ${code} ใน HOSxP ไม่มีเลขบัตร 13 หลัก` }, { status: 400 });
+      }
+    }
+    const [row] = await insightQuery<{ id: string; his_doctor_code: string | null }>(
+      `UPDATE users
+SET his_doctor_code = $2::text,
+    log = log || jsonb_build_array(jsonb_build_object('at', now(), 'action', 'set_his_doctor_code', 'code', $2::text, 'by', $3::text))
+WHERE id = $1
+RETURNING id, his_doctor_code`,
+      [id, code || null, name],
+    );
+    if (!row) return Response.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
+    return Response.json(row);
   }
 
   if ("role" in body) {

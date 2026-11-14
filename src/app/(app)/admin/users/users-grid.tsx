@@ -57,6 +57,11 @@ const columns = col.columns([
     cell: (info) => formatCount(info.getValue()),
     meta: { className: "text-right tabular-nums", filter: true },
   }),
+  col.accessor("his_doctor_code", {
+    header: "รหัสแพทย์ HOSxP",
+    enableSorting: false,
+    cell: (info) => <DoctorCodeCell user={info.row.original} reload={() => info.table.options.meta?.reload()} />,
+  }),
   col.display({
     id: "action",
     header: () => <span className="sr-only">การอนุมัติ</span>,
@@ -127,6 +132,27 @@ function RoleCell({ user, reload }: { user: AdminUser; reload: () => void }) {
   );
 }
 
+// รหัสแพทย์ใน HOSxP (doctor.code) ใช้เป็นผู้บันทึกตอนปิดสิทธิ (/fund/close-privilege) ว่าง = ล้าง ; API ตรวจว่ามีในระบบและมีเลขบัตร
+function DoctorCodeCell({ user, reload }: { user: AdminUser; reload: () => void }) {
+  const [draft, setDraft] = useState(user.his_doctor_code ?? "");
+  const code = draft.trim();
+  const name = `${user.fname} ${user.lname}`;
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        maxLength={10}
+        aria-label={`รหัสแพทย์ HOSxP ของ ${name}`}
+        className="h-7 w-20 rounded-md border border-line bg-surface px-2 tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      {code !== (user.his_doctor_code ?? "") && (
+        <RowAction body={{ id: user.id, his_doctor_code: code || null }} label={code ? "บันทึก" : "ล้าง"} name={`รหัสแพทย์ ${name}`} primary={false} reload={reload} />
+      )}
+    </span>
+  );
+}
+
 // One POST to /api/admin/users per click (approve or role), then reload the grid. Disabled while pending,
 // the error shows in the row.
 function RowAction({
@@ -136,7 +162,7 @@ function RowAction({
   primary,
   reload,
 }: {
-  body: { id: string; approve: boolean } | { id: string; role: string };
+  body: { id: string; approve: boolean } | { id: string; role: string } | { id: string; his_doctor_code: string | null };
   label: string;
   name: string;
   primary: boolean;

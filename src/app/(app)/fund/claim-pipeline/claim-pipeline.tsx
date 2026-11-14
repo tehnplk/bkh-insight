@@ -7,8 +7,8 @@ import { formatThaiDate } from "@/lib/thai-date";
 import { Segmented } from "@/app/(app)/quality/pending/segmented";
 import type { ClaimPipelinePage } from "@/app/api/fund/claim-pipeline/route";
 import {
-  REASONS_AT, REASON_LABEL, STEPS, STEP_LABEL, SUBMIT_DEADLINE_DAYS,
-  type Group, type PipelineRow, type PipelineType, type Reason,
+  REASONS_AT, REASON_LABEL, STEPS, STEP_LABEL, SUBMIT_DEADLINE_DAYS, viewOf,
+  type Group, type PipelineRow, type PipelineType, type Reason, type View,
 } from "@/app/api/fund/claim-pipeline/pipeline";
 import { Money, ShareBar, focusRing, formatPct, num, pct, useUrlParams } from "../_components/ui";
 
@@ -23,6 +23,7 @@ const dash = <span className="text-muted">–</span>;
 const TONE: Record<Reason, string> = {
   authen_only: "border-warning-line bg-warning-soft text-warning",
   none: "border-danger-line bg-danger-soft text-danger",
+  no_approve: "border-danger-line bg-danger-soft text-danger",
   unlocked: "border-warning-line bg-warning-soft text-warning",
   rep_wait: "border-warning-line bg-warning-soft text-warning",
   rep_missing: "border-danger-line bg-danger-soft text-danger",
@@ -33,7 +34,7 @@ const TONE: Record<Reason, string> = {
 
 /* ---------- funnel ---------- */
 
-function Funnel({ data, type, stage, select }: { data: ClaimPipelinePage; type: PipelineType; stage: string; select: (g: Group | null) => void }) {
+function Funnel({ data, type, view, stage, select }: { data: ClaimPipelinePage; type: PipelineType; view: View; stage: string; select: (g: Group | null) => void }) {
   const f = data.summary;
   const served = f.steps.served.count;
   const toggle = (g: Group) => select(stage === g || (g === "served" && !stage) ? null : g);
@@ -56,7 +57,7 @@ function Funnel({ data, type, stage, select }: { data: ClaimPipelinePage; type: 
                 className={`flex flex-col gap-1 px-3 pt-2.5 pb-2 text-left ${focusRing} ${on(s) ? "bg-accent-soft" : "hover:bg-hover"}`}
               >
                 <span className={`flex items-baseline justify-between gap-2 ${on(s) ? "text-accent-text" : "text-muted"}`}>
-                  <span className="font-medium">{STEP_LABEL[type][s]}</span>
+                  <span className="font-medium">{STEP_LABEL[view][s]}</span>
                   {prev !== null && <span className="text-xs tabular-nums">{formatPct(pct(t.count, prev))} ของขั้นก่อน</span>}
                 </span>
                 <span className="text-title tabular-nums">
@@ -67,9 +68,9 @@ function Funnel({ data, type, stage, select }: { data: ClaimPipelinePage; type: 
                 </span>
                 <ShareBar value={pct(t.count, served)} />
               </button>
-              {REASONS_AT[type][s] && (
-                <ul aria-label={`ไม่ถึงขั้น ${STEP_LABEL[type][s]}`} className="flex flex-col border-t border-line px-1.5 py-1">
-                  {REASONS_AT[type][s].map((r) => (
+              {REASONS_AT[view][s] && (
+                <ul aria-label={`ไม่ถึงขั้น ${STEP_LABEL[view][s]}`} className="flex flex-col border-t border-line px-1.5 py-1">
+                  {REASONS_AT[view][s].map((r) => (
                     <li key={r}>
                       <ReasonButton label={REASON_LABEL[r]} count={f.reasons[r].count} amount={f.reasons[r].amount} pressed={on(r)} onClick={() => toggle(r)} />
                     </li>
@@ -166,7 +167,15 @@ export function ClaimPipeline({ funds }: { funds: { code: string; name: string }
           <Segmented label="ประเภทผู้ป่วย" options={TYPES} value={type} onChange={(t) => set({ type: t === "op" ? null : t, stage: null })} />
           <label className="flex items-center gap-2">
             <span className="text-muted">กองทุน</span>
-            <select value={fund} onChange={(e) => set({ fund: e.target.value === "UCS" ? null : e.target.value })} className={SELECT_CLASS}>
+            {/* สาเหตุขั้น 2 ของ OFC (Approval Code) ต่างจากกองทุนอื่น เปลี่ยนมุมมองจึงล้างกลุ่มที่เลือก */}
+            <select
+              value={fund}
+              onChange={(e) => {
+                const next = e.target.value;
+                set({ fund: next === "UCS" ? null : next, stage: viewOf(type, next) === viewOf(type, fund) ? stage : null });
+              }}
+              className={SELECT_CLASS}
+            >
               {funds.map((f) => (
                 <option key={f.code} value={f.code}>
                   {f.name === f.code ? f.code : `${f.code} ${f.name}`}
@@ -179,7 +188,7 @@ export function ClaimPipeline({ funds }: { funds: { code: string; name: string }
       }
       columns={COLUMNS[type]}
       getRowId={(r) => r.key}
-      renderSummary={(data) => <Funnel data={data} type={type} stage={stage} select={(g) => set({ stage: g })} />}
+      renderSummary={(data) => <Funnel data={data} type={type} view={viewOf(type, fund)} stage={stage} select={(g) => set({ stage: g })} />}
     />
   );
 }
