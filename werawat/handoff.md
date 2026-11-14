@@ -1,5 +1,15 @@
 # Handoff: werawat (อัปเดต 14 พ.ย. 2569)
 
+## รอบ 14 พ.ย. 2569 ค่ำ (PR #37 merge แล้ว, deploy แล้ว main `b32835e`)
+- deploy แล้ว: `/fund/close-privilege` (ปิดสิทธิ สปสช. เลือกทีละราย), `/catalog/service-catalog` (UC 8,775 / OFC 2,019 / STP 6,739 แถว, เทียบ HOSxP 7 กฎ), `/fund/claim-pipeline` OFC ผู้ป่วยนอกขั้น 2 ใช้ Approval Code EDC (`ovst_seq.edc_approve_list_text`)
+- GH_TOKEN เป็น classic `ghp_` (public_repo) แล้ว agent สร้าง/merge PR เองได้ ; main มี CI ต้องผ่านก่อน merge (`gh pr checks <n> --watch`) ; VS Code ที่ยังไม่ restart ยังถือ token เก่า ให้อ่านจาก User env
+- ปิดสิทธิยังใช้จริงไม่ได้: ต้องขอจาก สปสช. แล้วตั้งใน `.env` ของ server: `NHSO_ENDPOINT_URL`, `NHSO_ENDPOINT_TOKEN`, `NHSO_ENDPOINT_CLAIM_PATH`, `NHSO_ENDPOINT_SOURCE_ID` (HOSxP ไม่มีค่าเหล่านี้ ; ห้ามใช้ `BMS01` และห้ามอ่าน token จาก `nhso_token` (รายคน) หรือ `sys_var` NHSO-CONFIRM-PRIVIVLEGE-API-TOKEN — ถ้าจะใช้ token กลางเดียวกันต้องถาม สปสช. ก่อน)
+- **ค้าง: ตั้งผู้บันทึกอัตโนมัติจาก HOSxP** (แทนให้ admin กรอก `his_doctor_code`):
+  - his พร้อม: `officer.officer_cid_hash256` = SHA2(officer_cid,256) hex ตัวเล็ก ; officer active + cid 13 หลัก 291 คน ไม่ซ้ำ มี `officer_doctor_code` ครบ ; 11 คน active ไม่มี cid ที่ใช้ได้
+  - insight ยังไม่มีคีย์: Health ID ขอ scope `openid profile email organization` ได้แค่ email/ชื่อ/org/sub (UUID) ไม่มี hash_cid
+  - ขั้นต่อไป: ผู้ใช้หา scope/claim ของ PLK Health ID ที่ให้ `hash_cid` → เพิ่ม scope ใน `src/auth.ts` → ตอน sign-in query `SELECT officer_cid, officer_doctor_code FROM officer WHERE officer_cid_hash256 = ? AND officer_active = 'Y'` ได้ 1 แถวพอดีจึงตั้ง ไม่งั้นปล่อยให้ admin ตั้ง ; recorderPid ใช้ `officer_cid` ได้ตรง (อ่านตอนยิง ห้ามเก็บเลขบัตรใน insight) ; ทดสอบกับบัญชีจริงว่า hash ตรงก่อนเปิดใช้ ; SQL ต้อง prove ก่อน
+- ค้างอื่น: STP claim rules/C-check (UCAE, USE_STATUS, refer, รหัสตัวใหญ่) จากไฟล์หมวด 19 หมวด ; OFC 256 visit ไม่มี Approval Code ต้องถามการเงิน ; แถว STP ชีต 1.OPAE ยังไม่มีคอลัมน์ "การบันทึกข้อมูล 16 แฟ้ม" จนกว่าจะนำเข้าไฟล์ใหม่
+
 ## รอบ 14 พ.ย. 2569 (PR #34 merge แล้ว, deploy แล้ว main `c1cb251`)
 - ใหม่ (รายละเอียดอยู่ใน AGENTS.md หัวข้อสมุดลูกหนี้ และ skill `uc-ar-subaccounts` ข้อ 7):
   - `/admin/ar-funds`: กติกากองทุนย่อย `ar_fund_rule` (items/rights/icd, pttype, ICD ช่วง+PDX, รายการจำเป็น) + กิจกรรมย่อย `ar_fund_activity` ; ตรวจเทียบ REP รายเดือนพร้อมเหตุผล, อัตราได้รับรายรายการ, รายการพบบ่อยในเคสได้รับ/ไม่ได้รับ (ปุ่มเพิ่มเข้ากติกา)

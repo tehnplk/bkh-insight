@@ -45,6 +45,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
       { label: "ปิดสิทธิ", href: "/fund/close-privilege" },
+      { label: "ตรวจรายการเบิก STP", href: "/fund/stp-check" },
       { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
       { label: "16 แฟ้มมาตรฐาน", href: "/fdh/files" },
     ],
