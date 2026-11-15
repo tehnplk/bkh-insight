@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import { Money, focusRing, num, useUrlParams } from "../_components/ui";
+import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import {
   STATUS_LABEL,
@@ -96,18 +98,26 @@ const th = "px-3 py-1.5 font-medium whitespace-nowrap";
 const td = "px-3 py-1.5";
 const box = "max-w-full overflow-x-auto rounded-lg border border-line";
 
-function Match({ t }: { t: PrecheckTotals }) {
+/** รายที่เปิดดูใน modal: fund ว่าง = ทุกกองทุน, mismatch = เฉพาะสถานะที่ไม่ใช่ "ตรง" */
+type Scope = { fund: string; mismatch: boolean };
+
+function Match({ t, onOpen }: { t: PrecheckTotals; onOpen: () => void }) {
   if (!t.mismatch) return <span className={`${badge} ${TONE.success}`}>ตรง</span>;
   return (
-    <span className={`${badge} ${TONE.danger}`} title={`ส่วนต่างค่าใช้จ่าย ${formatBaht(t.diff_total)} บาท · ส่วนต่างลูกหนี้ ${formatBaht(t.diff_debt)} บาท`}>
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`ส่วนต่างค่าใช้จ่าย ${formatBaht(t.diff_total)} บาท · ส่วนต่างลูกหนี้ ${formatBaht(t.diff_debt)} บาท`}
+      className={`${badge} ${TONE.danger} underline-offset-2 hover:underline ${focusRing}`}
+    >
       ไม่ตรง {formatCount(t.mismatch)} ราย
-    </span>
+    </button>
   );
 }
 
-function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) => void }) {
+function Summary({ data, onOpen }: { data: PrecheckPage; onOpen: (p: Scope) => void }) {
   const { total: t, funds } = data.summary;
-  const fundCells = (f: PrecheckTotals) => (
+  const fundCells = (f: PrecheckTotals, fund: string) => (
     <>
       <td className={`${td} ${num}`}>{formatCount(f.count)}</td>
       <td className={`${td} ${num}`}>{formatBaht(f.income)}</td>
@@ -115,7 +125,7 @@ function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) 
       <td className={`${td} ${num}`}>{formatBaht(f.rcpt_money)}</td>
       <td className={`${td} ${num}`}>{formatBaht(f.uc_money)}</td>
       <td className={`${td} ${num}`}>{formatBaht(f.debt)}</td>
-      <td className={td}><Match t={f} /></td>
+      <td className={td}><Match t={f} onOpen={() => onOpen({ fund, mismatch: true })} /></td>
     </>
   );
   return (
@@ -150,7 +160,7 @@ function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) 
                 <td className={`${td} ${num}`}>{formatBaht(t.uc_money)}</td>
                 <td className={`${td} ${num}`}>{formatBaht(t.debt)}</td>
                 <td className={`${td} ${num}`}><Money value={t.booked} /></td>
-                <td className={`${td} font-normal`}><Match t={t} /></td>
+                <td className={`${td} font-normal`}><Match t={t} onOpen={() => onOpen({ fund: "", mismatch: true })} /></td>
               </tr>
             </tbody>
           </table>
@@ -178,11 +188,11 @@ function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) 
                     <th scope="row" className={`${td} text-left font-normal whitespace-nowrap`}>
                       {f.fund} {f.fund_name !== f.fund && <span className="text-muted">{f.fund_name}</span>}
                     </th>
-                    {fundCells(f)}
+                    {fundCells(f, f.fund)}
                     <td className={td}>
                       <button
                         type="button"
-                        onClick={() => onFund(f.fund)}
+                        onClick={() => onOpen({ fund: f.fund, mismatch: false })}
                         aria-label={`รายตัว กองทุน ${f.fund}`}
                         className={`rounded-sm px-1 whitespace-nowrap text-accent-text underline-offset-2 hover:underline ${focusRing}`}
                       >
@@ -193,7 +203,7 @@ function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) 
                 ))}
                 <tr className="border-t-2 border-line font-semibold">
                   <th scope="row" className={`${td} text-left`}>รวม</th>
-                  {fundCells(t)}
+                  {fundCells(t, "")}
                   <td className={td} />
                 </tr>
               </tbody>
@@ -205,58 +215,159 @@ function Summary({ data, onFund }: { data: PrecheckPage; onFund: (fund: string) 
   );
 }
 
+const MODAL_ROWS = 100;
+
+/** รายของกองทุน/สถานะที่เลือกจากแถบสรุป: ตารางธรรมดา ไม่ใช่ DataGrid เพราะ DataGrid ตัวที่สองใช้ state ใน URL ร่วมกับตารางหลัก */
+function PickRows({ type, start, end, pick }: { type: PrecheckType; start: string; end: string; pick: Scope }) {
+  const query = new URLSearchParams({ type, start, end, sort: "date" });
+  if (pick.fund) query.set("cf", JSON.stringify({ fund: [pick.fund] }));
+  if (pick.mismatch) query.set("only", "mismatch");
+  // shortcut: แสดงได้แค่ MAX_PAGE_SIZE (100) แถวแรก ที่เหลือให้ส่งออก Excel ; ถ้าผู้ใช้ต้องไล่ดูในนี้เยอะค่อยเพิ่มแบ่งหน้า
+  const { loading, data, error, retry } = useJson<PrecheckPage>(`/api/fund/ar-precheck?${query}&pageSize=${MODAL_ROWS}`);
+  const [row, setRow] = useState<PrecheckRow | null>(null);
+  const t = TYPES.find((x) => x.value === type)!;
+
+  if (loading) return <Skeleton rows={6} />;
+  if (error || !data)
+    return <Notice title="โหลดรายการไม่สำเร็จ" detail={error} action={<button type="button" onClick={retry} className={btn}>ลองใหม่</button>} />;
+  if (!data.total) return <Notice title="ไม่มีรายการ" />;
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="tabular-nums">
+          {formatCount(data.total)} ราย
+          {data.total > data.rows.length && (
+            <span className="text-muted"> · แสดง {formatCount(data.rows.length)} รายแรกตาม{t.date} ดูทั้งหมดในไฟล์ Excel</span>
+          )}
+        </p>
+        <a href={`/api/fund/ar-precheck?${query}&format=xlsx`} className={btn}>ส่งออก Excel</a>
+      </div>
+      <div className={box}>
+        <table className="w-full border-collapse tabular-nums">
+          <caption className="sr-only">รายการ</caption>
+          <thead className="bg-surface-sunken text-left text-xs text-muted">
+            <tr>
+              <th className={th}>{t.date}</th>
+              <th className={th}>{type === "opd" ? "VN" : "AN"}</th>
+              <th className={th}>HN</th>
+              <th className={th}>ชื่อ-สกุล</th>
+              <th className={th}>กองทุน</th>
+              <th className={`${th} ${num}`}>ค่าใช้จ่าย ใบสั่งยา (บาท)</th>
+              <th className={`${th} ${num}`}>ค่าใช้จ่าย สรุป (บาท)</th>
+              <th className={`${th} ${num}`}>ส่วนต่างค่าใช้จ่าย (บาท)</th>
+              <th className={`${th} ${num}`}>ลูกหนี้ สรุป (บาท)</th>
+              <th className={`${th} ${num}`}>ตั้งหนี้แล้ว (บาท)</th>
+              <th className={`${th} ${num}`}>ส่วนต่างลูกหนี้ (บาท)</th>
+              <th className={th}>สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.key} className="border-t border-line hover:bg-hover">
+                <td className={`${td} whitespace-nowrap`}>{formatThaiDate(r.date)}</td>
+                <td className={td}>
+                  <button
+                    type="button"
+                    onClick={() => setRow(r)}
+                    aria-label={`รายละเอียด ${type === "opd" ? `VN ${r.vn}` : `AN ${r.an}`}`}
+                    className={`rounded-sm whitespace-nowrap text-accent-text underline-offset-2 hover:underline ${focusRing}`}
+                  >
+                    {type === "opd" ? r.vn : r.an}
+                  </button>
+                </td>
+                <td className={`${td} whitespace-nowrap`}>{r.hn}</td>
+                <td className={`${td} whitespace-nowrap`}>{r.patient_name || dash}</td>
+                <td className={`${td} whitespace-nowrap`} title={r.fund_name}>{r.fund}</td>
+                <td className={`${td} ${num}`}><Money value={r.rx_total} /></td>
+                <td className={`${td} ${num}`}><Money value={r.income} /></td>
+                <td className={`${td} ${num}`}><Diff value={r.diff_total} /></td>
+                <td className={`${td} ${num}`}><Money value={r.uc_money} /></td>
+                <td className={`${td} ${num}`}><Money value={r.debt} /></td>
+                <td className={`${td} ${num}`}><Diff value={r.diff_debt} /></td>
+                <td className={td}><Status status={r.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <DetailModal open={!!row} onClose={() => setRow(null)} title={row && detailTitle(row)} size="medium">
+        {row && renderDetail(row)}
+      </DetailModal>
+    </div>
+  );
+}
+
 export function PrecheckGrid() {
   const { start, end } = useDateRange();
   const { type: typeRaw, only, set } = useUrlParams(["type", "only", "sort", "dir", "cf"]);
   const type: PrecheckType = typeRaw === "ipd" ? "ipd" : "opd";
   const t = TYPES.find((x) => x.value === type)!;
+  const [pick, setPick] = useState<Scope | null>(null);
 
   return (
-    <DataGrid<PrecheckRow, PrecheckPage>
-      endpoint="/api/fund/ar-precheck"
-      params={{ start, end }}
-      filterKeys={FILTER_KEYS}
-      toolbar={
-        <>
-          <div role="radiogroup" aria-label="ประเภทผู้ป่วย" className="flex h-9 items-center gap-0.5 rounded-md border border-line bg-surface px-0.5">
-            {TYPES.map((x) => (
-              <button
-                key={x.value}
-                type="button"
-                role="radio"
-                aria-checked={type === x.value}
-                // คอลัมน์ที่ sort/กรองได้ต่างกันระหว่าง OPD/IPD จึงล้าง sort และตัวกรองหัวคอลัมน์ไปด้วย
-                onClick={() => type !== x.value && set({ type: x.value === "opd" ? null : x.value, sort: null, dir: null, cf: null })}
-                className={`h-8 rounded-md px-3 ${focusRing} ${type === x.value ? "bg-accent-soft font-medium text-accent-text" : "text-muted hover:bg-hover hover:text-foreground"}`}
-              >
-                {x.label}
-              </button>
-            ))}
-          </div>
-          <DateRangeFilter hideLabels labels={{ preset: `ช่วง${t.date}`, start: `${t.date} ตั้งแต่`, end: `${t.date} ถึง` }} />
-          <label className="flex h-9 items-center gap-2 whitespace-nowrap">
-            <input
-              type="checkbox"
-              checked={only === "mismatch"}
-              onChange={(e) => set({ only: e.target.checked ? "mismatch" : null })}
-              className={`size-4 accent-accent ${focusRing}`}
-            />
-            เฉพาะไม่ตรง
-          </label>
-        </>
-      }
-      columns={COLUMNS[type]}
-      getRowId={(r) => r.key}
-      renderDetail={renderDetail}
-      detailTitle={detailTitle}
-      detailSize="medium"
-      renderSummary={(data) => <Summary data={data} onFund={(fund) => set({ cf: JSON.stringify({ fund: [fund] }) })} />}
-      exportPlacement="summary"
-      fitScreen
-      pinColumns={3}
-      reorderable
-      hideable
-    />
+    <>
+      <DataGrid<PrecheckRow, PrecheckPage>
+        endpoint="/api/fund/ar-precheck"
+        params={{ start, end }}
+        filterKeys={FILTER_KEYS}
+        toolbar={
+          <>
+            <div role="radiogroup" aria-label="ประเภทผู้ป่วย" className="flex h-9 items-center gap-0.5 rounded-md border border-line bg-surface px-0.5">
+              {TYPES.map((x) => (
+                <button
+                  key={x.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={type === x.value}
+                  // คอลัมน์ที่ sort/กรองได้ต่างกันระหว่าง OPD/IPD จึงล้าง sort และตัวกรองหัวคอลัมน์ไปด้วย
+                  onClick={() => type !== x.value && set({ type: x.value === "opd" ? null : x.value, sort: null, dir: null, cf: null })}
+                  className={`h-8 rounded-md px-3 ${focusRing} ${type === x.value ? "bg-accent-soft font-medium text-accent-text" : "text-muted hover:bg-hover hover:text-foreground"}`}
+                >
+                  {x.label}
+                </button>
+              ))}
+            </div>
+            <DateRangeFilter hideLabels labels={{ preset: `ช่วง${t.date}`, start: `${t.date} ตั้งแต่`, end: `${t.date} ถึง` }} />
+            <label className="flex h-9 items-center gap-2 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={only === "mismatch"}
+                onChange={(e) => set({ only: e.target.checked ? "mismatch" : null })}
+                className={`size-4 accent-accent ${focusRing}`}
+              />
+              เฉพาะไม่ตรง
+            </label>
+          </>
+        }
+        columns={COLUMNS[type]}
+        getRowId={(r) => r.key}
+        renderDetail={renderDetail}
+        detailTitle={detailTitle}
+        detailSize="medium"
+        renderSummary={(data) => <Summary data={data} onOpen={setPick} />}
+        exportPlacement="summary"
+        fitScreen
+        pinColumns={3}
+        reorderable
+        hideable
+      />
+      <DetailModal
+        open={!!pick}
+        onClose={() => setPick(null)}
+        size="wide"
+        draggable
+        title={
+          pick && (
+            <>
+              {pick.mismatch ? "รายที่ไม่ตรง" : "รายตัว"} {pick.fund ? `กองทุน ${pick.fund}` : "ทุกกองทุน"}{" "}
+              <span className="font-normal text-muted">{t.label}</span>
+            </>
+          )
+        }
+      >
+        {pick && <PickRows type={type} start={start} end={end} pick={pick} />}
+      </DetailModal>
+    </>
   );
 }
 
