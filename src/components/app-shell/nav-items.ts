@@ -64,6 +64,7 @@ export const navItems: NavItem[] = [
     label: "ลูกหนี้",
     icon: "table",
     children: [
+      { label: "ตรวจค่ารักษาก่อนตั้งหนี้", href: "/fund/ar-precheck" },
       { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
@@ -94,6 +95,7 @@ export const adminSection: NavSection = {
     { label: "ผู้ใช้งาน", href: "/admin/users" },
     { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
     { label: "กองทุนย่อยลูกหนี้", href: "/admin/ar-funds" },
+    { label: "ปิดงวดลูกหนี้", href: "/admin/ar-periods" },
     { label: "บันทึกการเข้าถึง", href: "/admin/access-log" },
   ],
 };

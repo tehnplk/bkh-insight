@@ -1,4 +1,8 @@
 import { auth } from "@/auth";
+import { insightQuery } from "@/lib/db";
+import { formatThaiDate } from "@/lib/thai-date";
+import { closedThrough } from "../ar-trial-balance/trial-balance";
+import { addDays, nextMonth } from "./ledger";
 import { runSync } from "./sync";
 
 // ดึงยอดลูกหนี้จาก HOSxP ลง ar_ledger: { mode: "daily" } ใครที่ login แล้วกดได้, { mode: "backfill", month: "YYYY-MM" } admin เท่านั้น
@@ -11,6 +15,11 @@ export async function POST(request: Request) {
   if (mode !== "daily" && mode !== "backfill") return Response.json({ error: "mode ต้องเป็น daily หรือ backfill" }, { status: 400 });
   if (mode === "backfill" && session.user.role !== "admin") return Response.json({ error: "forbidden" }, { status: 403 });
   if (mode === "backfill" && typeof body.month !== "string") return Response.json({ error: "ต้องระบุ month (YYYY-MM)" }, { status: 400 });
+  // backfill ลงวันที่ตามเดือนนั้นเอง เดือนที่ปิดงวดแล้วจึงห้าม (รายวัน/ตัดหนี้ให้ trigger เลื่อนเข้างวดเปิด)
+  if (mode === "backfill") {
+    const through = await closedThrough(insightQuery);
+    if (through && body.month <= through) return Response.json({ error: `งวดถึง ${formatThaiDate(addDays(`${nextMonth(through)}-01`, -1))} ปิดแล้ว ดึงย้อนหลังเดือนที่ปิดไม่ได้ ต้องเปิดงวดที่หน้า ปิดงวดลูกหนี้ ก่อน` }, { status: 409 });
+  }
 
   try {
     const log = await runSync(mode === "daily" ? { mode } : { mode, month: body.month }, session.user.name ?? null);

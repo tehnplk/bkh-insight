@@ -14,8 +14,12 @@ export type JournalGroup = {
   n: number;
   amount: string | number;
 };
+/** ชนิดบัญชีของแต่ละข้าง (งบทดลองใช้แยกบัญชีจริงกับบัญชีรายได้/ส่วนต่างที่ปิดทุกสิ้นปีงบ) */
+export type AccountType = "ar" | "cash" | "revenue" | "diff_under" | "diff_over";
 /** code = null คือยังไม่กำหนดบัญชี (ต้องให้งานบัญชีกำหนดที่ /admin/ar-accounts) */
-export type JournalLine = { kind: string; dr_code: string | null; dr_name: string; cr_code: string | null; cr_name: string; n: number; amount: number };
+export type JournalLine = {
+  kind: string; dr_type: AccountType; dr_code: string | null; dr_name: string; cr_type: AccountType; cr_code: string | null; cr_name: string; n: number; amount: number;
+};
 
 export const CASH_NAME = "เงินฝากธนาคาร";
 const KIND_TEXT: Record<string, string> = { set: "ตั้งหนี้", adjust: "ปรับปรุง", cancel: "ยกเลิก", reverse: "กลับรายการ", settle: "รับชำระ", diff: "ส่วนต่าง" };
@@ -25,15 +29,16 @@ export function journalLines(groups: JournalGroup[]): JournalLine[] {
   for (const g of groups) {
     const cents = Math.round(Number(g.amount) * 100);
     if (!cents) continue;
-    const ar = { code: g.account_code, name: g.account_name ?? "ลูกหนี้ไม่ระบุบัญชี" };
-    let other: { code: string | null; name: string };
-    if (g.kind === "settle") other = { code: null, name: CASH_NAME };
-    else if (g.kind === "diff") other = cents < 0 ? { code: g.diff_under_code, name: "ส่วนต่างได้รับต่ำกว่าลูกหนี้" } : { code: g.diff_over_code, name: "ส่วนต่างได้รับสูงกว่าลูกหนี้" };
-    else other = { code: g.revenue_code, name: "รายได้" };
+    const ar = { type: "ar" as const, code: g.account_code, name: g.account_name ?? "ลูกหนี้ไม่ระบุบัญชี" };
+    let other: { type: AccountType; code: string | null; name: string };
+    if (g.kind === "settle") other = { type: "cash", code: null, name: CASH_NAME };
+    else if (g.kind === "diff")
+      other = cents < 0 ? { type: "diff_under", code: g.diff_under_code, name: "ส่วนต่างได้รับต่ำกว่าลูกหนี้" } : { type: "diff_over", code: g.diff_over_code, name: "ส่วนต่างได้รับสูงกว่าลูกหนี้" };
+    else other = { type: "revenue", code: g.revenue_code, name: "รายได้" };
     const [dr, cr] = cents > 0 ? [ar, other] : [other, ar];
     const kind = KIND_TEXT[g.kind] ?? g.kind;
     const key = `${kind}|${dr.code}|${dr.name}|${cr.code}|${cr.name}`;
-    const line = out.get(key) ?? { kind, dr_code: dr.code, dr_name: dr.name, cr_code: cr.code, cr_name: cr.name, n: 0, amount: 0 };
+    const line = out.get(key) ?? { kind, dr_type: dr.type, dr_code: dr.code, dr_name: dr.name, cr_type: cr.type, cr_code: cr.code, cr_name: cr.name, n: 0, amount: 0 };
     line.n += g.n;
     line.amount = Math.round(line.amount * 100 + Math.abs(cents)) / 100;
     out.set(key, line);

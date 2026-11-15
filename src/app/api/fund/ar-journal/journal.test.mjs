@@ -16,6 +16,7 @@ test("set, cancel, settle, both diffs", () => {
     ["ส่วนต่าง", "4301020105.231", "1102050101.202", 200.5],
   ]);
   assert.equal(lines.find((l) => l.kind === "รับชำระ").dr_name, "เงินฝากธนาคาร");
+  assert.deepEqual(lines.map((l) => [l.dr_type, l.cr_type]), [["ar", "revenue"], ["revenue", "ar"], ["cash", "ar"], ["ar", "diff_over"], ["diff_under", "ar"]]);
 });
 
 test("same direction groups merge; zero skipped; missing revenue stays null", () => {

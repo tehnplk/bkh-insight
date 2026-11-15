@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { Fragment, useState, useTransition, type ReactNode } from "react";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson } from "../_components/ui";
 import type { ArJournal } from "@/app/api/fund/ar-journal/route";
 import { CASH_NAME } from "@/app/api/fund/ar-journal/journal";
 import type { AdjustData } from "@/app/api/fund/ar-adjust/route";
+import type { ArTrialBalance } from "@/app/api/fund/ar-trial-balance/route";
+import type { TbRow } from "@/app/api/fund/ar-trial-balance/trial-balance";
 
 const TH = "px-3 py-2.5 font-medium";
 const TD = "px-3 py-1.5 align-top";
@@ -84,6 +86,99 @@ export function Journal({ month, monthText }: { month: string; monthText: string
             ))}
           </Table>
           <p className="text-xs text-muted">รับชำระลงเดบิตเงินฝากธนาคาร ให้งานบัญชีเลือกบัญชีเงินฝากที่รับโอนจริง</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/* ---------- งบทดลอง ---------- */
+
+const TB_GROUPS = [
+  ["ยกมา", "opening_dr", "opening_cr"],
+  ["ระหว่างงวด", "dr", "cr"],
+  ["ยกไป", "closing_dr", "closing_cr"],
+] as const;
+
+export function TrialBalance({ month, monthText }: { month: string; monthText: string }) {
+  const { data, error, retry } = useJson<ArTrialBalance>(`/api/fund/ar-trial-balance?${new URLSearchParams({ month })}`);
+  const label = (r: TbRow) =>
+    r.type === "retained" ? r.name : (
+      <>
+        {r.code ? <span className="whitespace-nowrap tabular-nums">{r.code}</span> : missing} <span className="text-muted">{r.name}</span>
+      </>
+    );
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
+        <h2 className="text-title">งบทดลอง · {monthText}</h2>
+        {data && data.rows.length > 0 && (
+          <a href={`/api/fund/ar-trial-balance?${new URLSearchParams({ month, format: "xlsx" })}`} className={btn} download>
+            ส่งออก Excel
+          </a>
+        )}
+      </div>
+      {error ? (
+        <Notice title={`โหลดงบทดลองไม่สำเร็จ: ${error}`} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />
+      ) : !data ? (
+        <Skeleton rows={4} />
+      ) : data.rows.length === 0 ? (
+        <p className="text-sm text-muted">ไม่มียอดถึงงวดนี้</p>
+      ) : (
+        <>
+          {data.closed && (
+            <p className="text-sm text-muted">
+              ปิดงวดแล้ว โดย {data.closed.by} เมื่อ {thaiDateTime(data.closed.at)}
+              {data.closed.changes > 0 && <span className="text-warning"> · ยอดปัจจุบันต่างจากตอนปิดงวด {formatCount(data.closed.changes)} บัญชี เพราะบัญชีคู่ถูกแก้หลังปิด</span>}
+            </p>
+          )}
+          {data.missing > 0 && <p className="text-sm text-warning">{formatCount(data.missing)} บัญชียังไม่มีรหัส กำหนดได้ที่หน้า บัญชีลูกหนี้ตามสิทธิ (ผู้ดูแลระบบ)</p>}
+          <div className="relative overflow-x-auto rounded-lg border border-line">
+            <table className="w-full border-collapse text-sm">
+              <caption className="sr-only">งบทดลอง งวด {monthText} (บาท)</caption>
+              <thead className="bg-surface text-left text-grid-head text-muted">
+                <tr>
+                  <th scope="col" rowSpan={2} className={`${TH} align-bottom`}>บัญชี</th>
+                  {TB_GROUPS.map(([g]) => (
+                    <th key={g} scope="colgroup" colSpan={2} className={`${TH} border-l border-line text-center`}>{g}</th>
+                  ))}
+                </tr>
+                <tr className="border-t border-line">
+                  {TB_GROUPS.map(([g]) => (
+                    <Fragment key={g}>
+                      <th scope="col" className={`${TH} border-l border-line ${num}`}>เดบิต (บาท)</th>
+                      <th scope="col" className={`${TH} ${num}`}>เครดิต (บาท)</th>
+                    </Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((r) => (
+                  <tr key={`${r.type}|${r.code}`} className="border-t border-line hover:bg-surface-sunken">
+                    <th scope="row" className={`${TD} text-left font-normal`}>{label(r)}</th>
+                    {TB_GROUPS.map(([g, dr, cr]) => (
+                      <Fragment key={g}>
+                        <td className={`${TD} border-l border-line ${num}`}><Money value={r[dr]} /></td>
+                        <td className={`${TD} ${num}`}><Money value={r[cr]} /></td>
+                      </Fragment>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-line font-semibold">
+                  <th scope="row" className="px-3 py-2 text-left">รวม</th>
+                  {TB_GROUPS.map(([g, dr, cr]) => (
+                    <Fragment key={g}>
+                      <td className={`border-l border-line px-3 py-2 ${num}`}><Money value={data.totals[dr]} /></td>
+                      <td className={`px-3 py-2 ${num}`}><Money value={data.totals[cr]} /></td>
+                    </Fragment>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="text-xs text-muted">บัญชีรายได้และส่วนต่างปิดเข้าผลสะสมปีงบก่อนทุก 1 ต.ค. บัญชีลูกหนี้และเงินฝากยกมาสะสม</p>
         </>
       )}
     </section>
