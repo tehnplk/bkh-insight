@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/ar-sync/ledger.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accountFor, chunkRange, dailyWindows, monthRange, planCancels, planIpd, planOpd } from "./ledger.ts";
+import { LEDGER_START, accountFor, chunkRange, dailyWindows, monthRange, parseCase, planCancels, planIpd, planOpd, toCents } from "./ledger.ts";
 
 const rules = {
   maps: [
@@ -107,4 +107,54 @@ test("date windows: ≤31-day chunks, daily windows clamp to ledger start, month
   assert.equal(monthRange("2025-09", "2026-11-09"), null);
   assert.equal(monthRange("2026-12", "2026-11-09"), null);
   assert.equal(monthRange("2026-13", "2026-11-09"), null);
+});
+
+test("parseCase: vn 12 digits or an 9–12 digits, exactly one", () => {
+  assert.deepEqual(parseCase({ vn: "690511062430" }), { vn: "690511062430" });
+  assert.deepEqual(parseCase({ an: "690001234" }), { an: "690001234" });
+  for (const bad of [null, {}, { vn: "690511062430", an: "690001234" }, { vn: "69051106243" }, { vn: 690511062430 }, { an: "69000123x" }, { an: "6900012" }, { vn: "' OR 1=1" }])
+    assert.ok("error" in parseCase(bad), JSON.stringify(bad));
+});
+
+// จำลอง ledger หลัง INSERT: ใช้ตรวจว่ากดดึงใหม่ซ้ำแล้วไม่ได้รายการเพิ่ม
+const applied = (states, entries) => {
+  const next = new Map([...states].map(([k, v]) => [k, { ...v }]));
+  for (const e of entries) {
+    const s = next.get(e.ref);
+    if (e.kind === "set") next.set(e.ref, { ...e, balance: toCents(e.amount), cancelled: false });
+    else Object.assign(s, { balance: s.balance + toCents(e.amount), cancelled: s.cancelled || e.kind === "cancel" });
+  }
+  return next;
+};
+
+test("case resync OPD: set then cancel in one run, adjust on change, second run books nothing", () => {
+  const today = "2026-11-15";
+  // VN มีหนี้ 2 ใบ: ใบ 2 ยอดเปลี่ยน (ยังไม่เคยลงยกเลิก), ใบ 7 ยังไม่เคยตั้งและถูกยกเลิกแล้ว (H1 ไม่คืนแถว ABORT แต่ H2 คืน)
+  const debts = [debt(2, 150), debt(7, 80)];
+  const cancels = [{ debt_id: 7, cancel_datetime: "2026-11-14 09:00:00" }];
+  let states = new Map([["2", state("2", 10000)]]);
+  const opd = planOpd(debts, states, rules, today);
+  assert.deepEqual(opd.map((e) => [e.kind, e.ref, e.amount]), [["adjust", "2", "50.00"], ["set", "7", "80.00"]]);
+  states = applied(states, opd);
+  const { entries } = planCancels(cancels, states);
+  assert.deepEqual(entries.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["cancel", "7", "-80.00", "2026-11-14"]]);
+  states = applied(states, entries);
+  assert.deepEqual(planOpd(debts, states, rules, today), []);
+  assert.deepEqual(planCancels(cancels, states).entries, []);
+});
+
+test("case resync IPD: whole-ledger window reverses an old AN whose finance_lock is no longer Y, once", () => {
+  const today = "2026-11-15";
+  const w = { from: LEDGER_START, to: today };
+  // จำหน่ายเกิน 120 วัน รายวันไม่เห็นแล้ว ; his ไม่คืนแถว (finance_lock <> 'Y') states มาจาก [an]
+  let states = new Map([["A9", ist("A9", 5000, "2026-01-02")]]);
+  const out = planIpd([], states, rules, w, "daily", today);
+  assert.deepEqual(out.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["reverse", "A9", "-50.00", today]]);
+  states = applied(states, out);
+  assert.deepEqual(planIpd([], states, rules, w, "daily", today), []);
+  // ปิดสิทธิอีกครั้งด้วยยอดใหม่ แล้วกดซ้ำ
+  const rows = [ipd("A9", 70, { dchdate: "2026-01-02" })];
+  const again = planIpd(rows, states, rules, w, "daily", today);
+  assert.deepEqual(again.map((e) => [e.kind, e.amount]), [["adjust", "70.00"]]);
+  assert.deepEqual(planIpd(rows, applied(states, again), rules, w, "daily", today), []);
 });
