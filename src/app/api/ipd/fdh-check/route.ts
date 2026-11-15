@@ -2,21 +2,24 @@ import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
 import { badRequest, inList, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
-import { CASE_LIMIT, casesSql, maskFound, ruleCodes } from "@/app/api/fdh/c-check/checks";
+import { CASE_LIMIT, casesSql, maskFound, ruleCodes, ruleParams } from "@/app/api/fdh/c-check/checks";
 import { STP_RULES } from "@/app/api/fdh/c-check/files";
 import { ipAnDruCheckSql } from "@/app/api/fdh/files/sql";
 import { MAX_EXPORT_ANS } from "../admissions/admissions";
-import { DRUG_CATALOG_CODES, checkDru, isCheckFile, type CatalogVersion, type CheckFinding, type CheckResult, type DruCheckRow } from "./check";
+import { DRUG_CATALOG_CODES, checkDru, type CatalogVersion, type CheckResult, type DruCheckRow } from "./check";
 
 // เหมือน /api/fdh/c-check/validate
 const C_INFO_SQL = "SELECT code, description FROM rep_error_code WHERE kind = 'C' AND code = ANY($1::text[])";
 const CATALOG_SQL = `SELECT hosp_drug_code AS code, unit_price, date_effective, date_approved, line_no, product_cat
 FROM drug_catalog_nhso WHERE hosp_drug_code = ANY($1::text[])`;
+const NO_CATALOG = "ยังไม่ได้นำเข้า Drug Catalog ที่เมนูตั้งค่ารหัสมาตรฐาน จึงยังเทียบแฟ้ม DRU กับ Drug Catalog ไม่ได้";
+
+type CaseRow = { c_code: string; hn: string | null; an: string | null; seq: string | null; found: string | null };
 
 /**
  * POST { ans, file } ตรวจ C หนึ่งแฟ้มของ admission ที่เลือก (หน้าเรียกทีละแฟ้มเพื่อแสดงความคืบหน้า)
- * IPD/PAT/INS: กฎ SQL ของหน้าตรวจ C (skill fdh-pre-validate) บนช่วงวันจำหน่ายของ AN ที่เลือก แล้วกรองเฉพาะ AN/HN ที่เลือก
- * DRU: เทียบ icode กับ HOSPDRUGCODE ของ Drug Catalog ที่นำเข้าใน /catalog/standard-codes ; แฟ้มอื่นยังไม่มีกฎ
+ * ทุกแฟ้มที่มีกฎ: กฎ SQL ของหน้าตรวจ C บนช่วงวันจำหน่ายของ AN ที่เลือก กรอง AN/HN ที่เลือกใน SQL ก่อน LIMIT
+ * DRU: กฎ SQL + เทียบ icode กับ HOSPDRUGCODE ของ Drug Catalog ที่นำเข้าใน /catalog/standard-codes
  */
 export async function POST(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
@@ -27,36 +30,31 @@ export async function POST(request: NextRequest) {
   }
   const file = typeof body?.file === "string" ? body.file : "";
   const result: CheckResult = { file, rules: [], findings: [], info: {} };
-  if (!isCheckFile(file)) return Response.json(result);
+  const codes = ruleCodes("ip", file);
+  if (file !== "DRU" && !codes.length) return Response.json(result);
   const anList = ans as string[];
 
   try {
-    if (file === "DRU") {
-      result.rules = [...DRUG_CATALOG_CODES];
-      const [[{ n }]] = await Promise.all([insightQuery<{ n: number }>("SELECT COUNT(*)::int AS n FROM drug_catalog_nhso")]);
-      if (!n) {
-        result.rules = [];
-        result.note = "ยังไม่ได้นำเข้า Drug Catalog ที่เมนูตั้งค่ารหัสมาตรฐาน จึงยังตรวจแฟ้ม DRU ไม่ได้";
-        return Response.json(result);
-      }
-      const today = todayIso();
-      const rows = await hisQuery<DruCheckRow>(ipAnDruCheckSql(anList.length), [today, today, ...anList]);
-      const codes = [...new Set(rows.map((r) => r.icode))];
-      const versions = codes.length ? await insightQuery<CatalogVersion>(CATALOG_SQL, [codes]) : [];
-      result.findings = checkDru(rows, versions.map((v) => ({ ...v, line_no: Number(v.line_no) })));
-    } else {
-      result.rules = ruleCodes("ip", file);
-      // ช่วงวันจำหน่ายที่ครอบ AN ที่เลือก ใช้กฎ SQL เดิมทั้งชุด (ผ่านการพิสูจน์แล้ว) แล้วเก็บเฉพาะของ AN/HN ที่เลือก
-      const adm = await hisQuery<{ an: string; hn: string; dchdate: string }>(`SELECT an, hn, dchdate FROM ipt WHERE ${inList("an", anList.length)}`, anList);
+    if (codes.length) {
+      result.rules = [...codes];
+      const adm = await hisQuery<{ dchdate: string }>(`SELECT dchdate FROM ipt WHERE ${inList("an", anList.length)}`, anList);
       if (adm.length) {
         const days = adm.map((a) => a.dchdate.slice(0, 10)).sort();
-        const cases = await hisQuery<Required<Omit<CheckFinding, "row" | "codes" | "found">> & { c_code: string; found: string | null }>(casesSql("ip", file), [days[0], days.at(-1)!]);
-        const anSet = new Set(anList);
-        const hnSet = new Set(adm.map((a) => a.hn));
+        const cases = await hisQuery<CaseRow>(casesSql("ip", file), ruleParams(days[0], days.at(-1)!, anList));
         result.truncated = cases.length >= CASE_LIMIT;
-        result.findings = cases
-          .filter((c) => (file === "PAT" ? !!c.hn && hnSet.has(c.hn) : !!c.an && anSet.has(c.an)))
-          .map((c) => ({ an: c.an || null, hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
+        result.findings = cases.map((c) => ({ an: c.an || null, hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
+      }
+    }
+    if (file === "DRU") {
+      const [{ n }] = await insightQuery<{ n: number }>("SELECT COUNT(*)::int AS n FROM drug_catalog_nhso");
+      if (!n) result.note = NO_CATALOG;
+      else {
+        result.rules = [...DRUG_CATALOG_CODES, ...result.rules];
+        const today = todayIso();
+        const rows = await hisQuery<DruCheckRow>(ipAnDruCheckSql(anList.length), [today, today, ...anList]);
+        const icodes = [...new Set(rows.map((r) => r.icode))];
+        const versions = icodes.length ? await insightQuery<CatalogVersion>(CATALOG_SQL, [icodes]) : [];
+        result.findings = [...checkDru(rows, versions.map((v) => ({ ...v, line_no: Number(v.line_no) }))), ...result.findings];
       }
     }
     const found = [...new Set(result.findings.flatMap((f) => f.codes))];

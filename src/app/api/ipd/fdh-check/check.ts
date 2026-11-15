@@ -1,10 +1,5 @@
-// ตรวจ C ใน modal 16 แฟ้ม (/ipd/admissions) แบบ pure: ชนิดข้อมูลและการตรวจแฟ้ม DRU กับ Drug Catalog ที่ สปสช. อนุมัติ
-// ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า และ check.test.mjs
-
-/** แฟ้มที่มีกฎ: IPD/PAT/INS ใช้กฎ SQL ของหน้าตรวจ C (skill fdh-pre-validate) ส่วน DRU เทียบ Drug Catalog */
-export const CHECK_FILES = ["IPD", "PAT", "INS", "DRU"] as const;
-export type CheckFile = (typeof CHECK_FILES)[number];
-export const isCheckFile = (f: string): f is CheckFile => (CHECK_FILES as readonly string[]).includes(f);
+// ตรวจ C ใน modal 16 แฟ้ม (/opd/admissions, /ipd/admissions) แบบ pure: ชนิดข้อมูลและการตรวจแฟ้ม DRU กับ Drug Catalog ที่ สปสช. อนุมัติ
+// แฟ้มที่ตรวจ = แฟ้มที่มีกฎใน RULES ของ c-check/checks.ts (DRU ตรวจกฎ SQL + Drug Catalog) ; ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า และ check.test.mjs
 
 /** รหัส C ของ Drug Catalog ที่ตรวจได้จากข้อมูลที่มี (C564 ED/NED ตรวจไม่ได้ เพราะแฟ้ม DRU ไม่มี ISED) */
 export const DRUG_CATALOG_CODES = ["562", "573", "195", "574"] as const;

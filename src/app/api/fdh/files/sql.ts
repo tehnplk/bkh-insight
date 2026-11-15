@@ -10,10 +10,16 @@ const HCODE = "(SELECT hospitalcode FROM opdconfig LIMIT 1)";
 const AI = "FROM p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e";
 const q = (select: string, rest: string) => `${H}\nSELECT ${select}\n${rest}${PAGE}`;
 
-// SELECT list ที่ OP กับ IP ใช้ร่วมกัน (ข้อความเหมือนกันทุกตัวอักษร)
-const INS = `v.hn AS \`HN\`, COALESCE(t.hipdata_code, t.pcode, 'UCS') AS \`INSCL\`, COALESCE(t.pttype, '') AS \`SUBTYPE\`, pt.cid AS \`CID\`, ${HCODE} AS \`HCODE\`, DATE_FORMAT(pp.expire_date, '%Y-%m-%d') AS \`DATEEXP\`, COALESCE(v.hospmain, ${HCODE}) AS \`HOSPMAIN\`, COALESCE(v.hospsub, v.hospmain, ${HCODE}) AS \`HOSPSUB\`, COALESCE(t.pcode, '') AS \`GOVCODE\`, COALESCE(t.name, '') AS \`GOVNAME\`, CASE WHEN t.hipdata_code = 'STP' THEN COALESCE(NULLIF(ap.auth_code, ''), '') ELSE COALESCE(v.pttypeno, '') END AS \`PERMITNO\`, '' AS \`DOCNO\`, COALESCE(pt.father_cid, pt.mother_cid, pt.cid) AS \`OWNRPID\`, COALESCE(pt.fathername, pt.mathername, CONCAT(pt.fname, ' ', pt.lname)) AS \`OWNNAME\`, COALESCE(v.an, '') AS \`AN\`, v.vn AS \`SEQ\`, COALESCE(t.nhso_subinscl, '') AS \`SUBINSCL\`, '1' AS \`RELINSCL\`, '1' AS \`HTYPE\``;
-// PERMITNO ของ STP = Authen Code ของสิทธิใน visit/admission (ap) ว่างก็ส่งว่าง ไม่ใช้ pttypeno แทน
-const INS_JOIN_OP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN visit_pttype ap ON ap.vn = v.vn AND ap.pttype = v.pttype";
+// SELECT list ที่ OP กับ IP ใช้ร่วมกัน (ข้อความเหมือนกันทุกตัวอักษร ยกเว้น PERMITNO)
+const ins = (permit: string) => `v.hn AS \`HN\`, COALESCE(t.hipdata_code, t.pcode, 'UCS') AS \`INSCL\`, COALESCE(t.pttype, '') AS \`SUBTYPE\`, pt.cid AS \`CID\`, ${HCODE} AS \`HCODE\`, DATE_FORMAT(pp.expire_date, '%Y-%m-%d') AS \`DATEEXP\`, COALESCE(v.hospmain, ${HCODE}) AS \`HOSPMAIN\`, COALESCE(v.hospsub, v.hospmain, ${HCODE}) AS \`HOSPSUB\`, COALESCE(t.pcode, '') AS \`GOVCODE\`, COALESCE(t.name, '') AS \`GOVNAME\`, ${permit} AS \`PERMITNO\`, '' AS \`DOCNO\`, COALESCE(pt.father_cid, pt.mother_cid, pt.cid) AS \`OWNRPID\`, COALESCE(pt.fathername, pt.mathername, CONCAT(pt.fname, ' ', pt.lname)) AS \`OWNNAME\`, COALESCE(v.an, '') AS \`AN\`, v.vn AS \`SEQ\`, COALESCE(t.nhso_subinscl, '') AS \`SUBINSCL\`, '1' AS \`RELINSCL\`, '1' AS \`HTYPE\``;
+// PERMITNO ต่อสิทธิ: UCS = Authen Code (ปิดสิทธิใน nhso_confirm_privilege ก่อน แล้ว auth_code ของสิทธิ) ; OFC (OP) = Approve Code ล่าสุดของ EDC
+// ไม่ fallback (ว่างให้กฎ C เตือน) ; OFC/LGO (IP) = claim_code แล้ว auth_code ; STP = Authen Code (ap) ว่างก็ส่งว่าง ; สิทธิอื่น = pttypeno เดิม
+const ucsAuthen = (vn: string) =>
+  `COALESCE(NULLIF((SELECT MAX(n.nhso_authen_code) FROM nhso_confirm_privilege n WHERE n.vn = ${vn} AND n.nhso_status = 'Y' AND n.nhso_authen_code <> ''), ''), NULLIF(ap.auth_code, ''), '')`;
+const PERMIT_OP = `CASE WHEN t.hipdata_code = 'UCS' THEN ${ucsAuthen("v.vn")} WHEN t.hipdata_code = 'OFC' THEN COALESCE(NULLIF(SUBSTRING_INDEX(sq.edc_approve_list_text, ',', -1), ''), '') WHEN t.hipdata_code = 'STP' THEN COALESCE(NULLIF(ap.auth_code, ''), '') ELSE COALESCE(v.pttypeno, '') END`;
+// ipt.vn (a.vn) = visit ที่ admit
+const PERMIT_IP = `CASE WHEN t.hipdata_code = 'UCS' THEN ${ucsAuthen("a.vn")} WHEN t.hipdata_code IN ('OFC', 'LGO') THEN COALESCE(NULLIF(ap.claim_code, ''), NULLIF(ap.auth_code, ''), '') WHEN t.hipdata_code = 'STP' THEN COALESCE(NULLIF(ap.auth_code, ''), '') ELSE COALESCE(v.pttypeno, '') END`;
+const INS_JOIN_OP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN visit_pttype ap ON ap.vn = v.vn AND ap.pttype = v.pttype LEFT JOIN ovst_seq sq ON sq.vn = v.vn";
 const INS_JOIN_IP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN ipt_pttype ap ON ap.an = v.an AND ap.pttype = v.pttype";
 const PAT = `${HCODE} AS \`HCODE\`, pt.hn AS \`HN\`, LPAD(COALESCE(pt.chwpart, '00'), 2, '0') AS \`CHANGWAT\`, LPAD(COALESCE(pt.amppart, '00'), 2, '0') AS \`AMPHUR\`, DATE_FORMAT(pt.birthday, '%Y-%m-%d') AS \`DOB\`, COALESCE(pt.sex, '1') AS \`SEX\`, COALESCE(pt.marrystatus, '9') AS \`MARRIAGE\`, LPAD(COALESCE(pt.occupation, '000'), 3, '0') AS \`OCCUPA\`, LPAD(COALESCE(pt.nationality, '099'), 3, '0') AS \`NATION\`, pt.cid AS \`PERSON_ID\`, CONCAT(COALESCE(pt.pname, ''), COALESCE(pt.fname, ''), ' ', COALESCE(pt.lname, '')) AS \`NAMEPAT\`, COALESCE(pt.pname, '') AS \`TITLE\`, COALESCE(pt.fname, '') AS \`FNAME\`, COALESCE(pt.lname, '') AS \`LNAME\`, CASE WHEN LENGTH(pt.cid) = 13 THEN '1' ELSE '2' END AS \`IDTYPE\``;
 const CLINIC = "CONCAT('0', LPAD(COALESCE(v.spclty, '01'), 2, '0'), '00')";
@@ -36,11 +42,11 @@ const IP_ITEMS = `${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an`;
 const NOT_OPD = "v.an IS NULL OR v.an = ''"; // แฟ้ม OP ตัด visit ที่ admit
 
 const OP_SQL = {
-  INS: q(INS, `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${INS_JOIN_OP}\nWHERE ${NOT_OPD}\nORDER BY v.vstdate, v.vn, pp.patient_pttype_id`),
+  INS: q(ins(PERMIT_OP), `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${INS_JOIN_OP}\nWHERE ${NOT_OPD}\nORDER BY v.vstdate, v.vn, pp.patient_pttype_id`),
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT v.hn FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
-  // DETAIL: '\\r' '\\n' ใน JS = '\r' '\n' ใน SQL (MySQL แปลงเป็น CR/LF เอง)
+  // DETAIL: '\\r' '\\n' ใน JS = '\r' '\n' ใน SQL (MySQL แปลงเป็น CR/LF เอง) ; UUC = '1' ตายตัว (มาตรฐานมีแค่ 1/2 ; ovstost 03/04 ไม่เกี่ยวการใช้สิทธิ)
   OPD: q(
-    `v.hn AS \`HN\`, ${CLINIC} AS \`CLINIC\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, DATE_FORMAT(v.vsttime, '%H%i') AS \`TIMEOPD\`, v.vn AS \`SEQ\`, CASE WHEN v.ovstost IN ('03', '04') THEN '3' ELSE '1' END AS \`UUC\`, SUBSTRING(REPLACE(REPLACE(COALESCE(s.cc, ''), '\\r', ' '), '\\n', ' '), 1, 255) AS \`DETAIL\`, ROUND(s.temperature, 1) AS \`BTEMP\`, ROUND(s.bps) AS \`SBP\`, ROUND(s.bpd) AS \`DBP\`, ROUND(s.pulse) AS \`PR\`, ROUND(s.rr) AS \`RR\`, CASE WHEN TIME(v.vsttime) BETWEEN '08:00:00' AND '16:00:00' THEN '1' ELSE '2' END AS \`OPTYPE\`, CASE WHEN rf_in.vn IS NOT NULL THEN '3' WHEN oa.hn IS NOT NULL THEN '2' ELSE '1' END AS \`TYPEIN\`, CASE WHEN i.an IS NOT NULL THEN '3' WHEN rf_out.vn IS NOT NULL THEN '2' WHEN v.ovstost IN ('04', '09') THEN '4' ELSE '1' END AS \`TYPEOUT\``,
+    `v.hn AS \`HN\`, ${CLINIC} AS \`CLINIC\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, DATE_FORMAT(v.vsttime, '%H%i') AS \`TIMEOPD\`, v.vn AS \`SEQ\`, '1' AS \`UUC\`, SUBSTRING(REPLACE(REPLACE(COALESCE(s.cc, ''), '\\r', ' '), '\\n', ' '), 1, 255) AS \`DETAIL\`, ROUND(s.temperature, 1) AS \`BTEMP\`, ROUND(s.bps) AS \`SBP\`, ROUND(s.bpd) AS \`DBP\`, ROUND(s.pulse) AS \`PR\`, ROUND(s.rr) AS \`RR\`, CASE WHEN TIME(v.vsttime) BETWEEN '08:00:00' AND '16:00:00' THEN '1' ELSE '2' END AS \`OPTYPE\`, CASE WHEN rf_in.vn IS NOT NULL THEN '3' WHEN oa.hn IS NOT NULL THEN '2' ELSE '1' END AS \`TYPEIN\`, CASE WHEN i.an IS NOT NULL THEN '3' WHEN rf_out.vn IS NOT NULL THEN '2' WHEN v.ovstost IN ('04', '09') THEN '4' ELSE '1' END AS \`TYPEOUT\``,
     "FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e LEFT JOIN opdscreen s ON s.vn = v.vn LEFT JOIN ipt i ON i.vn = v.vn LEFT JOIN referin rf_in ON rf_in.vn = v.vn LEFT JOIN referout rf_out ON rf_out.vn = v.vn LEFT JOIN oapp oa ON oa.hn = v.hn AND oa.nextdate = v.vstdate\nORDER BY v.vstdate, v.vn, rf_out.referout_id, oa.oapp_id",
   ),
   ORF: q(
@@ -69,7 +75,7 @@ const OP_SQL = {
 
 // IP: ทุกแฟ้มยึด admission ที่จำหน่ายในช่วง (AI) ; IPD: SVCTYPE = '1' ทุก admission (ไม่มี w.is_icu), ADM_W แปลงกรัมเป็นกิโลกรัม
 const IP_SQL = {
-  INS: q(INS, `${AI} INNER JOIN ovst v ON v.an = a.an ${INS_JOIN_IP}\nORDER BY a.dchdate, a.an, v.vn, pp.patient_pttype_id`),
+  INS: q(ins(PERMIT_IP), `${AI} INNER JOIN ovst v ON v.an = a.an ${INS_JOIN_IP}\nORDER BY a.dchdate, a.an, v.vn, pp.patient_pttype_id`),
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT a.hn FROM p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
   IPD: q(
     "i.hn AS `HN`, i.an AS `AN`, DATE_FORMAT(i.regdate, '%Y-%m-%d') AS `DATEADM`, DATE_FORMAT(i.regtime, '%H%i') AS `TIMEADM`, DATE_FORMAT(i.dchdate, '%Y-%m-%d') AS `DATEDSC`, DATE_FORMAT(i.dchtime, '%H%i') AS `TIMEDSC`, COALESCE(i.dchstts, '1') AS `DISCHS`, COALESCE(i.dchtype, '1') AS `DISCHT`, COALESCE(w.ward_export_code, w.sss_code, w.ward, '01') AS `WARDDSC`, LPAD(COALESCE(i.spclty, '01'), 2, '0') AS `DEPT`, ROUND(COALESCE(i.bw, 0) / 1000, 3) AS `ADM_W`, '1' AS `UUC`, '1' AS `SVCTYPE`",

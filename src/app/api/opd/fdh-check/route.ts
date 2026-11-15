@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { badRequest, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
-import { CASE_LIMIT, casesSql, maskFound, ruleCodes } from "@/app/api/fdh/c-check/checks";
+import { CASE_LIMIT, casesSql, maskFound, ruleCodes, ruleParams } from "@/app/api/fdh/c-check/checks";
+import { closedByVns } from "@/app/api/fdh/c-check/closed";
 import { STP_RULES } from "@/app/api/fdh/c-check/files";
 import { opDruCheckSql } from "@/app/api/fdh/files/sql";
 import { DRUG_CATALOG_CODES, checkDru, type CatalogVersion, type CheckResult, type DruCheckRow } from "@/app/api/ipd/fdh-check/check";
@@ -10,14 +11,14 @@ import { parseOpdSelection } from "../fdh-files";
 const C_INFO_SQL = "SELECT code, description FROM rep_error_code WHERE kind = 'C' AND code = ANY($1::text[])";
 const CATALOG_SQL = `SELECT hosp_drug_code AS code, unit_price, date_effective, date_approved, line_no, product_cat
 FROM drug_catalog_nhso WHERE hosp_drug_code = ANY($1::text[])`;
-/** แฟ้มผู้ป่วยนอกที่มีกฎ: OPD/PAT/INS ใช้กฎ SQL ของหน้าตรวจ C (skill fdh-pre-validate) ส่วน DRU เทียบ Drug Catalog */
-const RULE_FILES = new Set(["OPD", "PAT", "INS"]);
+const NO_CATALOG = "ยังไม่ได้นำเข้า Drug Catalog ที่เมนูตั้งค่ารหัสมาตรฐาน จึงยังเทียบแฟ้ม DRU กับ Drug Catalog ไม่ได้";
 
 type CaseRow = { c_code: string; hn: string | null; an: string | null; seq: string | null; found: string | null };
 
 /**
  * POST { vns, file } ตรวจ C หนึ่งแฟ้มของ visit ที่เลือก (หน้าเรียกทีละแฟ้มเพื่อแสดงความคืบหน้า)
- * กฎรันบนช่วงวันรับบริการที่ครอบ visit ที่เลือก แล้วเก็บเฉพาะ VN/HN ที่เลือก ; DRU: แถวตรวจกรอง SEQ ในลำดับเดียวกับแฟ้ม row จึงตรงแถวที่แสดง
+ * ทุกแฟ้มที่มีกฎ: กฎ SQL ของหน้าตรวจ C บนช่วงวันรับบริการที่ครอบ visit ที่เลือก กรอง VN/HN ที่เลือกใน SQL ก่อน LIMIT
+ * DRU: กฎ SQL + เทียบ Drug Catalog (แถวตรวจกรอง SEQ ในลำดับเดียวกับแฟ้ม row จึงตรงแถวที่แสดง)
  */
 export async function POST(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
@@ -27,27 +28,24 @@ export async function POST(request: NextRequest) {
   try {
     const sel = await parseOpdSelection(body);
     if ("error" in sel) return badRequest(sel.error);
-    if (file === "DRU") {
-      result.rules = [...DRUG_CATALOG_CODES];
-      const [{ n }] = await insightQuery<{ n: number }>("SELECT COUNT(*)::int AS n FROM drug_catalog_nhso");
-      if (!n) {
-        result.rules = [];
-        result.note = "ยังไม่ได้นำเข้า Drug Catalog ที่เมนูตั้งค่ารหัสมาตรฐาน จึงยังตรวจแฟ้ม DRU ไม่ได้";
-        return Response.json(result);
-      }
-      const rows = (await hisQuery<DruCheckRow & { seq: string }>(opDruCheckSql(), [sel.start, sel.end])).filter((r) => sel.vnSet.has(r.seq));
-      const codes = [...new Set(rows.map((r) => r.icode))];
-      const versions = codes.length ? await insightQuery<CatalogVersion>(CATALOG_SQL, [codes]) : [];
-      result.findings = checkDru(rows, versions.map((v) => ({ ...v, line_no: Number(v.line_no) })));
-    } else if (RULE_FILES.has(file)) {
-      result.rules = ruleCodes("op", file);
-      const cases = await hisQuery<CaseRow>(casesSql("op", file), [sel.start, sel.end]);
+    const codes = ruleCodes("op", file);
+    if (file !== "DRU" && !codes.length) return Response.json(result);
+    if (codes.length) {
+      result.rules = [...codes];
+      const cases = await hisQuery<CaseRow>(casesSql("op", file), ruleParams(sel.start, sel.end, sel.vns, await closedByVns(sel.vns)));
       result.truncated = cases.length >= CASE_LIMIT;
-      result.findings = cases
-        .filter((c) => (file === "PAT" ? !!c.hn && sel.hnSet.has(c.hn) : !!c.seq && sel.vnSet.has(c.seq)))
-        .map((c) => ({ hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
-    } else {
-      return Response.json(result);
+      result.findings = cases.map((c) => ({ hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
+    }
+    if (file === "DRU") {
+      const [{ n }] = await insightQuery<{ n: number }>("SELECT COUNT(*)::int AS n FROM drug_catalog_nhso");
+      if (!n) result.note = NO_CATALOG;
+      else {
+        result.rules = [...DRUG_CATALOG_CODES, ...result.rules];
+        const rows = (await hisQuery<DruCheckRow & { seq: string }>(opDruCheckSql(), [sel.start, sel.end])).filter((r) => sel.vnSet.has(r.seq));
+        const icodes = [...new Set(rows.map((r) => r.icode))];
+        const versions = icodes.length ? await insightQuery<CatalogVersion>(CATALOG_SQL, [icodes]) : [];
+        result.findings = [...checkDru(rows, versions.map((v) => ({ ...v, line_no: Number(v.line_no) }))), ...result.findings];
+      }
     }
     const found = [...new Set(result.findings.flatMap((f) => f.codes))];
     if (found.length) {

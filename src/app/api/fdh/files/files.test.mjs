@@ -58,3 +58,16 @@ test("ipAnExportSql: every IP file filters admissions by AN once, no date range 
     assert.equal(/LIMIT \? OFFSET \?/.test(s), false, f);
   }
 });
+
+test("INS.PERMITNO per fund and OPD.UUC fixed '1'", () => {
+  const op = exportSql("op", "INS"), ip = exportSql("ip", "INS");
+  assert.ok(op.includes("LEFT JOIN ovst_seq sq ON sq.vn = v.vn"));
+  assert.ok(op.includes("SUBSTRING_INDEX(sq.edc_approve_list_text, ',', -1)"), "OFC OP = Approve Code");
+  assert.ok(op.includes("n.vn = v.vn") && ip.includes("n.vn = a.vn"), "UCS = Authen จาก nhso_confirm_privilege ของ visit/visit ที่ admit");
+  assert.ok(ip.includes("NULLIF(ap.claim_code, '')") && !ip.includes("sq."), "OFC/LGO IP = claim_code");
+  for (const s of [op, ip]) {
+    assert.ok(s.includes("WHEN t.hipdata_code = 'STP' THEN COALESCE(NULLIF(ap.auth_code, ''), '')"), "STP = Authen Code");
+    assert.ok(s.includes("ELSE COALESCE(v.pttypeno, '') END AS `PERMITNO`"));
+  }
+  assert.ok(exportSql("op", "OPD").includes("'1' AS `UUC`") && !exportSql("op", "OPD").includes("ovstost IN ('03', '04') THEN '3'"));
+});

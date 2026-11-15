@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
 import { STP_RULES, compareCode, isFile, parseType, type ValidateResponse } from "../files";
-import { casesSql, countDef, maskFound, ruleCodes, ruleSummarySql } from "../checks";
+import { casesSql, countDef, maskFound, ruleCodes, ruleParams, ruleSummarySql } from "../checks";
+import { closedByRange } from "../closed";
 
 type Raw = { c_code: string; hn: string | null; an: string | null; seq: string | null; found: string | number | null };
 const str = (v: string | number | null) => (v == null ? "" : String(v));
@@ -17,15 +18,17 @@ export async function GET(request: NextRequest) {
   if (!isFile(type, file)) return badRequest("file ไม่อยู่ในหมวดที่เลือก");
   const range = parseRange(params);
   if (!range.ok) return badRequest(range.error);
-  const dates = [range.range.start, range.range.end];
+  const { start, end } = range.range;
+  const dates = [start, end];
 
   const codes = ruleCodes(type, file);
   const { sql, col } = countDef(type, file);
   try {
+    const rp = codes.length ? ruleParams(start, end, [], type === "op" ? await closedByRange(start, end) : []) : [];
     const [count, grouped, raw, info] = await Promise.all([
       hisQuery<Record<string, string | number | null>>(sql, dates),
-      codes.length ? hisQuery<{ c_code: string; n: number }>(ruleSummarySql(type, file), dates) : [],
-      codes.length ? hisQuery<Raw>(casesSql(type, file), dates) : [],
+      codes.length ? hisQuery<{ c_code: string; n: number }>(ruleSummarySql(type, file), rp) : [],
+      codes.length ? hisQuery<Raw>(casesSql(type, file), rp) : [],
       codes.length
         ? insightQuery<{ code: string; description: string | null; fix: string | null }>(
             "SELECT code, description, fix FROM rep_error_code WHERE kind = 'C' AND code = ANY($1::text[])",
