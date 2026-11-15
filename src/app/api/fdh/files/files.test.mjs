@@ -71,3 +71,21 @@ test("INS.PERMITNO per fund and OPD.UUC fixed '1'", () => {
   }
   assert.ok(exportSql("op", "OPD").includes("'1' AS `UUC`") && !exportSql("op", "OPD").includes("ovstost IN ('03', '04') THEN '3'"));
 });
+
+test("e-Claim 2564: drug split by chrgitem 3/4, DID = icode, IRF by AN, IP LABFU empty, DRUGREMARK one line", async () => {
+  const { opDruCheckSql } = await import("./sql.ts");
+  for (const t of FDH_TYPES) {
+    const dru = exportSql(t, "DRU");
+    assert.ok(dru.includes("inc.drg_chrgitem_id IN (3, 4)") && !dru.includes("op.income IN (3, 4)"), `${t} DRU`);
+    assert.ok(dru.includes("op.icode AS `DID`") && dru.includes("COALESCE(d.did, '') AS `DIDSTD`"), `${t} DID`);
+    for (const f of ["ADP", "PHDB"]) assert.ok(exportSql(t, f).includes("COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)"), `${t} ${f}`);
+  }
+  assert.ok(exportSql("ip", "IRF").includes("ro.vn = a.an"));
+  assert.ok(exportSql("ip", "LABFU").includes("\nWHERE 1 = 0\n"));
+  // DRUGREMARK อยู่ใน SELECT บรรทัดเดียว: opDruCheckSql ตัด SELECT list ทิ้งได้ครบ
+  const opDru = exportSql("op", "DRU");
+  assert.equal(opDru.split("\n").filter((l) => l.includes("ovst_presc_ned")).length, 1);
+  assert.ok(opDru.split("\n").find((l) => l.includes("ovst_presc_ned")).includes("AS `DRUGREMARK`"));
+  assert.ok(!opDruCheckSql().includes("ovst_presc_ned") && !opDruCheckSql().includes("DRUGREMARK"));
+  assert.ok(exportSql("ip", "DRU").includes("'' AS `DRUGREMARK`"));
+});
