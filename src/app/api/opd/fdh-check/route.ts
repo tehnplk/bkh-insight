@@ -32,8 +32,10 @@ export async function POST(request: NextRequest) {
     if (file !== "DRU" && !codes.length) return Response.json(result);
     if (codes.length) {
       result.rules = [...codes];
-      const cases = await hisQuery<CaseRow>(casesSql("op", file), ruleParams(sel.start, sel.end, sel.vns, await closedByVns(sel.vns)));
-      result.truncated = cases.length >= CASE_LIMIT;
+      // ขอเกิน 1 แถว: ได้ครบ CASE_LIMIT พอดีจะไม่ขึ้นว่าถูกตัด
+      const rows = await hisQuery<CaseRow>(casesSql("op", file, CASE_LIMIT + 1), ruleParams(sel.start, sel.end, sel.vns, await closedByVns(sel.vns)));
+      const cases = rows.slice(0, CASE_LIMIT);
+      result.truncated = rows.length > CASE_LIMIT;
       result.findings = cases.map((c) => ({ hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
     }
     if (file === "DRU") {

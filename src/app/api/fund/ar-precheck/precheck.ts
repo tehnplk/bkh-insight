@@ -3,16 +3,41 @@
 
 export type PrecheckType = "opd" | "ipd";
 /** ค่าเดียวต่อราย ตามลำดับการตรวจ (ข้อแรกที่ไม่ผ่าน) */
-export type PrecheckStatus = "no_stat" | "total" | "split" | "debt" | "unlocked" | "unpaid" | "ok";
+export type PrecheckStatus =
+  | "no_stat" | "stale_slip" | "admitted" | "overdue_lock" | "pending_lock"
+  | "total" | "stale_stat" | "split" | "keyed_after" | "debt" | "unlocked" | "unpaid" | "ok";
 export const STATUS_LABEL: Record<PrecheckStatus, string> = {
   no_stat: "ไม่มีข้อมูลสรุป",
+  stale_slip: "ใบลูกหนี้ค้างหลัง admit",
+  admitted: "admit แล้ว ตรวจที่ผู้ป่วยใน",
+  overdue_lock: "ค้างล็อกเกินกำหนด",
+  pending_lock: "ยังไม่ล็อกรายการ",
   total: "ค่าใช้จ่ายไม่ตรง",
+  stale_stat: "ยอดสรุป HOSxP ไม่อัปเดต",
   split: "แยกชำระ/ลูกหนี้ไม่ตรง",
+  keyed_after: "คีย์รายการหลังออกใบ",
   debt: "ใบลูกหนี้ไม่ตรง",
   unlocked: "ยังไม่ปิดการเงิน",
   unpaid: "ค้างชำระ",
   ok: "ตรง",
 };
+/** สถานะที่ยังไม่ต้องแก้: ตรง หรือรอขั้นตอนปกติของ HOSxP (นับ "ไม่ตรง" และ only=mismatch จากนี้ที่เดียว) */
+const SETTLED = new Set<PrecheckStatus>(["ok", "admitted", "pending_lock"]);
+export const isMismatch = (s: PrecheckStatus) => !SETTLED.has(s);
+export const lockLabel = (financeLock: string | null) => (financeLock === "Y" ? "ล็อกแล้ว" : "ยังไม่ล็อก");
+
+/** HOSxP ล็อกรายการ OPD ทุกวันราว 16.00 น. จึงให้เวลา 3 วันทำการ (จ.–ศ.) นับวันหลังวันรับบริการถึงวันนี้
+ *  เกินกำหนดเมื่อนับได้เกิน 3 เช่น รับบริการ ศ. 13 พ.ย. วันนี้ พ. 18 พ.ย. นับ จ. อ. พ. = 3 ยังไม่เกิน, พฤ. 19 = 4 เกิน
+ *  shortcut: ไม่หักวันหยุดราชการ (ไม่มีตารางวันหยุด) ช่วงสงกรานต์/ปีใหม่จะขึ้นเกินกำหนดเร็วไป ; ถ้ามีตารางวันหยุดค่อยหักออก */
+export function lockOverdue(date: string, today: string): boolean {
+  const end = Date.parse(today);
+  let n = 0;
+  for (let t = Date.parse(date) + 86_400_000; t <= end && n <= 3; t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n > 3;
+}
 export const ADMIT_LABEL = { yes: "admit แล้ว", no: "ไม่ admit" } as const;
 
 // ค่าจาก mysql2/pg (decimal/numeric) มาเป็น string
@@ -39,7 +64,7 @@ export type PrecheckSource = {
   uc_money: Num;
   /** OPD: SUM(rcpt_debt.amount) ที่ไม่ ABORT */
   debt_amount: Num;
-  /** IPD: ipt.finance_lock */
+  /** OPD: ovst.finance_lock, IPD: ipt.finance_lock ('Y' = ล็อกแล้ว) */
   finance_lock: string | null;
 };
 export type RxSum = { key: string; n_items: Num; rx_total: Num; rx_pay: Num; rx_debt: Num };
@@ -68,8 +93,8 @@ export type PrecheckRow = Omit<PrecheckSource, "has_stat" | "income" | "paid_mon
 const cents = (v: Num) => Math.round(Number(v ?? 0) * 100);
 const baht = (c: number) => c / 100;
 
-/** booked = null คืออ่านสมุดลูกหนี้ไม่ได้ (ทุกแถวเป็น null) ไม่มีแถวในสมุด = 0 */
-export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxSum[], booked: Booked[] | null): PrecheckRow[] {
+/** booked = null คืออ่านสมุดลูกหนี้ไม่ได้ (ทุกแถวเป็น null) ไม่มีแถวในสมุด = 0 ; today = วันนี้เวลาไทย ISO */
+export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxSum[], booked: Booked[] | null, today: string): PrecheckRow[] {
   const rxBy = new Map(rx.map((r) => [r.key, r]));
   const bookedBy = booked && new Map(booked.map((b) => [b.key, cents(b.booked)]));
   return sources.map(({ has_stat, income, paid_money, rcpt_money, uc_money, debt_amount, ...s }) => {
@@ -78,20 +103,28 @@ export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxS
     const stat = Boolean(Number(has_stat));
     const inc = cents(income), paid = cents(paid_money), rcpt = cents(rcpt_money), uc = cents(uc_money);
     const locked = s.finance_lock === "Y";
-    const debt = type === "opd" ? cents(debt_amount) : locked ? uc : 0;
+    const opd = type === "opd";
+    const debt = opd ? cents(debt_amount) : locked ? uc : 0;
+    const nItems = Number(x?.n_items ?? 0);
     const status: PrecheckStatus =
       !stat ? "no_stat"
+      // HOSxP ย้ายรายการไป AN ตอน admit แต่ไม่ยกเลิกใบลูกหนี้ OPD ที่ออกก่อน admit
+      : opd && s.an ? (debt > 0 && nItems === 0 ? "stale_slip" : "admitted")
+      : opd && !locked ? (lockOverdue(s.date, today) ? "overdue_lock" : "pending_lock")
       : total !== inc ? "total"
+      // ใบลูกหนี้ตรงกับรายการ paidst 02 แล้ว แต่ vn_stat.uc_money ยังเป็นยอดเดิม
+      : opd && debt === rxDebt && uc !== rxDebt ? "stale_stat"
       : pay !== paid || rxDebt !== uc ? "split"
-      : type === "opd" && debt !== uc ? "debt"
-      : type === "ipd" && !locked ? "unlocked"
+      : opd && debt < rxDebt ? "keyed_after"
+      : opd && debt > rxDebt ? "debt"
+      : !locked ? "unlocked"
       : paid - rcpt > 0 ? "unpaid"
       : "ok";
     const b = bookedBy ? (bookedBy.get(s.key) ?? 0) : null;
     return {
       ...s,
       admit: s.an ? "yes" : "no",
-      n_items: Number(x?.n_items ?? 0),
+      n_items: nItems,
       rx_total: baht(total),
       rx_pay: baht(pay),
       rx_debt: baht(rxDebt),
@@ -118,7 +151,7 @@ export type PrecheckTotals = {
   uc_money: number;
   debt: number;
   booked: number | null;
-  /** รายที่สถานะไม่ใช่ "ตรง" */
+  /** รายที่ต้องแก้ (isMismatch) */
   mismatch: number;
   diff_total: number;
   diff_debt: number;
@@ -135,7 +168,7 @@ function totals(rows: PrecheckRow[], ledgerOk: boolean): PrecheckTotals {
   for (const r of rows) {
     for (const k of MONEY) sum[k] += cents(r[k]);
     booked += cents(r.booked);
-    if (r.status !== "ok") mismatch++;
+    if (isMismatch(r.status)) mismatch++;
   }
   for (const k of MONEY) sum[k] = baht(sum[k]);
   return { count: rows.length, ...sum, booked: ledgerOk ? baht(booked) : null, mismatch };

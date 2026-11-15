@@ -2,12 +2,15 @@
 
 // modal 16 แฟ้ม (ดูข้อมูลรายแฟ้ม, ตรวจ C ทีละแฟ้มพร้อมแถบความคืบหน้า, กรองเฉพาะแถวที่ติด C, ส่งออก txt ใน zip และ Excel) ใช้ร่วม /ipd/admissions และ /opd/admissions
 // ข้อมูลมาจาก endpoint ของหน้า (POST { [idField]: ids, format: "json" }) ตรวจ C ผ่าน checkUrl (POST { [idField]: ids, file })
+// ยิงทีละชุดไม่เกิน chunkSize ราย เรียงกันไม่ขนาน (pool ของ his มี 3 connection ใช้ร่วมทุกผู้ใช้) แล้วรวมผลด้วย batch.ts
 import { useEffect, useRef, useState } from "react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { todayIso } from "@/lib/thai-date";
 import { cLabel, codeLevel, type Level } from "@/app/api/fdh/c-check/files";
+import { XLSX_MAX_BODY, XLSX_MAX_ROWS } from "@/app/api/fdh/files/txt";
 import type { CheckFinding, CheckResult } from "@/app/api/ipd/fdh-check/check";
+import { chunkIds, mergeChecks, mergePreviews, type MergedPreview } from "./batch";
 // shortcut: btn/focusRing/Skeleton/LoadError ยังอยู่ในโมดูล fund ย้ายไป src/components พร้อมกันเมื่อจัดระเบียบ fund/_components/ui
 import { Skeleton, btn, focusRing } from "@/app/(app)/fund/_components/ui";
 import { LoadError } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
@@ -15,21 +18,32 @@ import { LoadError } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 /** ข้อมูล 16 แฟ้มของรายที่เลือก ค่าแต่ละช่องตามที่ SQL ของแฟ้มคืน */
 export type FdhPreview = { files: { file: string; columns: string[]; rows: Record<string, string | number | null | undefined>[] }[] };
 
-/** แหล่งข้อมูลของหน้า: ids = AN (ผู้ป่วยใน) หรือ VN (ผู้ป่วยนอก) ; zipPrefix ใช้ตั้งชื่อไฟล์ fdh-<prefix>-<วันที่>-<จำนวน>.zip */
-type Source = { ids: string[]; idField: string; previewUrl: string; checkUrl: string; zipPrefix: string };
+/**
+ * แหล่งข้อมูลของหน้า: ids = AN (ผู้ป่วยใน) หรือ VN (ผู้ป่วยนอก) ; chunkSize = รายต่อ request (ค่าที่ route รับได้) ;
+ * zipPrefix ใช้ตั้งชื่อไฟล์ fdh-<prefix>-<วันที่>-<จำนวน>.zip
+ */
+type Source = { ids: string[]; idField: string; previewUrl: string; checkUrl: string; zipPrefix: string; chunkSize: number };
 
-type PreviewState = { busy: boolean; error?: string; data?: FdhPreview; file: string; version: number };
+/** part = ชุดที่กำลังโหลด [ลำดับ, ทั้งหมด] */
+type PreviewState = { busy: boolean; error?: string; data?: MergedPreview; file: string; version: number; part?: [number, number] };
 
 const dash = <span className="text-muted">–</span>;
 
-async function loadPreview(source: Source): Promise<FdhPreview> {
-  const res = await fetch(source.previewUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ [source.idField]: source.ids, format: "json" }),
-  });
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
   return res.json();
+}
+
+/** โหลดทีละชุดตามลำดับ แล้วต่อแถวแต่ละแฟ้ม */
+async function loadPreview(source: Source, onPart: (i: number, n: number) => void): Promise<MergedPreview> {
+  const chunks = chunkIds(source.ids, source.chunkSize);
+  const parts: FdhPreview[] = [];
+  for (const [i, ids] of chunks.entries()) {
+    onPart(i + 1, chunks.length);
+    parts.push(await postJson<FdhPreview>(source.previewUrl, { [source.idField]: ids, format: "json" }));
+  }
+  return mergePreviews(parts);
 }
 
 /**
@@ -81,18 +95,17 @@ type XlsxSheet = { name: string; columns: string[]; rows: Record<string, string 
 
 /** ส่งออก Excel หนึ่ง sheet ต่อแฟ้ม (สร้างที่ server จากข้อมูลที่แสดงอยู่ รวมผลตรวจ C) */
 async function downloadXlsx(sheets: XlsxSheet[], filename: string) {
-  const res = await fetch("/api/fdh/files/xlsx", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, sheets }),
-  });
+  const body = JSON.stringify({ filename, sheets });
+  // เกินขนาดนี้ proxy ตัด body เงียบ server จะได้ JSON ไม่ครบ
+  if (new Blob([body]).size > XLSX_MAX_BODY) throw new Error("ข้อมูลใหญ่เกินกว่าจะสร้าง Excel ได้ ใช้ไฟล์ zip แทน");
+  const res = await fetch("/api/fdh/files/xlsx", { method: "POST", headers: { "Content-Type": "application/json" }, body });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
   const url = URL.createObjectURL(await res.blob());
   Object.assign(document.createElement("a"), { href: url, download: filename }).click();
   URL.revokeObjectURL(url);
 }
 
-function XlsxButton({ build, filename, label }: { build: () => XlsxSheet[]; filename: string; label: string }) {
+function XlsxButton({ build, filename, label, rows }: { build: () => XlsxSheet[]; filename: string; label: string; rows: number }) {
   const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false });
   async function run() {
     setState({ busy: true });
@@ -105,6 +118,7 @@ function XlsxButton({ build, filename, label }: { build: () => XlsxSheet[]; file
       setState({ busy: false, error: `ส่งออก Excel ไม่สำเร็จ: ${(e as Error).message}` });
     }
   }
+  if (rows > XLSX_MAX_ROWS) return <span className="text-xs text-muted">Excel ได้ไม่เกิน {formatCount(XLSX_MAX_ROWS)} แถว ใช้ไฟล์ zip แทน</span>;
   return (
     <>
       <button type="button" disabled={state.busy} onClick={run} className={`${btn} disabled:cursor-wait disabled:opacity-60`}>
@@ -114,8 +128,8 @@ function XlsxButton({ build, filename, label }: { build: () => XlsxSheet[]; file
     </>
   );
 }
-/** ผลตรวจหนึ่งแฟ้ม: pending รอคิว, running กำลังตรวจ, done เสร็จ (issues = แถวที่ไม่ผ่าน), error ตรวจไม่สำเร็จ */
-type FileCheck = { status: "pending" | "running" | "done" | "error"; issues: Map<number, RowIssue>; rules: string[]; note?: string; error?: string; truncated?: boolean };
+/** ผลตรวจหนึ่งแฟ้ม: pending รอคิว, running กำลังตรวจ (part = ชุดที่ตรวจอยู่ เมื่อมีหลายชุด), done เสร็จ (issues = แถวที่ไม่ผ่าน), error ตรวจไม่สำเร็จ */
+type FileCheck = { status: "pending" | "running" | "done" | "error"; issues: Map<number, RowIssue>; rules: string[]; note?: string; error?: string; truncated?: boolean; part?: string };
 /** จำนวนแถวที่ระดับสูงสุดเป็น lvl */
 const countLevel = (c: FileCheck | undefined, lvl: Level) => [...(c?.issues.values() ?? [])].filter((x) => rowLevel(x) === lvl).length;
 /** แถวที่ต้องดู (ติด C หรือเตือน) ไม่รวมแถวที่มีแต่ระดับข้อมูล */
@@ -175,22 +189,15 @@ function CheckBar({ check }: { check?: FileCheck }) {
 function checkLabel(check?: FileCheck) {
   if (!check) return null;
   if (check.status === "pending") return "รอตรวจ";
-  if (check.status === "running") return "กำลังตรวจ";
+  if (check.status === "running") return check.part ? `กำลังตรวจ ชุด ${check.part}` : "กำลังตรวจ";
   if (check.status === "error") return "ตรวจไม่สำเร็จ";
   if (!check.rules.length) return check.note ? "ตรวจไม่ได้" : "ไม่มีกฎ";
   const errors = countLevel(check, "error"), warns = countLevel(check, "warn");
   return errors ? `ไม่ผ่าน ${formatCount(errors)} แถว` : warns ? `เตือน ${formatCount(warns)} แถว` : "ผ่าน";
 }
 
-/** ตรวจ C ทีละแฟ้มตามลำดับ (แสดงความคืบหน้าต่อแฟ้ม) */
-async function checkFile(url: string, idField: string, ids: string[], file: string): Promise<CheckResult> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [idField]: ids, file }) });
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
-  return res.json();
-}
-
-/** เนื้อหา modal หลังโหลด 16 แฟ้มแล้ว: ปุ่มตรวจ C (ซ้ายบน) ส่งออก zip (ขวาบน) รายการแฟ้ม (ซ้าย) และข้อมูลแฟ้ม (ขวา) */
-function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[]; file: string; onFile: (f: string) => void; source: Source }) {
+/** เนื้อหา modal หลังโหลด 16 แฟ้มแล้ว: ปุ่มตรวจ C (ซ้ายบน) ส่งออก zip (ขวาบน) รายการแฟ้ม (ซ้าย) และข้อมูลแฟ้ม (ขวา) ; counts = แถวต่อชุดของแต่ละแฟ้ม */
+function PreviewContent({ files, counts, file, onFile, source }: { files: PreviewFile[]; counts: MergedPreview["counts"]; file: string; onFile: (f: string) => void; source: Source }) {
   const [checks, setChecks] = useState<Record<string, FileCheck>>({});
   const [info, setInfo] = useState<Record<string, string>>({});
   const [onlyC, setOnlyC] = useState(false);
@@ -221,13 +228,21 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
     });
   }
 
+  /** ตรวจทีละแฟ้ม แต่ละแฟ้มทีละชุดตามลำดับ (แสดงความคืบหน้าต่อแฟ้มและชุด) */
   async function runCheck() {
     const empty = { issues: new Map<number, RowIssue>(), rules: [] as string[] };
+    const chunks = chunkIds(source.ids, source.chunkSize);
     setChecks(Object.fromEntries(files.map((f) => [f.file, { status: "pending", ...empty }])));
     for (const f of files) {
-      setChecks((c) => ({ ...c, [f.file]: { status: "running", ...empty } }));
       try {
-        const r = await checkFile(source.checkUrl, source.idField, source.ids, f.file);
+        const parts: CheckResult[] = [];
+        for (const [i, ids] of chunks.entries()) {
+          setChecks((c) => ({ ...c, [f.file]: { status: "running", ...empty, part: chunks.length > 1 ? `${i + 1}/${chunks.length}` : undefined } }));
+          parts.push(await postJson<CheckResult>(source.checkUrl, { [source.idField]: ids, file: f.file }));
+          // แฟ้มที่ไม่มีกฎ route ตอบว่างทันที ไม่ต้องยิงชุดอื่น
+          if (!parts[0].rules.length && !parts[0].note) break;
+        }
+        const r = mergeChecks(parts, counts[f.file]);
         setInfo((i) => ({ ...i, ...r.info }));
         setChecks((c) => ({ ...c, [f.file]: { status: "done", issues: mapIssues(f, r.findings), rules: r.rules, note: r.note, truncated: r.truncated } }));
       } catch (e) {
@@ -272,6 +287,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
         <div className="flex flex-wrap items-center gap-2">
           <XlsxButton
             build={buildSheets}
+            rows={shownFiles.reduce((n, f) => n + rowIndexes(f).length, 0)}
             filename={`fdh-${source.zipPrefix}-${todayIso()}-${source.ids.length}${filtering ? "-c" : ""}.xlsx`}
             label={filtering ? "ส่งออก Excel (เฉพาะที่ติด C/เตือน)" : "ส่งออก Excel"}
           />
@@ -282,7 +298,7 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
         <ul className="flex flex-col gap-0.5 text-xs text-warning">
           {notes.map(([f, c]) => (
             <li key={f}>
-              {f}: {c.error ? `ตรวจไม่สำเร็จ ${c.error}` : c.note ?? "รายการ C ทั้งช่วงเกิน 1,000 เคส ผลอาจไม่ครบ"}
+              {f}: {c.error ? `ตรวจไม่สำเร็จ ${c.error}` : c.note ?? "รายการ C เกิน 1,000 เคสต่อชุด ผลอาจไม่ครบ"}
             </li>
           ))}
         </ul>
@@ -382,12 +398,22 @@ function PreviewContent({ files, file, onFile, source }: { files: PreviewFile[];
 
 /** เนื้อหา modal 16 แฟ้ม: โหลด / error / ข้อมูล (แฟ้มที่ไม่มีแถวไม่แสดง เหมือน zip ที่ไม่ใส่แฟ้มว่าง) */
 function PreviewBody({ state, onFile, onRetry, source }: { state: PreviewState; onFile: (f: string) => void; onRetry: () => void; source: Source }) {
-  if (state.busy) return <Skeleton rows={8} />;
+  if (state.busy)
+    return (
+      <div className="flex flex-col gap-2">
+        {state.part && state.part[1] > 1 && (
+          <p role="status" className="text-sm text-muted tabular-nums">
+            กำลังโหลด ชุด {formatCount(state.part[0])}/{formatCount(state.part[1])}
+          </p>
+        )}
+        <Skeleton rows={8} />
+      </div>
+    );
   if (state.error || !state.data) return <LoadError what="16 แฟ้ม" error={state.error} retry={onRetry} />;
   const files = state.data.files.filter((f) => f.rows.length);
   if (!files.length) return <p className="text-sm text-muted">ไม่มีข้อมูลใน 16 แฟ้มสำหรับรายที่เลือก</p>;
   // โหลดข้อมูลชุดใหม่ = ผลตรวจเดิมใช้ไม่ได้ (key เปลี่ยนตามรอบที่โหลด)
-  return <PreviewContent key={state.version} files={files} file={state.file} onFile={onFile} source={source} />;
+  return <PreviewContent key={state.version} files={files} counts={state.data.counts} file={state.file} onFile={onFile} source={source} />;
 }
 
 /**
@@ -402,19 +428,20 @@ export function FdhPreviewModal({
   previewUrl,
   checkUrl,
   zipPrefix,
+  chunkSize,
   unit,
 }: Source & { open: boolean; onClose: () => void; unit: string }) {
   const [state, setState] = useState<PreviewState>({ busy: false, file: "", version: 0 });
-  const [source, setSource] = useState<Source>({ ids, idField, previewUrl, checkUrl, zipPrefix });
-  const latest = useRef<Source>({ ids, idField, previewUrl, checkUrl, zipPrefix });
-  latest.current = { ids, idField, previewUrl, checkUrl, zipPrefix };
+  const [source, setSource] = useState<Source>({ ids, idField, previewUrl, checkUrl, zipPrefix, chunkSize });
+  const latest = useRef<Source>({ ids, idField, previewUrl, checkUrl, zipPrefix, chunkSize });
+  latest.current = { ids, idField, previewUrl, checkUrl, zipPrefix, chunkSize };
 
   async function load() {
     const src = latest.current;
     setSource(src);
-    setState((p) => ({ ...p, busy: true, error: undefined }));
+    setState((p) => ({ ...p, busy: true, error: undefined, part: undefined }));
     try {
-      const data = await loadPreview(src);
+      const data = await loadPreview(src, (i, n) => setState((p) => ({ ...p, part: [i, n] })));
       setState((p) => ({ ...p, busy: false, data, version: p.version + 1, file: data.files.find((f) => f.file === p.file)?.file ?? data.files[0]?.file ?? "" }));
     } catch (e) {
       setState((p) => ({ ...p, busy: false, error: (e as Error).message }));

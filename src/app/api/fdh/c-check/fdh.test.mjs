@@ -118,6 +118,8 @@ test("rule SQL assembly: 4 params, base without opitemrece, items one statement 
   }
   assert.ok(ruleSummarySql("ip", "IPD").includes("NOT REGEXP '^0{0,1}[1-9]$'"));
   // C305/C349 อ่าน ovst ตามวันที่ด้วย index เสมอ และเทียบ VN เป็นตัวเลข (ไม่ CAST AS CHAR)
+  // modal ขอ CASE_LIMIT + 1 แถวเพื่อรู้ว่าถูกตัดจริง ; หน้า /fdh/c-check ใช้ค่าเริ่มต้น
+  assert.ok(casesSql("ip", "IDX", CASE_LIMIT + 1).endsWith(`LIMIT ${CASE_LIMIT + 1}`));
   const ins = casesSql("op", "INS");
   assert.equal(ins.split("ovst o FORCE INDEX (ix_vstdate)").length - 1, 2);
   assert.ok(ins.includes("CAST(o.vn AS UNSIGNED) NOT IN (SELECT k FROM cl)") && !/CAST\([^)]* AS CHAR\)/.test(ins));

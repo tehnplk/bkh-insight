@@ -17,6 +17,7 @@ import {
   ADJRW_RATES,
   IPD_MAX_DAYS,
   MAX_EXPORT_ANS,
+  MAX_SELECT_ANS,
   type AdmissionDetail,
   type AdmissionRow,
   type AdmissionsPage,
@@ -586,7 +587,7 @@ function PreviewButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
-      disabled={!n || n > MAX_EXPORT_ANS}
+      disabled={!n || n > MAX_SELECT_ANS}
       onClick={onOpen}
       title={n ? undefined : "ติ๊กเลือกรายที่จะส่ง FDH ในตารางก่อน"}
       className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -617,9 +618,9 @@ function SelectionBar({ onClear }: { onClear: () => void }) {
           ล้างที่เลือก
         </button>
       </div>
-      {n > MAX_EXPORT_ANS && (
+      {n > MAX_SELECT_ANS && (
         <p role="alert" className="text-xs text-danger">
-          เลือกได้ไม่เกิน {formatCount(MAX_EXPORT_ANS)} รายต่อครั้ง
+          เลือกได้ไม่เกิน {formatCount(MAX_SELECT_ANS)} รายต่อครั้ง
         </p>
       )}
     </div>
@@ -658,6 +659,7 @@ export function AdmissionsGrid({
         previewUrl="/api/ipd/fdh-export"
         checkUrl="/api/ipd/fdh-check"
         zipPrefix="ip"
+        chunkSize={MAX_EXPORT_ANS}
         unit="ราย"
       />
       <DataGrid<AdmissionRow, AdmissionsPage>

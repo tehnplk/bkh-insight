@@ -82,10 +82,14 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   reorderable?: boolean;
   /** ปุ่ม "คอลัมน์" ให้ผู้ใช้เลือกซ่อนคอลัมน์ (คอลัมน์ที่ header เป็นข้อความ) จำต่อผู้ใช้ต่อหน้าใน localStorage */
   hideable?: boolean;
-  /** ตารางกว้าง: กรอบตารางสูงพอดีจอ (แถบเลื่อนแนวนอนอยู่ขอบล่างจอเสมอ) หัวตารางค้าง และมีแถบเลื่อนแนวนอนด้านบนเพิ่ม */
+  /** ตารางกว้าง: กรอบตารางสูงพอดีจอ (แถบเลื่อนแนวนอนอยู่ขอบล่างจอเสมอ) หัวตารางค้าง และมีแถบเลื่อนแนวนอนด้านบนเพิ่ม
+   *  ใน DetailModal size "wide" กรอบสูงพอดี modal แทน */
   fitScreen?: boolean;
   /** ตรึงคอลัมน์ซ้ายกี่คอลัมน์ (นับตามลำดับที่แสดง ไม่รวมปุ่มรายละเอียดซึ่งตรึงให้เอง) ใช้คู่กับ fitScreen */
   pinColumns?: number;
+  /** เก็บ state (page, pageSize, sort, dir, q, cf, filterKeys) ใน React state เริ่มจากค่านี้ แทน URL
+   *  ใช้กับ grid ใน modal ที่มี DataGrid อีกตัวในหน้าเดียวกัน เช่น { pageSize: "100", cf: '{"fund":["UCS"]}' } ไม่ส่ง = ใช้ URL */
+  localState?: Record<string, string>;
 };
 
 const API_KEYS = ["page", "pageSize", "sort", "dir", "q", "cf"] as const;
@@ -140,6 +144,16 @@ function parseCf(raw: string | null): Record<string, string[]> {
   }
 }
 
+/** สำเนาของ base ที่ตั้ง/ลบ (null หรือ "") ค่าตาม changes */
+function withChanges(base: { toString(): string }, changes: Record<string, string | number | null>) {
+  const next = new URLSearchParams(base.toString());
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null || v === "") next.delete(k);
+    else next.set(k, String(v));
+  }
+  return next;
+}
+
 /** id ของคอลัมน์ (display ใช้ id, accessor ใช้ accessorKey) ใช้จัดลำดับ */
 const columnId = (c: { id?: string }) => c.id ?? String((c as { accessorKey?: unknown }).accessorKey ?? "");
 
@@ -173,12 +187,15 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   hideable = false,
   fitScreen = false,
   pinColumns = 0,
+  localState,
 }: DataGridProps<T, R>) {
   const router = useRouter();
   const pathname = usePathname();
-  const sp = useSearchParams();
+  const urlSp = useSearchParams();
+  const [localSp, setLocalSp] = useState(() => new URLSearchParams(localState));
+  const sp = localState ? localSp : urlSp;
 
-  // state ของ grid อยู่ใน URL ทั้งหมด (refresh/แชร์ link ได้หน้าเดิม) server เป็นคน validate
+  // state ของ grid อยู่ใน URL ทั้งหมด (refresh/แชร์ link ได้หน้าเดิม) เว้นแต่ส่ง localState ; server เป็นคน validate
   const page = Math.max(1, Number(sp.get("page")) || 1);
   // pageSize=all = แสดงทั้งหมด (server ให้ไม่เกิน ALL_PAGE_SIZE แถว)
   const showAll = sp.get("pageSize") === "all";
@@ -266,6 +283,11 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   // อ่าน param ล่าสุดจาก location เพราะ callback ที่หน่วงไว้อาจถือ sp ของ render ก่อน
   function commitSearch(v: string) {
     clearTimeout(timer.current);
+    if (localState) {
+      setSentQ(v);
+      setLocalSp((prev) => ((prev.get("q") ?? "") === v ? prev : withChanges(prev, { q: v, page: null })));
+      return;
+    }
     const next = new URLSearchParams(window.location.search);
     if ((next.get("q") ?? "") === v) return;
     if (v) next.set("q", v);
@@ -294,18 +316,14 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   }
 
   function setParams(changes: Record<string, string | number | null>) {
-    const next = new URLSearchParams(sp.toString());
-    for (const [k, v] of Object.entries(changes)) {
-      if (v === null || v === "") next.delete(k);
-      else next.set(k, String(v));
-    }
-    const qs = next.toString();
+    if (localState) return setLocalSp((prev) => withChanges(prev, changes));
+    const qs = withChanges(sp, changes).toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
   const goToPage = (p: number) => setParams({ page: p > 1 ? p : null });
 
   // ลำดับคอลัมน์ที่ผู้ใช้จัดเอง (id) ว่าง = ตามที่หน้ากำหนด ; จำต่อผู้ใช้ต่อหน้า (ผู้ใช้จาก ProfileMenu)
-  const orderKey = () => `bkh:grid-cols:${storageUser()}:${pathname}`;
+  const orderKey = () => `bkh:grid-cols:${storageUser()}:${pathname}${localState ? "#local" : ""}`;
   const orderRaw = useSyncExternalStore(subscribeOrder, () => (reorderable ? readStorage(orderKey()) : null), () => null);
   const order = useMemo(() => parseOrder(orderRaw), [orderRaw]);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -337,7 +355,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   }
 
   // คอลัมน์ที่ผู้ใช้ซ่อน (id) จำต่อผู้ใช้ต่อหน้า
-  const hiddenKey = () => `bkh:grid-hidden:${storageUser()}:${pathname}`;
+  const hiddenKey = () => `bkh:grid-hidden:${storageUser()}:${pathname}${localState ? "#local" : ""}`;
   const hiddenRaw = useSyncExternalStore(subscribeOrder, () => (hideable ? readStorage(hiddenKey()) : null), () => null);
   const hidden = useMemo(() => parseOrder(hiddenRaw), [hiddenRaw]);
   function saveHidden(next: string[]) {
@@ -394,7 +412,8 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     if (!box || !tbl) return;
     // กรอบตาราง = ความสูงที่เหลือใน <main> (ลบแถบแบ่งหน้าด้านล่าง) ตั้งที่ DOM ตรงๆ ไม่ต้อง render ใหม่
     const fit = () => {
-      const main = box.closest("main");
+      // ใน DetailModal (dialog อยู่ใต้ main ใน DOM) วัดจาก dialog ; size "wide" สูงคงที่ จึงเติมเต็ม modal พอดี
+      const main = box.closest("dialog") ?? box.closest("main");
       if (!main) return;
       const top = box.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
       box.style.maxHeight = `${Math.max(320, main.clientHeight - top - 76)}px`;
