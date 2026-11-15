@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
 
   const [rows, [lastSync], [success]] = await Promise.all([
     insightQuery<Record<keyof AccountBalance, string | null>>(SUMMARY_SQL, [range.from, range.to]),
-    insightQuery<SyncLog>(`SELECT ${LOG_COLS} FROM ar_sync_log ORDER BY started_at DESC LIMIT 1`),
-    insightQuery<{ at: string }>("SELECT to_char(finished_at, 'YYYY-MM-DD HH24:MI') AS at FROM ar_sync_log WHERE finished_at IS NOT NULL AND error IS NULL ORDER BY started_at DESC LIMIT 1"),
+    insightQuery<SyncLog>(`SELECT ${LOG_COLS} FROM ar_sync_log WHERE mode <> 'case' ORDER BY started_at DESC LIMIT 1`),
+    insightQuery<{ at: string }>("SELECT to_char(finished_at, 'YYYY-MM-DD HH24:MI') AS at FROM ar_sync_log WHERE mode <> 'case' AND finished_at IS NOT NULL AND error IS NULL ORDER BY started_at DESC LIMIT 1"),
   ]);
   const totals: Balance = { opening: 0, increase: 0, decrease: 0, closing: 0 };
   const out = rows.map((r): AccountBalance => {

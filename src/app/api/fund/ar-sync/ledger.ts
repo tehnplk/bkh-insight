@@ -215,6 +215,17 @@ export const nextMonth = (month: string) => {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
 };
 
+/** รายที่ดึงใหม่: OPD = VN (ทุก debt_id ของ visit), IPD = AN */
+export type SyncCase = { vn: string } | { an: string };
+
+/** body ของ POST /api/fund/ar-sync/case : { vn } (12 หลัก) หรือ { an } (9–12 หลัก) อย่างใดอย่างหนึ่ง */
+export function parseCase(body: unknown): SyncCase | { error: string } {
+  const b = (body ?? {}) as { vn?: unknown; an?: unknown };
+  if ((b.vn == null) === (b.an == null)) return { error: "ต้องระบุ vn หรือ an อย่างใดอย่างหนึ่ง" };
+  if (b.vn != null) return typeof b.vn === "string" && /^\d{12}$/.test(b.vn) ? { vn: b.vn } : { error: "VN ต้องเป็นตัวเลข 12 หลัก" };
+  return typeof b.an === "string" && /^\d{9,12}$/.test(b.an) ? { an: b.an } : { error: "AN ต้องเป็นตัวเลข 9–12 หลัก" };
+}
+
 /** ประเภทแถวทั้งหมดใน ar_ledger: Kind ของ ar-sync + settle/diff ของการตัดหนี้ด้วย STM */
 export type LedgerKind = Kind | "settle" | "diff";
 export const KIND_LABEL: Record<LedgerKind, string> = { set: "ตั้งหนี้", adjust: "ปรับปรุง", cancel: "ยกเลิก", reverse: "กลับรายการ", settle: "รับชำระ", diff: "ส่วนต่าง" };

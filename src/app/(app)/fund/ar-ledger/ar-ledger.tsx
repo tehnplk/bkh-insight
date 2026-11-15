@@ -9,6 +9,7 @@ import { THAI_MONTHS_SHORT, formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { DataFreshness } from "../_components/freshness";
+import { CaseResync } from "../_components/case-resync";
 import { AdjustRequestForm, AdjustRequests, Journal, TrialBalance } from "./ar-ledger-extras";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
@@ -160,7 +161,7 @@ const renderSummary = ({ total, summary }: EntriesPage) => (
 
 const detailTitle = (r: LedgerEntry) => `${r.an ? `AN ${r.an}` : r.vn ? `VN ${r.vn}` : r.ref} · ${r.patient_type}`;
 
-function LedgerDetail({ row, account }: { row: LedgerEntry; account: ReactNode }) {
+function LedgerDetail({ row, account, onResync }: { row: LedgerEntry; account: ReactNode; onResync: () => void }) {
   return (
     <div className="text-sm">
       <Facts>
@@ -178,6 +179,7 @@ function LedgerDetail({ row, account }: { row: LedgerEntry; account: ReactNode }
         <Fact label="จำนวนเงิน (บาท)"><span className="font-semibold"><Money value={Number(row.amount)} /></span></Fact>
         <Fact label="เหตุผล">{row.note}</Fact>
       </Facts>
+      <CaseResync vn={row.patient_type === "OP" ? row.vn : null} an={row.patient_type === "IP" ? row.an : null} onDone={onResync} />
       {(row.vn || row.an) && (
         // ยอดของ adjust/cancel/reverse ไม่ใช่ยอดหนี้ทั้งก้อน จึงเทียบส่วนต่างเฉพาะแถวตั้งหนี้
         <DebtorItems vn={row.vn} an={row.an} debtor={row.kind === "set" ? Number(row.amount) : undefined} />
@@ -206,7 +208,8 @@ export function ArLedger() {
       {selected?.name && <span className="ml-2 font-normal text-muted">{selected.name}</span>}
     </>
   );
-  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} />;
+  // ไม่ remount DataGrid (จะปิด modal) แถวในตารางจึงเห็นรายการใหม่เมื่อโหลดตารางครั้งถัดไป
+  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} onResync={retry} />;
 
   return (
     <div className="flex flex-col gap-5">

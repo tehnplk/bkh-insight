@@ -8,6 +8,7 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
+import { CaseResync } from "../_components/case-resync";
 import {
   STATUS_LABEL,
   type PrecheckPage, type PrecheckRow, type PrecheckStatus, type PrecheckTotals, type PrecheckType,
@@ -76,18 +77,32 @@ const COLUMNS = {
   ]),
 };
 
-const renderDetail = (r: PrecheckRow) => (
-  <div className="text-sm">
-    <Facts>
-      <Fact label="สถานะ"><Status status={r.status} /></Fact>
-      <Fact label="ส่วนต่างค่าใช้จ่าย (บาท)"><Diff value={r.diff_total} /></Fact>
-      <Fact label="ส่วนต่างลูกหนี้ (บาท)"><Diff value={r.diff_debt} /></Fact>
-      <Fact label="ลงสมุดแล้ว (บาท)"><Money value={r.booked} /></Fact>
-    </Facts>
-    {/* visit ที่ admit แล้วยังดูรายการของ vn (OPD) ; IPD ไม่มี vn จึงใช้ an */}
-    <DebtorItems vn={r.vn} an={r.vn ? null : r.an} debtor={r.uc_money ?? undefined} />
-  </div>
-);
+const renderDetail = (r: PrecheckRow) => {
+  // HOSxP ย้ายรายการของ visit ไปที่ AN ตอน admit (opitemrece.vn เป็น NULL) แต่ vn_stat ยังเป็นยอดเดิม จึงต้องดูที่ AN
+  const moved = r.vn != null && r.an != null && r.n_items === 0;
+  return (
+    <div className="text-sm">
+      <Facts>
+        <Fact label="สถานะ"><Status status={r.status} /></Fact>
+        <Fact label="ส่วนต่างค่าใช้จ่าย (บาท)"><Diff value={r.diff_total} /></Fact>
+        <Fact label="ส่วนต่างลูกหนี้ (บาท)"><Diff value={r.diff_debt} /></Fact>
+        <Fact label="ลงสมุดแล้ว (บาท)"><Money value={r.booked} /></Fact>
+      </Facts>
+      {/* แถว IPD ไม่มี vn ; OPD ที่ admit แล้วดึงตาม vn ของ visit */}
+      <CaseResync vn={r.vn} an={r.vn ? null : r.an} />
+      {/* visit ที่ admit แล้วดูรายการของ vn (OPD) ถ้ายังอยู่ที่ vn ; IPD ไม่มี vn จึงใช้ an */}
+      {moved ? (
+        <>
+          {/* ยอดทั้ง AN เทียบกับลูกหนี้ของ visit ไม่ได้ จึงไม่ส่ง debtor */}
+          <DebtorItems vn={null} an={r.an} />
+          <p className="mt-2 text-xs text-muted">รายการของ visit นี้ย้ายไป AN {r.an} ตอน admit จึงแสดงรายการทั้งหมดของ AN</p>
+        </>
+      ) : (
+        <DebtorItems vn={r.vn} an={r.vn ? null : r.an} debtor={r.uc_money ?? undefined} />
+      )}
+    </div>
+  );
+};
 const detailTitle = (r: PrecheckRow) => (
   <>
     {r.patient_name} <span className="font-normal text-muted tabular-nums">{r.vn ? `VN ${r.vn}` : `AN ${r.an}`}</span>
