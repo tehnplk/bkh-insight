@@ -86,6 +86,10 @@ test("ruleCodes match the codes written in each block, C160/C161 and dropped cod
   assert.deepEqual(ruleCodes("op", "CHA"), ["302", "555"]);
   assert.deepEqual(ruleCodes("op", "ADP"), ["171", "514", "301", "234", "357", "634", "756", "STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"]);
   assert.deepEqual(ruleCodes("op", "ORF"), ["STP-R113"]);
+  assert.deepEqual(ruleCodes("op", "DRU"), ["301", "303", "565", "STP-R108"]);
+  assert.ok(!ruleCodes("ip", "DRU").includes("565"), "C565 เป็นกฎ OP เท่านั้น");
+  assert.equal(codeLevel("565"), "warn");
+  assert.ok(countDef("ip", "IRF").sql.includes("ro.vn = a.an"));
   assert.ok(!ruleSummarySql("ip").includes("SVCTYPE"));
 });
 
@@ -148,4 +152,16 @@ test("ins.PERMITNO of C127/C125 uses the same CASE as the exported INS.PERMITNO"
     assert.equal(norm(checked), norm(exported), t);
   }
   assert.ok(!ruleSummarySql("op").includes("ovstost"), "UUC = '1' เหมือนแฟ้มส่งออก");
+});
+
+test("ADP.TYPE and drug split in rules match the exported ADP/DRU", async () => {
+  const { exportSql } = await import("../files/sql.ts");
+  const adpType = exportSql("op", "ADP").match(/COALESCE\(CASE inc\.drg_chrgitem_id .*? END, nd\.nhso_adp_type_id, 3\)/)[0];
+  for (const t of FDH_TYPES) {
+    const adp = ruleSummarySql(t, "ADP");
+    assert.equal(adp.split(`${adpType} AS ADPTYPE`).length - 1, 2, `${t} it + adp_s`);
+    assert.ok(adp.includes("COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU"), t);
+    assert.ok(!/op\.income (NOT )?IN \(3, ?4\)/.test(adp + ruleSummarySql(t, "DRU") + countDef(t, "DRU").sql), `${t} ยังแยกยาด้วย income`);
+    assert.ok(exportSql(t, "ADP").includes(`${adpType} AS \`TYPE\``));
+  }
 });

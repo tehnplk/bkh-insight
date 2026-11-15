@@ -16,7 +16,7 @@ export type OpFile = (typeof FILE_ORDER.op)[number];
 export type IpFile = (typeof FILE_ORDER.ip)[number];
 
 /** จำนวนรหัส C ที่มีกฎตรวจ (ทุกหมวดรวมกันไม่ซ้ำ ไม่นับกฎ STP) ต้องตรงกับ checks.ts (ตรวจใน fdh.test.mjs) */
-export const RULE_CODE_COUNT = 41;
+export const RULE_CODE_COUNT = 42;
 
 /** ระดับของกฎ: error = ติด C แน่ ; warn = อาจถูกตีกลับ ; info = ยังไม่ยืนยันว่ากองทุนตรวจ (ไม่นับเป็นติด C) */
 export type Level = "error" | "warn" | "info";
@@ -24,7 +24,7 @@ export type Level = "error" | "warn" | "info";
 /** ระดับของรหัส C ที่ไม่ใช่ error (ไม่ระบุ = error) ปรับตาม backtest กับ REP (precision ต่ำ = warn/info) */
 export const C_LEVEL: Record<string, Level> = {
   "151": "info", "152": "info", "179": "info", "301": "warn", "302": "warn", "303": "warn",
-  "305": "warn", "312": "warn", "349": "info", "357": "warn", "555": "warn", "634": "warn", "801": "warn",
+  "305": "warn", "312": "warn", "349": "info", "357": "warn", "555": "warn", "565": "warn", "634": "warn", "801": "warn",
   "902": "info", "998": "warn",
 };
 

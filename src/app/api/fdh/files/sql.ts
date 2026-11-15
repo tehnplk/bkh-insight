@@ -22,20 +22,32 @@ const PERMIT_IP = `CASE WHEN t.hipdata_code = 'UCS' THEN ${ucsAuthen("a.vn")} WH
 const INS_JOIN_OP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN visit_pttype ap ON ap.vn = v.vn AND ap.pttype = v.pttype LEFT JOIN ovst_seq sq ON sq.vn = v.vn";
 const INS_JOIN_IP = "INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN pttype t ON t.pttype = v.pttype LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype LEFT JOIN ipt_pttype ap ON ap.an = v.an AND ap.pttype = v.pttype";
 const PAT = `${HCODE} AS \`HCODE\`, pt.hn AS \`HN\`, LPAD(COALESCE(pt.chwpart, '00'), 2, '0') AS \`CHANGWAT\`, LPAD(COALESCE(pt.amppart, '00'), 2, '0') AS \`AMPHUR\`, DATE_FORMAT(pt.birthday, '%Y-%m-%d') AS \`DOB\`, COALESCE(pt.sex, '1') AS \`SEX\`, COALESCE(pt.marrystatus, '9') AS \`MARRIAGE\`, LPAD(COALESCE(pt.occupation, '000'), 3, '0') AS \`OCCUPA\`, LPAD(COALESCE(pt.nationality, '099'), 3, '0') AS \`NATION\`, pt.cid AS \`PERSON_ID\`, CONCAT(COALESCE(pt.pname, ''), COALESCE(pt.fname, ''), ' ', COALESCE(pt.lname, '')) AS \`NAMEPAT\`, COALESCE(pt.pname, '') AS \`TITLE\`, COALESCE(pt.fname, '') AS \`FNAME\`, COALESCE(pt.lname, '') AS \`LNAME\`, CASE WHEN LENGTH(pt.cid) = 13 THEN '1' ELSE '2' END AS \`IDTYPE\``;
-const CLINIC = "CONCAT('0', LPAD(COALESCE(v.spclty, '01'), 2, '0'), '00')";
+// CLINIC/DEPT = รหัสแผนก สปสช. (spclty.nhso_code) ; แฟ้มที่ใช้ CLINIC ต้อง join SP_V (หรือ spclty sp ของตัวเอง)
+const CLINIC = "CONCAT('0', LPAD(COALESCE(sp.nhso_code, '01'), 2, '0'), '00')";
+const SP_V = "LEFT JOIN spclty sp ON sp.spclty = v.spclty";
+const ITEM_CLINIC = "CONCAT(CASE WHEN op.an IS NOT NULL AND op.an <> '' THEN '1' ELSE '0' END, LPAD(COALESCE(sp.nhso_code, '01'), 2, '0'), '00')";
+// ยา = หมวดค่ารักษา 3/4 (income.drg_chrgitem_id) ไม่ใช่รหัส income ; DRU + ADP ครอบทุกรายการของ visit/AN ไม่ซ้อนกัน
+const DRUG_INC = "INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4)";
+const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
+// ADP.TYPE ตามหมวดค่ารักษา ไม่เข้าหมวดใช้ nhso_adp_type_id ; checks.ts ใช้สูตรเดียวกัน (fdh.test.mjs ตรวจ)
+const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+const TOTCOPAY = "ROUND(CASE WHEN op.paidst = '03' THEN op.sum_price ELSE 0 END, 2) AS `TOTCOPAY`";
 const CHA = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE\`, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS \`CHRGITEM\`, ROUND(SUM(op.sum_price), 2) AS \`AMOUNT\`, pt.cid AS \`PERSON_ID\`, COALESCE(op.vn, '') AS \`SEQ\``;
 const CHA_GROUP = "GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid\nHAVING ROUND(SUM(op.sum_price), 2) > 0";
-const AER = `v.hn AS \`HN\`, COALESCE(v.an, '') AS \`AN\`, DATE_FORMAT(er.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(er.er_emergency_type, '') AS \`AUTHAE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, er.vstdate), '%Y-%m-%d') AS \`AEDATE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, v.vsttime), '%H%i') AS \`AETIME\`, COALESCE(ed.accident_transport_type_id, '1') AS \`AETYPE\`, COALESCE(rin.referin_number, rin.docno, '') AS \`REFER_NO\`, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS \`REFMAINI\`, COALESCE(er.er_pt_type, '1') AS \`IREFTYPE\`, COALESCE(rout.refer_hospcode, '') AS \`REFMAINO\`, COALESCE(rout.refer_type, '') AS \`OREFTYPE\`, CASE WHEN er.er_emergency_type = '1' THEN '1' ELSE '0' END AS \`UCAE\`, COALESCE(er.er_emergency_level_id, '1') AS \`EMTYPE\`, er.vn AS \`SEQ\`, COALESCE(er.er_dch_type, '1') AS \`AESTATUS\`, '' AS \`DALERT\`, '' AS \`TALERT\``;
-const AER_JOIN = "LEFT JOIN er_nursing_detail ed ON ed.vn = er.vn LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn";
-const ADP = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(nd.nhso_adp_type_id, 3) AS \`TYPE\`, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS \`CODE\`, ROUND(op.qty, 2) AS \`QTY\`, ROUND(op.unitprice, 2) AS \`RATE\`, COALESCE(op.vn, '') AS \`SEQ\`, '' AS \`CAGCODE\`, '' AS \`DOSE\`, '' AS \`CA_TYPE\`, '' AS \`SERIALNO\`, ROUND(COALESCE(op.paidst, 0), 2) AS \`TOTCOPAY\`, '' AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, '' AS \`QTYDAY\`, COALESCE(nd.tmlt_code, '') AS \`TMLTCODE\`, '' AS \`STATUS1\`, '' AS \`BI\`, ${CLINIC} AS \`CLINIC\`, '1' AS \`ITEMSRC\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`GRAVIDA\`, '' AS \`GA_WEEK\`, '' AS \`DCIP/E_screen\`, '' AS \`LMP\`, '' AS \`SP_ITEM\``;
-const ADP_JOIN = "INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN doctor doc ON doc.code = op.doctor";
-const DRU = `${HCODE} AS \`HCODE\`, op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, CASE WHEN op.an IS NOT NULL AND op.an <> '' THEN CONCAT('1', LPAD(COALESCE(i.spclty, '01'), 2, '0'), '00') ELSE ${CLINIC} END AS \`CLINIC\`, pt.cid AS \`PERSON_ID\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE_SERV\`, COALESCE(d.did, d.sks_drug_code, d.icode) AS \`DID\`, d.name AS \`DIDNAME\`, ROUND(op.qty, 0) AS \`AMOUNT\`, ROUND(op.unitprice, 2) AS \`DRUGPRICE\`, ROUND(COALESCE(d.unitcost, 0), 2) AS \`DRUGCOST\`, COALESCE(d.tmt_tp_code, d.tmt_gp_code, d.sks_drug_code, '') AS \`DIDSTD\`, d.units AS \`UNIT\`, COALESCE(d.packqty, '1') AS \`UNIT_PACK\`, COALESCE(op.vn, '') AS \`SEQ\`, '' AS \`DRUGREMARK\`, '' AS \`PA_NO\`, ROUND(COALESCE(op.paidst, 0), 2) AS \`TOTCOPAY\`, CASE WHEN op.an IS NOT NULL AND op.an <> '' AND op.income = 3 THEN '1' ELSE '2' END AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, COALESCE(du.shortlist, op.drugusage, '') AS \`SIGCODE\`, TRIM(CONCAT(COALESCE(du.name1, ''), ' ', COALESCE(du.name2, ''), ' ', COALESCE(du.name3, ''))) AS \`SIGTEXT\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`SP_ITEM\``;
-const DRU_JOIN = "INNER JOIN drugitems d ON d.icode = op.icode INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN ipt i ON i.an = op.an LEFT JOIN drugusage du ON du.drugusage = op.drugusage LEFT JOIN doctor doc ON doc.code = op.doctor";
-const LABFU = `${HCODE} AS \`HCODE\`, lh.hn AS \`HN\`, pt.cid AS \`PERSON_ID\`, DATE_FORMAT(lh.order_date, '%Y-%m-%d') AS \`DATESERV\`, COALESCE(lh.vn, '') AS \`SEQ\`, COALESCE(li.provis_labcode, li.tmlt_code, li.labtest, li.lab_items_code) AS \`LABTEST\`, lo.lab_order_result AS \`LABRESULT\`, COALESCE(i.an, '') AS \`AN\``;
+const AER = `v.hn AS \`HN\`, COALESCE(v.an, '') AS \`AN\`, DATE_FORMAT(er.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(NULLIF(ac.claim_code, ''), '') AS \`AUTHAE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, er.vstdate), '%Y-%m-%d') AS \`AEDATE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, v.vsttime), '%H%i') AS \`AETIME\`, COALESCE(ac.ac_type, '') AS \`AETYPE\`, COALESCE(rin.referin_number, rin.docno, '') AS \`REFER_NO\`, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS \`REFMAINI\`, CASE WHEN rin.vn IS NOT NULL THEN '1100' ELSE '' END AS \`IREFTYPE\`, COALESCE(rout.refer_hospcode, '') AS \`REFMAINO\`, CASE WHEN rout.vn IS NOT NULL THEN '1100' ELSE '' END AS \`OREFTYPE\`, COALESCE(NULLIF(ac.ac_ae, ''), NULLIF(ept.ucae, 'N'), '') AS \`UCAE\`, '' AS \`EMTYPE\`, er.vn AS \`SEQ\`, '' AS \`AESTATUS\`, '' AS \`DALERT\`, '' AS \`TALERT\``;
+const AER_JOIN = "LEFT JOIN er_nursing_detail ed ON ed.vn = er.vn LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn LEFT JOIN er_pt_type ept ON ept.er_pt_type = er.er_pt_type LEFT JOIN ipt_accident ac ON ac.an = v.an";
+const ADP = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATEOPD\`, ${ADP_TYPE} AS \`TYPE\`, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS \`CODE\`, ROUND(op.qty, 2) AS \`QTY\`, ROUND(op.unitprice, 2) AS \`RATE\`, COALESCE(op.vn, '') AS \`SEQ\`, '' AS \`CAGCODE\`, '' AS \`DOSE\`, '' AS \`CA_TYPE\`, '' AS \`SERIALNO\`, ${TOTCOPAY}, '' AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, '' AS \`QTYDAY\`, COALESCE(nd.tmlt_code, '') AS \`TMLTCODE\`, '' AS \`STATUS1\`, '' AS \`BI\`, ${ITEM_CLINIC} AS \`CLINIC\`, '1' AS \`ITEMSRC\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`GRAVIDA\`, '' AS \`GA_WEEK\`, '' AS \`DCIP/E_screen\`, '' AS \`LMP\`, '' AS \`SP_ITEM\``;
+const ADP_JOIN = "INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN doctor doc ON doc.code = op.doctor LEFT JOIN income inc ON inc.income = op.income LEFT JOIN ipt ia ON ia.an = op.an LEFT JOIN spclty sp ON sp.spclty = COALESCE(v.spclty, ia.spclty)";
+// remark = DRUGREMARK: OP = เหตุผลใช้ยานอกบัญชี EA–EF (ต้องอยู่บรรทัดเดียว opDruCheckSql ตัดที่ "\nSELECT "/"\nFROM ")
+const dru = (remark: string) => `${HCODE} AS \`HCODE\`, op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, ${ITEM_CLINIC} AS \`CLINIC\`, pt.cid AS \`PERSON_ID\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE_SERV\`, op.icode AS \`DID\`, d.name AS \`DIDNAME\`, ROUND(op.qty, 0) AS \`AMOUNT\`, ROUND(op.unitprice, 2) AS \`DRUGPRICE\`, ROUND(COALESCE(d.unitcost, 0), 2) AS \`DRUGCOST\`, COALESCE(d.did, '') AS \`DIDSTD\`, d.units AS \`UNIT\`, COALESCE(d.packqty, '1') AS \`UNIT_PACK\`, COALESCE(op.vn, '') AS \`SEQ\`, ${remark} AS \`DRUGREMARK\`, '' AS \`PA_NO\`, ${TOTCOPAY}, CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, COALESCE(du.shortlist, op.drugusage, '') AS \`SIGCODE\`, TRIM(CONCAT(COALESCE(du.name1, ''), ' ', COALESCE(du.name2, ''), ' ', COALESCE(du.name3, ''))) AS \`SIGTEXT\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`SP_ITEM\``;
+const OP_REMARK = "(SELECT MIN(CASE WHEN UPPER(pn.presc_reason) REGEXP '^E[A-F]$' THEN UPPER(pn.presc_reason) END) FROM ovst_presc_ned pn WHERE pn.vn = op.vn AND pn.icode = op.icode)";
+const DRU_JOIN = `${DRUG_INC} INNER JOIN drugitems d ON d.icode = op.icode INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN ipt i ON i.an = op.an LEFT JOIN drugusage du ON du.drugusage = op.drugusage LEFT JOIN doctor doc ON doc.code = op.doctor LEFT JOIN spclty sp ON sp.spclty = COALESCE(i.spclty, v.spclty)`;
+const LABFU = `${HCODE} AS \`HCODE\`, lh.hn AS \`HN\`, pt.cid AS \`PERSON_ID\`, DATE_FORMAT(lh.order_date, '%Y-%m-%d') AS \`DATESERV\`, COALESCE(lh.vn, '') AS \`SEQ\`, li.labtest AS \`LABTEST\`, ROUND(lo.lab_order_result + 0, 2) AS \`LABRESULT\`, COALESCE(i.an, '') AS \`AN\``;
 const LABFU_JOIN = "INNER JOIN lab_order lo ON lo.lab_order_number = lh.lab_order_number INNER JOIN lab_items li ON li.lab_items_code = lo.lab_items_code INNER JOIN patient pt ON pt.hn = lh.hn LEFT JOIN ipt i ON i.vn = lh.vn";
-const LAB_RESULT = "lo.lab_order_result IS NOT NULL AND lo.lab_order_result <> ''";
+// LABFU = ผลแล็บตัวเลขของผู้ป่วยคลินิกโรคเรื้อรัง ; regex ใช้ {0,1} แทน ? (mysql2 แทน ? ทุกตัวเป็น param)
+const LABFU_OP_WHERE = "li.labtest <> '' AND lo.lab_order_result REGEXP '^[0-9]+([.][0-9]+){0,1}$' AND lo.lab_order_result + 0 > 0 AND i.an IS NULL AND EXISTS (SELECT 1 FROM clinic c JOIN clinic_visit cv ON cv.clinic = c.clinic AND cv.vn = lh.vn)";
 const PHDB = `op.hn AS \`HN\`, COALESCE(nd.moph_price_item_code, nd.nhso_adp_code, nd.billcode, op.icode) AS \`CODE\`, ROUND(op.qty, 0) AS \`QTY\`, ROUND(op.sum_price, 2) AS \`PRICE\`, COALESCE(op.an, '') AS \`AN\`, COALESCE(op.vn, '') AS \`SEQ\`, COALESCE(t.hipdata_code, t.pcode, 'UCS') AS \`INSCL\``;
-const PHDB_JOIN = "INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN ipt i ON i.an = op.an LEFT JOIN pttype t ON t.pttype = COALESCE(v.pttype, i.pttype)";
+const PHDB_JOIN = "INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN ipt i ON i.an = op.an LEFT JOIN pttype t ON t.pttype = COALESCE(v.pttype, i.pttype) LEFT JOIN income inc ON inc.income = op.income";
 const OP_RANGE = "FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e";
 const OP_ONLY = "op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '')";
 const IP_ITEMS = `${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an`;
@@ -46,44 +58,48 @@ const OP_SQL = {
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT v.hn FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
   // DETAIL: '\\r' '\\n' ใน JS = '\r' '\n' ใน SQL (MySQL แปลงเป็น CR/LF เอง) ; UUC = '1' ตายตัว (มาตรฐานมีแค่ 1/2 ; ovstost 03/04 ไม่เกี่ยวการใช้สิทธิ)
   OPD: q(
-    `v.hn AS \`HN\`, ${CLINIC} AS \`CLINIC\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, DATE_FORMAT(v.vsttime, '%H%i') AS \`TIMEOPD\`, v.vn AS \`SEQ\`, '1' AS \`UUC\`, SUBSTRING(REPLACE(REPLACE(COALESCE(s.cc, ''), '\\r', ' '), '\\n', ' '), 1, 255) AS \`DETAIL\`, ROUND(s.temperature, 1) AS \`BTEMP\`, ROUND(s.bps) AS \`SBP\`, ROUND(s.bpd) AS \`DBP\`, ROUND(s.pulse) AS \`PR\`, ROUND(s.rr) AS \`RR\`, CASE WHEN TIME(v.vsttime) BETWEEN '08:00:00' AND '16:00:00' THEN '1' ELSE '2' END AS \`OPTYPE\`, CASE WHEN rf_in.vn IS NOT NULL THEN '3' WHEN oa.hn IS NOT NULL THEN '2' ELSE '1' END AS \`TYPEIN\`, CASE WHEN i.an IS NOT NULL THEN '3' WHEN rf_out.vn IS NOT NULL THEN '2' WHEN v.ovstost IN ('04', '09') THEN '4' ELSE '1' END AS \`TYPEOUT\``,
-    "FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e LEFT JOIN opdscreen s ON s.vn = v.vn LEFT JOIN ipt i ON i.vn = v.vn LEFT JOIN referin rf_in ON rf_in.vn = v.vn LEFT JOIN referout rf_out ON rf_out.vn = v.vn LEFT JOIN oapp oa ON oa.hn = v.hn AND oa.nextdate = v.vstdate\nORDER BY v.vstdate, v.vn, rf_out.referout_id, oa.oapp_id",
+    `v.hn AS \`HN\`, ${CLINIC} AS \`CLINIC\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, DATE_FORMAT(v.vsttime, '%H%i') AS \`TIMEOPD\`, v.vn AS \`SEQ\`, '1' AS \`UUC\`, SUBSTRING(REPLACE(REPLACE(COALESCE(s.cc, ''), '\\r', ' '), '\\n', ' '), 1, 255) AS \`DETAIL\`, ROUND(s.temperature, 1) AS \`BTEMP\`, ROUND(s.bps) AS \`SBP\`, ROUND(s.bpd) AS \`DBP\`, ROUND(s.pulse) AS \`PR\`, ROUND(s.rr) AS \`RR\`, '' AS \`OPTYPE\`, CASE WHEN rf_in.vn IS NOT NULL THEN '3' WHEN oa.hn IS NOT NULL THEN '2' ELSE '1' END AS \`TYPEIN\`, COALESCE(NULLIF(ost.export_code, '1'), CASE WHEN i.an IS NOT NULL THEN '2' WHEN rf_out.vn IS NOT NULL THEN '3' END, '1') AS \`TYPEOUT\``,
+    `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e LEFT JOIN opdscreen s ON s.vn = v.vn LEFT JOIN ipt i ON i.vn = v.vn LEFT JOIN referin rf_in ON rf_in.vn = v.vn LEFT JOIN referout rf_out ON rf_out.vn = v.vn LEFT JOIN oapp oa ON oa.hn = v.hn AND oa.nextdate = v.vstdate LEFT JOIN ovstost ost ON ost.ovstost = v.ovstost ${SP_V}\nORDER BY v.vstdate, v.vn, rf_out.referout_id, oa.oapp_id`,
   ),
   ORF: q(
-    `ro.hn AS \`HN\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`DATEOPD\`, ${CLINIC} AS \`CLINIC\`, COALESCE(ro.refer_hospcode, ro.hospcode) AS \`REFER\`, COALESCE(ro.refer_type, 1) AS \`REFERTYPE\`, ro.vn AS \`SEQ\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`REFERDATE\``,
-    `FROM p JOIN referout ro ON ro.refer_date BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = ro.vn\nWHERE ${NOT_OPD}\nORDER BY ro.refer_date, ro.vn, ro.referout_id`,
+    `ro.hn AS \`HN\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`DATEOPD\`, ${CLINIC} AS \`CLINIC\`, COALESCE(ro.refer_hospcode, ro.hospcode) AS \`REFER\`, '2' AS \`REFERTYPE\`, ro.vn AS \`SEQ\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`REFERDATE\``,
+    `FROM p JOIN referout ro ON ro.refer_date BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = ro.vn ${SP_V}\nWHERE ${NOT_OPD}\nORDER BY ro.refer_date, ro.vn, ro.referout_id`,
   ),
   ODX: q(
     `od.hn AS \`HN\`, DATE_FORMAT(od.vstdate, '%Y-%m-%d') AS \`DATEDX\`, ${CLINIC} AS \`CLINIC\`, REPLACE(od.icd10, '.', '') AS \`DIAG\`, COALESCE(od.diagtype, '1') AS \`DXTYPE\`, COALESCE(doc.licenseno, od.doctor, '') AS \`DRDX\`, pt.cid AS \`PERSON_ID\`, od.vn AS \`SEQ\``,
-    "FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn LEFT JOIN doctor doc ON doc.code = od.doctor\nORDER BY od.vstdate, od.vn, od.ovst_diag_id",
+    `FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn LEFT JOIN doctor doc ON doc.code = od.doctor ${SP_V}\nORDER BY od.vstdate, od.vn, od.ovst_diag_id`,
   ),
   OOP: q(
     `v.hn AS \`HN\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, ${CLINIC} AS \`CLINIC\`, REPLACE(dop.icd9, '.', '') AS \`OPER\`, COALESCE(doc.licenseno, dop.doctor, '') AS \`DROPID\`, pt.cid AS \`PERSON_ID\`, v.vn AS \`SEQ\`, ROUND(COALESCE(dop.price, 0), 2) AS \`SERVPRICE\``,
-    "FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN doctor doc ON doc.code = dop.doctor\nORDER BY v.vstdate, v.vn, dop.doctor_operation_id",
+    `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN doctor doc ON doc.code = dop.doctor ${SP_V}\nORDER BY v.vstdate, v.vn, dop.doctor_operation_id`,
   ),
+  // CHT: ยอดจากรายการ opitemrece ของ visit (= ผลรวม CHA) หนึ่งแถวต่อ visit ; ใบเสร็จใบแรกตาม finance_number
   CHT: q(
-    "vs.hn AS `HN`, '' AS `AN`, DATE_FORMAT(vs.vstdate, '%Y-%m-%d') AS `DATE`, ROUND(vs.income, 2) AS `TOTAL`, ROUND(vs.paid_money, 2) AS `PAID`, vs.pttype AS `PTTYPE`, pt.cid AS `PERSON_ID`, vs.vn AS `SEQ`, '' AS `OPD_MEMO`, COALESCE(rp.bill_number, '') AS `INVOICE_NO`, COALESCE(rp.book_number, '') AS `INVOICE_LT`",
-    `FROM p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn LEFT JOIN rcpt_print rp ON rp.vn = vs.vn\nWHERE ${NOT_OPD}\nORDER BY vs.vstdate, vs.vn, rp.finance_number`,
+    "vs.hn AS `HN`, '' AS `AN`, DATE_FORMAT(vs.vstdate, '%Y-%m-%d') AS `DATE`, ROUND(COALESCE(x.t, 0), 2) AS `TOTAL`, ROUND(COALESCE(x.pd, 0), 2) AS `PAID`, vs.pttype AS `PTTYPE`, pt.cid AS `PERSON_ID`, vs.vn AS `SEQ`, '' AS `OPD_MEMO`, COALESCE((SELECT rp.bill_number FROM rcpt_print rp WHERE rp.vn = vs.vn ORDER BY rp.finance_number LIMIT 1), '') AS `INVOICE_NO`, COALESCE((SELECT rp.book_number FROM rcpt_print rp WHERE rp.vn = vs.vn ORDER BY rp.finance_number LIMIT 1), '') AS `INVOICE_LT`",
+    `FROM p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn LEFT JOIN (SELECT op.vn, SUM(op.sum_price) AS t, SUM(CASE WHEN op.paidst IN ('01', '03') THEN op.sum_price ELSE 0 END) AS pd FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e WHERE ${OP_ONLY} GROUP BY op.vn) x ON x.vn = vs.vn\nWHERE ${NOT_OPD}\nORDER BY vs.vstdate, vs.vn`,
   ),
   CHA: q(CHA, `${OP_RANGE} INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income\nWHERE ${OP_ONLY}\n${CHA_GROUP}\nORDER BY \`DATE\`, \`SEQ\`, \`HN\`, \`AN\`, \`CHRGITEM\``),
   AER: q(AER, `FROM p JOIN er_regist er ON er.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = er.vn ${AER_JOIN}\nWHERE ${NOT_OPD}\nORDER BY er.vstdate, er.vn, rout.referout_id`),
-  ADP: q(ADP, `${OP_RANGE} ${ADP_JOIN}\nWHERE ${OP_ONLY} AND op.income NOT IN (3, 4)\nORDER BY op.vstdate, op.vn, op.hos_guid`),
-  DRU: q(DRU, `${OP_RANGE} ${DRU_JOIN}\nWHERE ${OP_ONLY} AND op.income IN (3, 4)\nORDER BY op.vstdate, op.vn, op.hos_guid`),
-  LABFU: q(LABFU, `FROM p JOIN lab_head lh ON lh.order_date BETWEEN p.s AND p.e ${LABFU_JOIN}\nWHERE ${LAB_RESULT} AND i.an IS NULL\nORDER BY lh.order_date, lh.lab_order_number, lo.lab_items_code`),
-  PHDB: q(PHDB, `${OP_RANGE} ${PHDB_JOIN}\nWHERE ${OP_ONLY} AND op.income NOT IN (3, 4)\nORDER BY op.vstdate, op.vn, op.hos_guid`),
+  ADP: q(ADP, `${OP_RANGE} ${ADP_JOIN}\nWHERE ${OP_ONLY} AND ${NOT_DRUG}\nORDER BY op.vstdate, op.vn, op.hos_guid`),
+  DRU: q(dru(OP_REMARK), `${OP_RANGE} ${DRU_JOIN}\nWHERE ${OP_ONLY}\nORDER BY op.vstdate, op.vn, op.hos_guid`),
+  LABFU: q(LABFU, `FROM p JOIN lab_head lh ON lh.order_date BETWEEN p.s AND p.e ${LABFU_JOIN}\nWHERE ${LABFU_OP_WHERE}\nORDER BY lh.order_date, lh.lab_order_number, lo.lab_items_code`),
+  PHDB: q(PHDB, `${OP_RANGE} ${PHDB_JOIN}\nWHERE ${OP_ONLY} AND ${NOT_DRUG}\nORDER BY op.vstdate, op.vn, op.hos_guid`),
 } satisfies Record<OpFile, string>;
 
-// IP: ทุกแฟ้มยึด admission ที่จำหน่ายในช่วง (AI) ; IPD: SVCTYPE = '1' ทุก admission (ไม่มี w.is_icu), ADM_W แปลงกรัมเป็นกิโลกรัม
+// IP: ทุกแฟ้มยึด admission ที่จำหน่ายในช่วง (AI) ; ADM_W แปลงกรัมเป็นกิโลกรัม
+// ipAnExportSql แทนแค่ a.dchdate BETWEEN ตัวแรก (p เป็นวันนี้) จึงห้ามมี subquery อื่นที่อ้าง p ; CHT ใช้ correlated subquery แทน
+// LABFU ผู้ป่วยในส่งว่าง (WHERE 1 = 0) คงคอลัมน์ไว้ให้แฟ้มมี header
 const IP_SQL = {
   INS: q(ins(PERMIT_IP), `${AI} INNER JOIN ovst v ON v.an = a.an ${INS_JOIN_IP}\nORDER BY a.dchdate, a.an, v.vn, pp.patient_pttype_id`),
   PAT: q(PAT, "FROM patient pt WHERE pt.hn IN (SELECT a.hn FROM p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e)\nORDER BY pt.hn"),
   IPD: q(
-    "i.hn AS `HN`, i.an AS `AN`, DATE_FORMAT(i.regdate, '%Y-%m-%d') AS `DATEADM`, DATE_FORMAT(i.regtime, '%H%i') AS `TIMEADM`, DATE_FORMAT(i.dchdate, '%Y-%m-%d') AS `DATEDSC`, DATE_FORMAT(i.dchtime, '%H%i') AS `TIMEDSC`, COALESCE(i.dchstts, '1') AS `DISCHS`, COALESCE(i.dchtype, '1') AS `DISCHT`, COALESCE(w.ward_export_code, w.sss_code, w.ward, '01') AS `WARDDSC`, LPAD(COALESCE(i.spclty, '01'), 2, '0') AS `DEPT`, ROUND(COALESCE(i.bw, 0) / 1000, 3) AS `ADM_W`, '1' AS `UUC`, '1' AS `SVCTYPE`",
-    "FROM p JOIN ipt i ON i.dchdate BETWEEN p.s AND p.e LEFT JOIN ward w ON w.ward = i.ward\nORDER BY i.dchdate, i.an",
+    "i.hn AS `HN`, i.an AS `AN`, DATE_FORMAT(i.regdate, '%Y-%m-%d') AS `DATEADM`, DATE_FORMAT(i.regtime, '%H%i') AS `TIMEADM`, DATE_FORMAT(i.dchdate, '%Y-%m-%d') AS `DATEDSC`, DATE_FORMAT(i.dchtime, '%H%i') AS `TIMEDSC`, s.nhso_dchstts AS `DISCHS`, t.nhso_dchtype AS `DISCHT`, COALESCE(w.ward_export_code, w.sss_code, w.ward, '01') AS `WARDDSC`, LPAD(COALESCE(sp.nhso_code, '01'), 2, '0') AS `DEPT`, ROUND(COALESCE(i.bw, 0) / 1000, 3) AS `ADM_W`, '1' AS `UUC`, CASE WHEN tt.is_ambulatory = 'Y' THEN 'A' ELSE 'I' END AS `SVCTYPE`",
+    "FROM p JOIN ipt i ON i.dchdate BETWEEN p.s AND p.e LEFT JOIN ward w ON w.ward = i.ward LEFT JOIN ipt_type tt ON tt.ipt_type = i.ipt_type LEFT JOIN dchstts s ON s.dchstts = i.dchstts LEFT JOIN dchtype t ON t.dchtype = i.dchtype LEFT JOIN spclty sp ON sp.spclty = i.spclty\nORDER BY i.dchdate, i.an",
   ),
+  // HOSxP เก็บ referout ของผู้ป่วยในด้วย vn = AN
   IRF: q(
-    "a.an AS `AN`, COALESCE(ro.refer_hospcode, ro.hospcode) AS `REFER`, COALESCE(ro.refer_type, 1) AS `REFERTYPE`",
-    `${AI} INNER JOIN referout ro ON ro.vn = a.vn\nORDER BY a.dchdate, a.an, ro.referout_id`,
+    "a.an AS `AN`, COALESCE(ro.refer_hospcode, ro.hospcode) AS `REFER`, '2' AS `REFERTYPE`",
+    `${AI} INNER JOIN referout ro ON ro.vn = a.an\nORDER BY a.dchdate, a.an, ro.referout_id`,
   ),
   IDX: q(
     "id.an AS `AN`, REPLACE(id.icd10, '.', '') AS `DIAG`, COALESCE(id.diagtype, '1') AS `DXTYPE`, COALESCE(doc.licenseno, id.doctor, '') AS `DRDX`",
@@ -94,19 +110,19 @@ const IP_SQL = {
     `${AI} INNER JOIN iptoprt io ON io.an = a.an LEFT JOIN doctor doc ON doc.code = io.doctor\nORDER BY a.dchdate, a.an, io.iptoprt_id`,
   ),
   CHT: q(
-    "ans.hn AS `HN`, ans.an AS `AN`, DATE_FORMAT(ans.dchdate, '%Y-%m-%d') AS `DATE`, ROUND(ans.income, 2) AS `TOTAL`, ROUND(ans.paid_money, 2) AS `PAID`, ans.pttype AS `PTTYPE`, pt.cid AS `PERSON_ID`, '' AS `SEQ`, '' AS `OPD_MEMO`, COALESCE(rp.bill_number, '') AS `INVOICE_NO`, COALESCE(rp.book_number, '') AS `INVOICE_LT`",
-    `${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn LEFT JOIN rcpt_print rp ON rp.vn = ans.vn\nORDER BY a.dchdate, a.an, rp.finance_number`,
+    "ans.hn AS `HN`, ans.an AS `AN`, DATE_FORMAT(ans.dchdate, '%Y-%m-%d') AS `DATE`, ROUND(COALESCE((SELECT SUM(op.sum_price) FROM opitemrece op FORCE INDEX (ix_an) WHERE op.an = ans.an), 0), 2) AS `TOTAL`, ROUND(COALESCE((SELECT SUM(CASE WHEN op.paidst IN ('01', '03') THEN op.sum_price ELSE 0 END) FROM opitemrece op FORCE INDEX (ix_an) WHERE op.an = ans.an), 0), 2) AS `PAID`, ans.pttype AS `PTTYPE`, pt.cid AS `PERSON_ID`, '' AS `SEQ`, '' AS `OPD_MEMO`, COALESCE((SELECT rp.bill_number FROM rcpt_print rp WHERE rp.vn = ans.vn ORDER BY rp.finance_number LIMIT 1), '') AS `INVOICE_NO`, COALESCE((SELECT rp.book_number FROM rcpt_print rp WHERE rp.vn = ans.vn ORDER BY rp.finance_number LIMIT 1), '') AS `INVOICE_LT`",
+    `${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn\nORDER BY a.dchdate, a.an`,
   ),
   CHA: q(CHA, `${IP_ITEMS} INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income\n${CHA_GROUP}\nORDER BY \`AN\`, \`DATE\`, \`SEQ\`, \`CHRGITEM\`, \`HN\``),
   AER: q(AER, `${AI} INNER JOIN ovst v ON v.an = a.an INNER JOIN er_regist er ON er.vn = v.vn ${AER_JOIN}\nORDER BY a.dchdate, a.an, er.vn, rout.referout_id`),
-  ADP: q(ADP, `${IP_ITEMS} ${ADP_JOIN}\nWHERE op.income NOT IN (3, 4)\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
+  ADP: q(ADP, `${IP_ITEMS} ${ADP_JOIN}\nWHERE ${NOT_DRUG}\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
   LVD: q(
     "hl.ipt_home_leave_id AS `SEQLVD`, hl.an AS `AN`, DATE_FORMAT(hl.dch_date, '%Y-%m-%d') AS `DATEOUT`, DATE_FORMAT(hl.dch_time, '%H%i') AS `TIMEOUT`, DATE_FORMAT(hl.reg_date, '%Y-%m-%d') AS `DATEIN`, DATE_FORMAT(hl.reg_time, '%H%i') AS `TIMEIN`, DATEDIFF(hl.reg_date, hl.dch_date) AS `QTYDAY`",
     `${AI} INNER JOIN ipt_home_leave hl ON hl.an = a.an\nORDER BY a.dchdate, a.an, hl.ipt_home_leave_id`,
   ),
-  DRU: q(DRU, `${IP_ITEMS} ${DRU_JOIN}\nWHERE op.income IN (3, 4)\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
-  LABFU: q(LABFU, `${AI} INNER JOIN lab_head lh ON lh.vn = a.vn ${LABFU_JOIN}\nWHERE ${LAB_RESULT}\nORDER BY a.dchdate, a.an, lh.lab_order_number, lo.lab_items_code`),
-  PHDB: q(PHDB, `${IP_ITEMS} ${PHDB_JOIN}\nWHERE op.income NOT IN (3, 4)\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
+  DRU: q(dru("''"), `${IP_ITEMS} ${DRU_JOIN}\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
+  LABFU: q(LABFU, `${AI} INNER JOIN lab_head lh ON lh.vn = a.vn ${LABFU_JOIN}\nWHERE 1 = 0\nORDER BY a.dchdate, a.an, lh.lab_order_number, lo.lab_items_code`),
+  PHDB: q(PHDB, `${IP_ITEMS} ${PHDB_JOIN}\nWHERE ${NOT_DRUG}\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
 } satisfies Record<IpFile, string>;
 
 const SQL: Record<FdhType, Record<string, string>> = { op: OP_SQL, ip: IP_SQL };
@@ -123,7 +139,7 @@ export const ipAnExportSql = (file: string, n: number) =>
   exportSql("ip", file).replace(/\b(a|i)\.dchdate BETWEEN p\.s AND p\.e/, (_, x) => `${x}.an IN (${Array(n).fill("?").join(", ")})`);
 /**
  * ตรวจแฟ้ม DRU กับ Drug Catalog: FROM/WHERE/ORDER BY เดียวกับ ipAnExportSql("DRU") แถวที่ i จึงตรงกับแถวที่ i ของแฟ้ม
- * แต่ดึง icode (= HOSPDRUGCODE ของ Drug Catalog) แทน DID ซึ่งในแฟ้มเป็นรหัส 24 หลัก ; price/date_serv ใช้สูตรเดียวกับ DRUGPRICE/DATE_SERV
+ * ดึง icode (= DID ของแฟ้ม = HOSPDRUGCODE ของ Drug Catalog) ; price/date_serv ใช้สูตรเดียวกับ DRUGPRICE/DATE_SERV
  */
 export function ipAnDruCheckSql(n: number) {
   const s = ipAnExportSql("DRU", n);
