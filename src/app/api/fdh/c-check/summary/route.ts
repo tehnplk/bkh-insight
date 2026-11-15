@@ -2,9 +2,11 @@ import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
 import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_lib/fund";
 import { FILE_ORDER, codeLevel, parseType, type Level, type SummaryResponse } from "../files";
-import { RULES, countDef, ruleSummarySql } from "../checks";
+import { RULES, countDef, itemFiles, ruleParams, ruleSummarySql } from "../checks";
+import { closedByRange } from "../closed";
 
 type Count = Record<string, string | number | null>;
+type RuleCount = { c_code: string; fdh_file: string; n: number };
 const RANK: Level[] = ["info", "warn", "error"];
 
 /** GET ?type=op|ip&start=&end= จำนวนแถวและจำนวนเคสที่ติดกฎของทุกแฟ้มในหมวด (left tab + badge) */
@@ -15,20 +17,24 @@ export async function GET(request: NextRequest) {
   if (!type) return badRequest("type ต้องเป็น op หรือ ip");
   const range = parseRange(params);
   if (!range.ok) return badRequest(range.error);
-  const dates = [range.range.start, range.range.end];
+  const { start, end } = range.range;
+  const dates = [start, end];
 
   const files = FILE_ORDER[type];
   // ADP/PHDB/DRU ใช้ statement เดียวกัน จึงรันครั้งเดียว และ pool ของ his มี 3 connection จึงรันพร้อมกันไม่เกิน 3 statement
   const statements = [...new Set(files.map((f) => countDef(type, f).sql))];
+  // กฎ: แฟ้มที่ไม่อ่าน opitemrece รวม statement เดียว ส่วนแฟ้ม items รันทีละแฟ้ม
+  const ruleSql = [ruleSummarySql(type), ...itemFiles(type).map((f) => ruleSummarySql(type, f))];
   try {
-    const [rules, ...counts] = await Promise.all([
-      hisQuery<{ c_code: string; fdh_file: string; n: number }>(ruleSummarySql(type), dates),
-      ...statements.map((sql) => hisQuery<Count>(sql, dates)),
+    const rp = ruleParams(start, end, [], type === "op" ? await closedByRange(start, end) : []);
+    const [counts, ruleRows] = await Promise.all([
+      Promise.all(statements.map((sql) => hisQuery<Count>(sql, dates))),
+      Promise.all(ruleSql.map((sql) => hisQuery<RuleCount>(sql, rp))),
     ]);
     const bySql = new Map(statements.map((sql, i) => [sql, counts[i][0]]));
     const cases = new Map<string, number>();
     const level = new Map<string, Level>();
-    for (const r of rules) {
+    for (const r of ruleRows.flat()) {
       cases.set(r.fdh_file, (cases.get(r.fdh_file) ?? 0) + Number(r.n));
       const l = codeLevel(r.c_code), cur = level.get(r.fdh_file);
       if (!cur || RANK.indexOf(l) > RANK.indexOf(cur)) level.set(r.fdh_file, l);

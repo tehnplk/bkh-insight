@@ -2,13 +2,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FDH_TYPES, FILE_ORDER, RULE_CODE_COUNT, STP_RULES, cLabel, codeLevel, compareCode, isFile, parseType } from "./files.ts";
-import { CASE_LIMIT, RULES, casesSql, countDef, maskCid, maskFound, ruleCodes, ruleSummarySql } from "./checks.ts";
+import { CASE_LIMIT, RULES, casesSql, countDef, itemFiles, maskCid, maskFound, ruleCodes, ruleParams, ruleSummarySql } from "./checks.ts";
 
 const H = "WITH p AS (SELECT CAST(? AS DATE) AS s, CAST(? AS DATE) AS e)";
-// mysql2 แทน `?` ตามลำดับ: สองตัวแรกต้องเป็นวันที่ใน H ส่วน `?` อื่น (ใน regex) ต้องอยู่หลัง H
-const assertParams = (sql) => {
+const H4 = `${H},
+sel AS (SELECT j.k FROM JSON_TABLE(?, '$[*]' COLUMNS (k BIGINT PATH '$')) j),
+cl AS (SELECT j.k FROM JSON_TABLE(?, '$[*]' COLUMNS (k BIGINT PATH '$')) j)`;
+const qCount = (sql) => sql.split("?").length - 1;
+// mysql2 แทน `?` ตามลำดับโดยไม่สนเครื่องหมายคำพูด: นับแถว = [start, end] ; กฎ = [start, end, selJson, closedJson] และห้ามมี `?` อื่น
+const assertCount = (sql) => {
   assert.ok(sql.startsWith(H), sql.slice(0, 80));
   assert.ok(!sql.includes("${"), "template literal ไม่ถูกแทน");
+};
+const assertRule = (sql, label) => {
+  assert.ok(sql.startsWith(H4), `${label}: ${sql.slice(0, 80)}`);
+  assert.ok(!sql.includes("${"), `${label}: template literal ไม่ถูกแทน`);
+  assert.equal(qCount(sql), 4, `${label}: ? ต้องมี 4 ตัวพอดี`);
+  assert.ok(!/CAST\(\? AS JSON\)/.test(sql), `${label}: MariaDB ไม่รองรับ CAST AS JSON`);
 };
 
 test("type and file whitelist", () => {
@@ -24,6 +34,10 @@ test("type and file whitelist", () => {
   assert.equal(cLabel("STP-R175"), "STP-R175");
   assert.deepEqual(["STP-R111", "STP-AUTH", "116", "STP-R108", "105"].sort(compareCode), ["105", "116", "STP-AUTH", "STP-R108", "STP-R111"]);
   assert.equal(codeLevel("116"), "error");
+  assert.equal(codeLevel("514"), "error");
+  assert.equal(codeLevel("555"), "warn");
+  assert.equal(codeLevel("305"), "warn");
+  assert.equal(codeLevel("349"), "info");
   assert.equal(codeLevel("STP-R175"), "error");
   assert.equal(codeLevel("STP-R112"), "warn");
   assert.equal(codeLevel("STP-AUTH"), "info");
@@ -33,7 +47,8 @@ test("every file has one count statement starting with the date params", () => {
   for (const t of FDH_TYPES) {
     for (const f of FILE_ORDER[t]) {
       const { sql, col } = countDef(t, f);
-      assertParams(sql);
+      assertCount(sql);
+      assert.equal(qCount(sql), 2, `${t}/${f}`);
       assert.ok(sql.includes(` AS ${col}`), `${t}/${f}`);
     }
   }
@@ -46,14 +61,17 @@ test("every file has one count statement starting with the date params", () => {
   assert.ok(countDef("ip", "ADP").sql.includes("FORCE INDEX (ix_an)"));
 });
 
-test("ruleCodes match the codes written in each block, C160/C161 are off", () => {
+test("ruleCodes match the codes written in each block, C160/C161 and dropped codes are off", () => {
   const all = new Set();
   for (const t of FDH_TYPES) {
     for (const [file, rule] of Object.entries(RULES[t])) {
       assert.ok(FILE_ORDER[t].includes(file), `${t}/${file}`);
+      // arm แบบ SELECT '<code>', '<FILE>' ต้องอยู่ใน codes ; ADP op และ CHA เป็น arm เดียวหลายรหัส จึงเช็คว่าทุกรหัสอยู่ใน SQL
       const inSql = [...rule.sql.matchAll(/SELECT '([\w-]+)'(?: AS c_code)?, '([A-Z]+)'/g)];
-      assert.deepEqual(inSql.map((m) => m[1]), rule.codes, `${t}/${file}`);
+      assert.ok(inSql.every((m) => rule.codes.includes(m[1])), `${t}/${file} รหัสใน SQL ไม่อยู่ใน codes`);
       assert.ok(inSql.every((m) => m[2] === file), `${t}/${file} fdh_file`);
+      for (const c of rule.codes) assert.ok(rule.sql.includes(`'${c}'`), `${t}/${file} ไม่มี ${c} ใน SQL`);
+      assert.equal(new Set(rule.codes).size, rule.codes.length, `${t}/${file} codes ซ้ำ`);
       rule.codes.forEach((c) => all.add(c));
     }
   }
@@ -62,28 +80,53 @@ test("ruleCodes match the codes written in each block, C160/C161 are off", () =>
   // กฎ STP ทุกตัวมีคำอธิบาย/วิธีแก้ และทุกคำอธิบายมีกฎ
   assert.deepEqual(stp.sort(), Object.keys(STP_RULES).sort());
   assert.ok(!ruleSummarySql("ip").includes("STP-R112"), "R112 เป็นกฎ OP เท่านั้น");
-  assert.ok(!all.has("160") && !all.has("161"));
-  assert.deepEqual(ruleCodes("op", "INS"), ["127", "STP-R175", "STP-AUTH"]);
+  for (const c of ["160", "161", "106", "108", "115", "117", "438", "515"]) assert.ok(!all.has(c), c);
+  assert.deepEqual(ruleCodes("op", "INS"), ["127", "305", "349", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("ip", "INS"), ["125", "STP-R175", "STP-AUTH"]);
-  assert.deepEqual(ruleCodes("op", "CHA"), []);
+  assert.deepEqual(ruleCodes("op", "CHA"), ["302", "555"]);
+  assert.deepEqual(ruleCodes("op", "ADP"), ["171", "514", "301", "234", "357", "634", "756", "STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"]);
+  assert.deepEqual(ruleCodes("op", "ORF"), ["STP-R113"]);
   assert.ok(!ruleSummarySql("ip").includes("SVCTYPE"));
 });
 
-test("rule SQL assembly", () => {
+test("rule SQL assembly: 4 params, base without opitemrece, items one statement per file, sel filter before LIMIT", () => {
   for (const t of FDH_TYPES) {
-    const all = ruleSummarySql(t);
-    assertParams(all);
-    assert.ok(all.endsWith(") r GROUP BY c_code, fdh_file"));
+    const items = itemFiles(t);
+    assert.deepEqual(items, ["ADP", "DRU", "CHA", "CHT"], t);
+    const base = ruleSummarySql(t);
+    assertRule(base, `${t} base`);
+    assert.ok(base.endsWith(") r GROUP BY c_code, fdh_file"));
+    assert.ok(!base.includes("opitemrece"), `${t} base แตะ opitemrece`);
     for (const file of Object.keys(RULES[t])) {
-      assert.ok(all.includes(`'${file}' AS fdh_file`));
+      const isItems = items.includes(file);
+      assert.equal(base.includes(`'${file}' AS fdh_file`), !isItems, `${t}/${file} in base`);
+      assertRule(ruleSummarySql(t, file), `${t}/${file} summary`);
       const cases = casesSql(t, file);
-      assertParams(cases);
+      assertRule(cases, `${t}/${file} cases`);
       assert.ok(cases.endsWith(`ORDER BY c_code, hn, an, seq LIMIT ${CASE_LIMIT}`));
+      assert.ok(cases.includes(") r\nWHERE NOT EXISTS (SELECT 1 FROM sel) OR "), `${t}/${file} sel`);
+      assert.ok(cases.includes(file === "PAT" ? "r.hn IN (SELECT" : `CAST(r.${t === "op" ? "seq" : "an"} AS UNSIGNED) IN (SELECT k FROM sel)`));
+      if (isItems) assert.ok(cases.includes(t === "op" ? "opitemrece op FORCE INDEX (ix_vstdate)" : "opitemrece op FORCE INDEX (ix_an)"), `${t}/${file}`);
+      else assert.ok(!cases.includes("opitemrece"), `${t}/${file} base แตะ opitemrece`);
       // เฉพาะ block ของแฟ้มนั้น
       for (const other of Object.keys(RULES[t])) if (other !== file) assert.ok(!cases.includes(`'${other}' AS fdh_file`));
     }
   }
-  assert.ok(ruleSummarySql("ip", "IPD").includes("NOT REGEXP '^0?[1-9]$'"));
+  assert.ok(ruleSummarySql("ip", "IPD").includes("NOT REGEXP '^0{0,1}[1-9]$'"));
+  // C305/C349 อ่าน ovst ตามวันที่ด้วย index เสมอ และเทียบ VN เป็นตัวเลข (ไม่ CAST AS CHAR)
+  const ins = casesSql("op", "INS");
+  assert.equal(ins.split("ovst o FORCE INDEX (ix_vstdate)").length - 1, 2);
+  assert.ok(ins.includes("CAST(o.vn AS UNSIGNED) NOT IN (SELECT k FROM cl)") && !/CAST\([^)]* AS CHAR\)/.test(ins));
+});
+
+test("ruleParams: JSON arrays of numbers", () => {
+  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-30", "[]", "[]"]);
+  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30", ["690915083012", "690915090144"], ["690915083012"]), [
+    "2026-09-01",
+    "2026-09-30",
+    "[690915083012,690915090144]",
+    "[690915083012]",
+  ]);
 });
 
 test("CID is masked for C104/C116 only", () => {
@@ -94,4 +137,15 @@ test("CID is masked for C104/C116 only", () => {
   assert.equal(maskFound("104", " "), "x");
   assert.equal(maskFound("104", null), null);
   assert.equal(maskFound("101", "นายสมชาย "), "นายสมชาย ");
+});
+
+test("ins.PERMITNO of C127/C125 uses the same CASE as the exported INS.PERMITNO", async () => {
+  const { exportSql } = await import("../files/sql.ts");
+  const norm = (s) => s.replace(/\s+/g, " ").replace(/\ba\.VN\b/g, "a.vn");
+  for (const t of FDH_TYPES) {
+    const exported = exportSql(t, "INS").match(/CASE WHEN t\.hipdata_code = 'UCS'.*? END AS `PERMITNO`/s)[0].replace(" AS `PERMITNO`", "");
+    const checked = ruleSummarySql(t, "INS").match(/CASE WHEN t\.hipdata_code = 'UCS'.*? END AS PERMITNO/s)[0].replace(" AS PERMITNO", "");
+    assert.equal(norm(checked), norm(exported), t);
+  }
+  assert.ok(!ruleSummarySql("op").includes("ovstost"), "UUC = '1' เหมือนแฟ้มส่งออก");
 });
