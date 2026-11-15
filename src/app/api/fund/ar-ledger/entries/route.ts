@@ -11,6 +11,7 @@ import { KIND_LABEL, monthRange, type LedgerKind, type PatientType } from "../..
 export type LedgerEntry = {
   id: string;
   entry_date: string;
+  orig_entry_date: string | null; // วันที่เดิมเมื่อ trigger เลื่อนเข้างวดเปิดเพราะงวดเดิมปิดแล้ว
   kind: LedgerKind;
   ref: string;
   vn: string | null;
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
   const args = [...base, ...cfw.params];
   if (facet) return Response.json(await loadFacet(insightQuery, FILTER_DEFS, facet, facetQ, "FROM ar_ledger", { sql: where, params: args }, "pg"));
   // sort มาจาก allowlist จึงใช้เป็นชื่อคอลัมน์ได้
-  const select = `SELECT id, entry_date, kind, ref, vn, an, patient_type, ref_date, pttype, hipdata_code, hospmain, amount, note
+  const select = `SELECT id, entry_date, orig_entry_date, kind, ref, vn, an, patient_type, ref_date, pttype, hipdata_code, hospmain, amount, note
 FROM ar_ledger ${where}
 ORDER BY ${sort ?? "entry_date"} ${dir === "desc" ? "DESC" : "ASC"} NULLS LAST, id`;
 

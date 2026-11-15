@@ -9,7 +9,7 @@ import { THAI_MONTHS_SHORT, formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { DataFreshness } from "../_components/freshness";
-import { AdjustRequestForm, AdjustRequests, Journal } from "./ar-ledger-extras";
+import { AdjustRequestForm, AdjustRequests, Journal, TrialBalance } from "./ar-ledger-extras";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
 import type { AccountBalance, ArLedgerSummary } from "@/app/api/fund/ar-ledger/route";
@@ -164,7 +164,10 @@ function LedgerDetail({ row, account }: { row: LedgerEntry; account: ReactNode }
   return (
     <div className="text-sm">
       <Facts>
-        <Fact label="วันที่ลงบัญชี">{formatThaiDate(row.entry_date)}</Fact>
+        <Fact label="วันที่ลงบัญชี">
+          {formatThaiDate(row.entry_date)}
+          {row.orig_entry_date && <span className="block text-xs text-muted">เลื่อนจาก {formatThaiDate(row.orig_entry_date)} เพราะงวดนั้นปิดแล้ว</span>}
+        </Fact>
         <Fact label="ประเภท">{KIND_LABEL[row.kind]}</Fact>
         {row.patient_type === "OP" && <Fact label="เลขที่ลูกหนี้">{row.ref}</Fact>}
         <Fact label="วันตั้งหนี้/จำหน่าย">{formatThaiDate(row.ref_date)}</Fact>
@@ -288,6 +291,7 @@ export function ArLedger() {
             </section>
           )}
           <Journal month={d.month} monthText={monthLabel(d.month)} />
+          <TrialBalance month={d.month} monthText={monthLabel(d.month)} />
           <AdjustRequests />
         </div>
       )}
