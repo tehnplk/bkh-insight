@@ -554,9 +554,9 @@ const selWhere = (type: FdhType, file: string) =>
       : `CAST(r.${type === "op" ? "seq" : "an"} AS UNSIGNED) IN (SELECT k FROM sel)`
   }`;
 
-/** รายเคสของแฟ้ม (ต้องมีกฎ) ไม่เกิน CASE_LIMIT แถว params ruleParams() */
-export const casesSql = (type: FdhType, file: string) =>
-  `${prefix(!!RULES[type][file].items, type)}\nSELECT c_code, hn, an, seq, found FROM (\n${RULES[type][file].sql}\n) r\nWHERE ${selWhere(type, file)}\nORDER BY c_code, hn, an, seq LIMIT ${CASE_LIMIT}`;
+/** รายเคสของแฟ้ม (ต้องมีกฎ) ไม่เกิน limit แถว params ruleParams() ; modal ส่ง CASE_LIMIT + 1 เพื่อรู้ว่าถูกตัดจริงหรือไม่ */
+export const casesSql = (type: FdhType, file: string, limit = CASE_LIMIT) =>
+  `${prefix(!!RULES[type][file].items, type)}\nSELECT c_code, hn, an, seq, found FROM (\n${RULES[type][file].sql}\n) r\nWHERE ${selWhere(type, file)}\nORDER BY c_code, hn, an, seq LIMIT ${Math.trunc(limit)}`;
 
 /**
  * params ของทุก statement กฎ: [start, end, selJson, closedJson] ; sel = VN (op) / AN (ip) ที่เลือก ว่าง = ทั้งช่วง ;

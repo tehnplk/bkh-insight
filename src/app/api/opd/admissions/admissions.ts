@@ -4,8 +4,10 @@ import type { GridPage } from "@/lib/grid-query";
 
 /** ช่วงวันรับบริการยาวสุด: เท่าหน้าอื่น (31) เพราะ 16 แฟ้มของผู้ป่วยนอกอ่าน opitemrece ตามช่วงวันที่ */
 export const OPD_MAX_DAYS = 31;
-/** ดู/ตรวจ 16 แฟ้มได้สูงสุดต่อครั้ง */
-export const MAX_EXPORT_VNS = 500;
+/** VN ต่อ request ของ 16 แฟ้ม (ดู/ตรวจ/ส่งออก) modal แบ่งชุดเอง: วัดแล้ว statement ช้าสุด ~1.6 วินาทีเมื่อเรียง VN ตามวัน */
+export const MAX_EXPORT_VNS = 1000;
+/** เลือกส่ง FDH ได้รวมสูงสุด (modal ยิงทีละชุด MAX_EXPORT_VNS) เพดานจากขนาดข้อมูลที่ browser ถือ */
+export const MAX_SELECT_VNS = 5000;
 
 /** สถานะปิดสิทธิ (หลักเดียวกับ /fund/claim-status): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
 export type ClaimStatus = "closed" | "authen_only" | "none";

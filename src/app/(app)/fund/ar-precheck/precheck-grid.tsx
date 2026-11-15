@@ -6,11 +6,11 @@ import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
+import { Money, focusRing, num, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { CaseResync } from "../_components/case-resync";
 import {
-  STATUS_LABEL,
+  STATUS_LABEL, lockLabel,
   type PrecheckPage, type PrecheckRow, type PrecheckStatus, type PrecheckTotals, type PrecheckType,
 } from "@/app/api/fund/ar-precheck/precheck";
 
@@ -22,9 +22,22 @@ const TONE = {
   danger: "border-danger-line bg-danger-soft text-danger",
   warning: "border-warning-line bg-warning-soft text-warning",
   success: "border-success-line bg-success-soft text-success",
+  muted: "border-line bg-surface-sunken text-muted",
 };
+// รอขั้นตอนปกติของ HOSxP = muted, ต้องตามแต่ไม่ใช่ใบลูกหนี้ผิด = warning, ต้องแก้ใบลูกหนี้/รายการ = danger
 const STATUS_TONE: Record<PrecheckStatus, keyof typeof TONE> = {
-  no_stat: "danger", total: "danger", split: "danger", debt: "danger", unlocked: "warning", unpaid: "warning", ok: "success",
+  no_stat: "danger", stale_slip: "danger", admitted: "muted", overdue_lock: "warning", pending_lock: "muted",
+  total: "danger", stale_stat: "warning", split: "danger", keyed_after: "danger", debt: "danger",
+  unlocked: "warning", unpaid: "warning", ok: "success",
+};
+/** วิธีแก้ แสดงใน modal รายละเอียดของแถว */
+const STATUS_HINT: Partial<Record<PrecheckStatus, string>> = {
+  stale_slip: "ยกเลิกใบลูกหนี้ผู้ป่วยนอกใน HOSxP แล้วกดดึงใหม่",
+  admitted: "รายการย้ายไป AN แล้ว ตรวจยอดที่ผู้ป่วยใน",
+  overdue_lock: "เกิน 3 วันทำการหลังวันรับบริการแล้วยังไม่ล็อกรายการใน HOSxP",
+  pending_lock: "HOSxP ล็อกรายการทุกวันราว 16.00 น. ตรวจอีกครั้งหลังล็อก",
+  stale_stat: "ใบลูกหนี้ตรงกับรายการลูกหนี้แล้ว ยอดสรุปของ HOSxP ยังเป็นค่าเดิม ไม่ต้องแก้ใบลูกหนี้",
+  keyed_after: "ออกใบลูกหนี้เพิ่มสำหรับรายการที่คีย์หลังออกใบ แล้วกดดึงใหม่",
 };
 const TYPES = [
   { value: "opd", label: "ผู้ป่วยนอก", date: "วันที่รับบริการ" },
@@ -42,7 +55,7 @@ const money = (key: MoneyKey, header: string) =>
 const diff = (key: "diff_total" | "diff_debt", header: string) =>
   col.accessor(key, { header: `${header} (บาท)`, cell: (c) => <Diff value={c.getValue()} />, meta: { className: num } });
 const text = (key: "vn" | "an" | "hn" | "patient_name", header: string) =>
-  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: nowrap });
+  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: key === "patient_name" ? nowrap : { ...nowrap, filter: true } });
 const dateCol = (header: string) =>
   col.accessor("date", { header, cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } });
 const rights = [
@@ -60,6 +73,12 @@ const amounts = [
   money("debt", "ตั้งหนี้แล้ว"),
   diff("diff_debt", "ส่วนต่างลูกหนี้"),
   money("booked", "ลงสมุดแล้ว"),
+  col.accessor("finance_lock", {
+    header: "ล็อกรายการ",
+    enableSorting: false,
+    cell: (c) => <span className={c.getValue() === "Y" ? undefined : "text-muted"}>{lockLabel(c.getValue())}</span>,
+    meta: nowrap,
+  }),
   col.accessor("status", { header: "สถานะ", cell: (c) => <Status status={c.getValue()} />, meta: { filter: true } }),
 ];
 
@@ -87,7 +106,9 @@ const renderDetail = (r: PrecheckRow) => {
         <Fact label="ส่วนต่างค่าใช้จ่าย (บาท)"><Diff value={r.diff_total} /></Fact>
         <Fact label="ส่วนต่างลูกหนี้ (บาท)"><Diff value={r.diff_debt} /></Fact>
         <Fact label="ลงสมุดแล้ว (บาท)"><Money value={r.booked} /></Fact>
+        <Fact label="ล็อกรายการ">{lockLabel(r.finance_lock)}</Fact>
       </Facts>
+      {STATUS_HINT[r.status] && <p className="mt-2">{STATUS_HINT[r.status]}</p>}
       {/* แถว IPD ไม่มี vn ; OPD ที่ admit แล้วดึงตาม vn ของ visit */}
       <CaseResync vn={r.vn} an={r.vn ? null : r.an} />
       {/* visit ที่ admit แล้วดูรายการของ vn (OPD) ถ้ายังอยู่ที่ vn ; IPD ไม่มี vn จึงใช้ an */}
@@ -230,85 +251,21 @@ function Summary({ data, onOpen }: { data: PrecheckPage; onOpen: (p: Scope) => v
   );
 }
 
-const MODAL_ROWS = 100;
-
-/** รายของกองทุน/สถานะที่เลือกจากแถบสรุป: ตารางธรรมดา ไม่ใช่ DataGrid เพราะ DataGrid ตัวที่สองใช้ state ใน URL ร่วมกับตารางหลัก */
+/** รายของกองทุน/สถานะที่เลือกจากแถบสรุป: DataGrid แบบ localState จึงไม่ใช้ state ใน URL ร่วมกับตารางหลัก */
 function PickRows({ type, start, end, pick }: { type: PrecheckType; start: string; end: string; pick: Scope }) {
-  const query = new URLSearchParams({ type, start, end, sort: "date" });
-  if (pick.fund) query.set("cf", JSON.stringify({ fund: [pick.fund] }));
-  if (pick.mismatch) query.set("only", "mismatch");
-  // shortcut: แสดงได้แค่ MAX_PAGE_SIZE (100) แถวแรก ที่เหลือให้ส่งออก Excel ; ถ้าผู้ใช้ต้องไล่ดูในนี้เยอะค่อยเพิ่มแบ่งหน้า
-  const { loading, data, error, retry } = useJson<PrecheckPage>(`/api/fund/ar-precheck?${query}&pageSize=${MODAL_ROWS}`);
-  const [row, setRow] = useState<PrecheckRow | null>(null);
-  const t = TYPES.find((x) => x.value === type)!;
-
-  if (loading) return <Skeleton rows={6} />;
-  if (error || !data)
-    return <Notice title="โหลดรายการไม่สำเร็จ" detail={error} action={<button type="button" onClick={retry} className={btn}>ลองใหม่</button>} />;
-  if (!data.total) return <Notice title="ไม่มีรายการ" />;
   return (
-    <div className="flex flex-col gap-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="tabular-nums">
-          {formatCount(data.total)} ราย
-          {data.total > data.rows.length && (
-            <span className="text-muted"> · แสดง {formatCount(data.rows.length)} รายแรกตาม{t.date} ดูทั้งหมดในไฟล์ Excel</span>
-          )}
-        </p>
-        <a href={`/api/fund/ar-precheck?${query}&format=xlsx`} className={btn}>ส่งออก Excel</a>
-      </div>
-      <div className={box}>
-        <table className="w-full border-collapse tabular-nums">
-          <caption className="sr-only">รายการ</caption>
-          <thead className="bg-surface-sunken text-left text-xs text-muted">
-            <tr>
-              <th className={th}>{t.date}</th>
-              <th className={th}>{type === "opd" ? "VN" : "AN"}</th>
-              <th className={th}>HN</th>
-              <th className={th}>ชื่อ-สกุล</th>
-              <th className={th}>กองทุน</th>
-              <th className={`${th} ${num}`}>ค่าใช้จ่าย ใบสั่งยา (บาท)</th>
-              <th className={`${th} ${num}`}>ค่าใช้จ่าย สรุป (บาท)</th>
-              <th className={`${th} ${num}`}>ส่วนต่างค่าใช้จ่าย (บาท)</th>
-              <th className={`${th} ${num}`}>ลูกหนี้ สรุป (บาท)</th>
-              <th className={`${th} ${num}`}>ตั้งหนี้แล้ว (บาท)</th>
-              <th className={`${th} ${num}`}>ส่วนต่างลูกหนี้ (บาท)</th>
-              <th className={th}>สถานะ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((r) => (
-              <tr key={r.key} className="border-t border-line hover:bg-hover">
-                <td className={`${td} whitespace-nowrap`}>{formatThaiDate(r.date)}</td>
-                <td className={td}>
-                  <button
-                    type="button"
-                    onClick={() => setRow(r)}
-                    aria-label={`รายละเอียด ${type === "opd" ? `VN ${r.vn}` : `AN ${r.an}`}`}
-                    className={`rounded-sm whitespace-nowrap text-accent-text underline-offset-2 hover:underline ${focusRing}`}
-                  >
-                    {type === "opd" ? r.vn : r.an}
-                  </button>
-                </td>
-                <td className={`${td} whitespace-nowrap`}>{r.hn}</td>
-                <td className={`${td} whitespace-nowrap`}>{r.patient_name || dash}</td>
-                <td className={`${td} whitespace-nowrap`} title={r.fund_name}>{r.fund}</td>
-                <td className={`${td} ${num}`}><Money value={r.rx_total} /></td>
-                <td className={`${td} ${num}`}><Money value={r.income} /></td>
-                <td className={`${td} ${num}`}><Diff value={r.diff_total} /></td>
-                <td className={`${td} ${num}`}><Money value={r.uc_money} /></td>
-                <td className={`${td} ${num}`}><Money value={r.debt} /></td>
-                <td className={`${td} ${num}`}><Diff value={r.diff_debt} /></td>
-                <td className={td}><Status status={r.status} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <DetailModal open={!!row} onClose={() => setRow(null)} title={row && detailTitle(row)} size="medium">
-        {row && renderDetail(row)}
-      </DetailModal>
-    </div>
+    <DataGrid<PrecheckRow>
+      endpoint="/api/fund/ar-precheck"
+      params={{ type, start, end, only: pick.mismatch ? "mismatch" : "" }}
+      localState={pick.fund ? { pageSize: "100", cf: JSON.stringify({ fund: [pick.fund] }) } : { pageSize: "100" }}
+      columns={COLUMNS[type]}
+      getRowId={(r) => r.key}
+      renderDetail={renderDetail}
+      detailTitle={detailTitle}
+      detailSize="medium"
+      fitScreen
+      pinColumns={3}
+    />
   );
 }
 

@@ -40,8 +40,10 @@ export async function POST(request: NextRequest) {
       const adm = await hisQuery<{ dchdate: string }>(`SELECT dchdate FROM ipt WHERE ${inList("an", anList.length)}`, anList);
       if (adm.length) {
         const days = adm.map((a) => a.dchdate.slice(0, 10)).sort();
-        const cases = await hisQuery<CaseRow>(casesSql("ip", file), ruleParams(days[0], days.at(-1)!, anList));
-        result.truncated = cases.length >= CASE_LIMIT;
+        // ขอเกิน 1 แถว: ได้ครบ CASE_LIMIT พอดีจะไม่ขึ้นว่าถูกตัด
+        const rows = await hisQuery<CaseRow>(casesSql("ip", file, CASE_LIMIT + 1), ruleParams(days[0], days.at(-1)!, anList));
+        const cases = rows.slice(0, CASE_LIMIT);
+        result.truncated = rows.length > CASE_LIMIT;
         result.findings = cases.map((c) => ({ an: c.an || null, hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));
       }
     }

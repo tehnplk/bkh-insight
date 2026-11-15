@@ -156,8 +156,10 @@ export type AdmissionDetail = { diags: DiagRow[]; opers: OperRow[] };
 /** ช่วงวันจำหน่ายยาวสุดที่หน้านี้ยอม (หน้าอื่น 31 วัน) ยาวได้เพราะ query ไม่อ่าน opitemrece ตามช่วงวันที่ ใช้ทั้งหน้าและ API */
 export const IPD_MAX_DAYS = 90;
 
-/** ส่งออก 16 แฟ้ม (zip) ได้สูงสุดต่อครั้ง: จำกัดขนาด IN list ของ his และเวลาที่ opitemrece ถูกอ่าน */
-export const MAX_EXPORT_ANS = 500;
+/** AN ต่อ request ของ 16 แฟ้ม (ดู/ตรวจ/ส่งออก): จำกัดขนาด IN list ของ his และเวลาที่ opitemrece ถูกอ่าน modal แบ่งชุดเอง */
+export const MAX_EXPORT_ANS = 1000;
+/** เลือกส่ง FDH ได้รวมสูงสุด (~28 MB ข้อความใน browser) modal ยิงทีละชุด MAX_EXPORT_ANS */
+export const MAX_SELECT_ANS = 2000;
 
 /** ข้อมูล 16 แฟ้มของ AN ที่เลือก (POST /api/ipd/fdh-export format "json") ค่าแต่ละช่องตามที่ SQL ของแฟ้มคืน */
 export type FdhPreview = { files: { file: string; columns: string[]; rows: Record<string, string | number | null | undefined>[] }[] };

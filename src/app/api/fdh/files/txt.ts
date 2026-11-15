@@ -1,6 +1,11 @@
 // รูปแบบไฟล์ .txt ของ 16 แฟ้ม (pure ไม่มี import) ใช้ได้ทั้ง server (route ส่งออก) และ client (สร้าง zip ใน browser)
 // ตัวคั่น | หัวคอลัมน์บรรทัดแรก CRLF ตามโค้ดของ รพ. ที่ส่ง FDH จริง (ยังไม่มีสเปกทางการเรื่องรูปแบบไฟล์)
 
+/** Excel ของ modal 16 แฟ้ม (/api/fdh/files/xlsx) ได้รวมทุก sheet ไม่เกินนี้ ; modal ปิดปุ่มเมื่อเกิน (zip ยังใช้ได้) */
+export const XLSX_MAX_ROWS = 100_000;
+/** body ของ xlsx ต้องต่ำกว่า proxyClientMaxBodySize (32mb ใน next.config.ts) ไม่งั้น proxy ตัด body เงียบ */
+export const XLSX_MAX_BODY = 30 * 1024 * 1024;
+
 type Cell = string | number | null | undefined;
 export type FileRow = Record<string, Cell>;
 

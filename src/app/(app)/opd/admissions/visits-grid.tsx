@@ -10,7 +10,7 @@ import { usePersistedFilter } from "@/lib/persisted-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
-import { MAX_EXPORT_VNS, OPD_MAX_DAYS, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
+import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
 import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { FundSelect } from "@/app/(app)/ipd/admissions/admissions-grid";
@@ -169,7 +169,7 @@ function PreviewButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
-      disabled={!n || n > MAX_EXPORT_VNS}
+      disabled={!n || n > MAX_SELECT_VNS}
       onClick={onOpen}
       title={n ? undefined : "ติ๊กเลือก visit ที่จะส่ง FDH ในตารางก่อน"}
       className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -193,9 +193,9 @@ function SelectionBar({ onClear }: { onClear: () => void }) {
           ล้างที่เลือก
         </button>
       </div>
-      {n > MAX_EXPORT_VNS && (
+      {n > MAX_SELECT_VNS && (
         <p role="alert" className="text-xs text-danger">
-          เลือกได้ไม่เกิน {formatCount(MAX_EXPORT_VNS)} visit ต่อครั้ง
+          เลือกได้ไม่เกิน {formatCount(MAX_SELECT_VNS)} visit ต่อครั้ง
         </p>
       )}
     </div>
@@ -228,6 +228,7 @@ export function VisitsGrid({ pttypeOptions, depOptions }: { pttypeOptions: CodeO
         previewUrl="/api/opd/fdh-export"
         checkUrl="/api/opd/fdh-check"
         zipPrefix="op"
+        chunkSize={MAX_EXPORT_VNS}
         unit="visit"
       />
       <DataGrid<VisitRow, VisitsPage>

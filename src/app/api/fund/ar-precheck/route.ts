@@ -2,10 +2,11 @@ import type { NextRequest } from "next/server";
 import { cacheLife } from "next/cache";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
+import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { FULL_NAME_SQL, badRequest, fundOf, isAuthed, loadLookups, parseRange, pttypeName, unauthorized } from "../_lib/fund";
 import {
-  ADMIT_LABEL, STATUS_LABEL, buildRows, matches, sortRows, summarize,
+  ADMIT_LABEL, STATUS_LABEL, buildRows, isMismatch, lockLabel, matches, sortRows, summarize,
   type Booked, type PrecheckRow, type PrecheckPage, type PrecheckSource, type PrecheckStatus, type PrecheckType, type RxSum,
 } from "./precheck";
 
@@ -19,6 +20,9 @@ const FILTER_GET = {
   pttype_name: (r) => r.pttype_name,
   status: (r) => r.status,
   admit: (r) => r.admit,
+  vn: (r) => r.vn,
+  an: (r) => r.an,
+  hn: (r) => r.hn,
 } satisfies RowGetters<PrecheckRow, string>;
 type FilterKey = keyof typeof FILTER_GET;
 const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
@@ -31,7 +35,7 @@ type StatCols = { has_stat: number; income: Num; paid_money: Num; rcpt_money: Nu
 const RX_COLS = `COUNT(*) AS n_items, SUM(sum_price) AS rx_total,
   SUM(IF(paidst IN ('00','01','03'), sum_price, 0)) AS rx_pay, SUM(IF(paidst = '02', sum_price, 0)) AS rx_debt`;
 const OP_RX = `SELECT vn AS \`key\`, ${RX_COLS} FROM opitemrece FORCE INDEX (ix_vstdate) WHERE vstdate BETWEEN ? AND ? AND vn IS NOT NULL GROUP BY vn`;
-const OP_VISITS = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.pttype, NULLIF(o.an, '') AS an,
+const OP_VISITS = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.pttype, NULLIF(o.an, '') AS an, o.finance_lock,
   vs.vn IS NOT NULL AS has_stat, vs.income, vs.paid_money, vs.rcpt_money, vs.uc_money,
   (SELECT SUM(r.amount) FROM rcpt_debt r WHERE r.vn = o.vn AND (r.status IS NULL OR r.status <> 'ABORT')) AS debt_amount
 FROM ovst o LEFT JOIN vn_stat vs ON vs.vn = o.vn LEFT JOIN patient p ON p.hn = o.hn
@@ -56,7 +60,7 @@ async function chunked<T>(keys: string[], run: (part: string[]) => Promise<T[]>)
 type Loaded = { rows: PrecheckRow[]; ledger_error: string | null };
 
 // HOSxP เปลี่ยนตลอดวันระหว่างแก้ไข จึง cache สั้น (cacheLife "minutes" revalidate ราว 1 นาที) แค่กันโหลดซ้ำตอนเปลี่ยนหน้า/เรียง/กรอง
-async function loadRows(type: PrecheckType, start: string, end: string): Promise<Loaded> {
+async function loadRows(type: PrecheckType, start: string, end: string, today: string): Promise<Loaded> {
   "use cache";
   cacheLife("minutes");
   const lk = await loadLookups();
@@ -70,14 +74,14 @@ async function loadRows(type: PrecheckType, start: string, end: string): Promise
   if (type === "opd") {
     const [items, visits] = await Promise.all([
       hisQuery<RxSum>(OP_RX, [start, end]),
-      hisQuery<StatCols & { vn: string; hn: string; patient_name: string | null; vstdate: string; pttype: string | null; an: string | null; debt_amount: Num }>(
+      hisQuery<StatCols & { vn: string; hn: string; patient_name: string | null; vstdate: string; pttype: string | null; an: string | null; finance_lock: string | null; debt_amount: Num }>(
         OP_VISITS,
         [start, end],
       ),
     ]);
     rx = items;
     sources = visits.map(({ vn, vstdate, pttype, patient_name, ...r }) => ({
-      ...r, ...base(pttype), key: vn, vn, patient_name: patient_name ?? "", date: String(vstdate).slice(0, 10), regdate: null, finance_lock: null,
+      ...r, ...base(pttype), key: vn, vn, patient_name: patient_name ?? "", date: String(vstdate).slice(0, 10), regdate: null,
     }));
   } else {
     const admits = await hisQuery<StatCols & { an: string; hn: string; patient_name: string | null; regdate: string | null; dchdate: string; pttype: string | null; finance_lock: string | null }>(
@@ -100,10 +104,10 @@ async function loadRows(type: PrecheckType, start: string, end: string): Promise
     console.error("ar-precheck: ledger", e);
     ledger_error = "อ่านสมุดลูกหนี้ไม่สำเร็จ";
   }
-  return { rows: buildRows(type, sources, rx, booked), ledger_error };
+  return { rows: buildRows(type, sources, rx, booked, today), ledger_error };
 }
 
-type XlsxRow = PrecheckRow & { status_label: string };
+type XlsxRow = PrecheckRow & { lock_label: string; status_label: string };
 const money = (key: keyof PrecheckRow, header: string): XlsxColumn<XlsxRow> => ({ key, header: `${header} (บาท)`, width: 14, type: "money" });
 const MONEY_COLUMNS: XlsxColumn<XlsxRow>[] = [
   money("rx_total", "ค่าใช้จ่าย ใบสั่งยา"),
@@ -116,6 +120,7 @@ const MONEY_COLUMNS: XlsxColumn<XlsxRow>[] = [
   money("debt", "ตั้งหนี้แล้ว"),
   money("diff_debt", "ส่วนต่างลูกหนี้"),
   money("booked", "ลงสมุดแล้ว"),
+  { key: "lock_label", header: "ล็อกรายการ", width: 12 },
   { key: "status_label", header: "สถานะ", width: 20 },
 ];
 const PERSON: XlsxColumn<XlsxRow>[] = [
@@ -150,8 +155,8 @@ export async function GET(request: NextRequest) {
   if (!cf.ok) return badRequest(cf.error);
   const { filters, facet, facetQ } = cf.query;
 
-  const { rows: all, ledger_error } = await loadRows(type, start, end);
-  const pool = all.filter((r) => (!only || r.status !== "ok") && (!q || matches(r, q)));
+  const { rows: all, ledger_error } = await loadRows(type, start, end, todayIso());
+  const pool = all.filter((r) => (!only || isMismatch(r.status)) && (!q || matches(r, q)));
   if (facet) {
     const labels: Partial<Record<FilterKey, (v: string) => string>> = {
       fund: (v) => {
@@ -167,7 +172,7 @@ export async function GET(request: NextRequest) {
   const rows = sortRows([...filterRows(pool, filters, FILTER_GET)], sort ?? "date", dir);
 
   if (format === "xlsx") {
-    return xlsxResponse(`ar-precheck-${type}-${start}_${end}.xlsx`, XLSX_COLUMNS[type], rows.map((r) => ({ ...r, status_label: STATUS_LABEL[r.status] })));
+    return xlsxResponse(`ar-precheck-${type}-${start}_${end}.xlsx`, XLSX_COLUMNS[type], rows.map((r) => ({ ...r, lock_label: lockLabel(r.finance_lock), status_label: STATUS_LABEL[r.status] })));
   }
   const body: PrecheckPage = {
     rows: rows.slice((page - 1) * pageSize, page * pageSize),

@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
 import ExcelJS from "exceljs";
 import { badRequest, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
+import { XLSX_MAX_ROWS as MAX_ROWS } from "../txt";
 
 const MAX_SHEETS = 20;
 const MAX_COLUMNS = 80;
-const MAX_ROWS = 100_000;
 
 type Sheet = { name: string; columns: string[]; rows: Record<string, unknown>[] };
 
