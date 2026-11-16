@@ -19,7 +19,7 @@ export async function GET() {
     insightQuery<{ at: string | null }>("SELECT to_char(max(finished_at), 'YYYY-MM-DD HH24:MI') AS at FROM ar_sync_log WHERE mode <> 'case' AND finished_at IS NOT NULL AND error IS NULL"),
     insightQuery<{ op: string | null; ip: string | null }>(
       `SELECT to_char(max(admit_at) FILTER (WHERE patient_type = 'OP'), 'YYYY-MM-DD') AS op,
-  to_char(max(discharge_at) FILTER (WHERE patient_type = 'IP'), 'YYYY-MM-DD') AS ip FROM rep_row`,
+  to_char(max(discharge_at) FILTER (WHERE patient_type = 'IP'), 'YYYY-MM-DD') AS ip FROM rep_row WHERE scheme = 'UCS'`,
     ),
     insightQuery<Freshness["stm"][number]>(
       `SELECT DISTINCT ON (scheme, patient_type) scheme, patient_type, period_month::text AS period_month, transfer_date::text AS transfer_date

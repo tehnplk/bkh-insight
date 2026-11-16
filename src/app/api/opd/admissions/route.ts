@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { escapeLike, hisQuery } from "@/lib/db";
+import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
@@ -8,7 +8,8 @@ import {
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
 import { CLAIM_JOINS, STATUS_SQL } from "@/app/api/fund/_lib/claim";
-import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
+import { latestRepSql, repLabel } from "@/app/api/fund/_lib/rep";
+import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -86,7 +87,11 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
 const FILTERABLE = ["vn", "hn", "patient_name", "fund", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no"] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
-const XLSX_COLUMNS: XlsxColumn<VisitRow>[] = [
+// REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
+const REP_SQL = latestRepSql("seq_no", "vn", "OP");
+
+type XlsxRow = VisitRow & Record<"rep_no" | "rep_label", string>;
+const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "vn", header: "VN", width: 14 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
@@ -101,6 +106,8 @@ const XLSX_COLUMNS: XlsxColumn<VisitRow>[] = [
   { key: "pdx_name", header: "ชื่อโรคหลัก", width: 36 },
   { key: "ovst_status", header: "สถานะผู้ป่วย", width: 18 },
   { key: "rcpt_no", header: "เลขที่ใบเสร็จ", width: 16 },
+  { key: "rep_no", header: "เลขที่ REP", width: 14 },
+  { key: "rep_label", header: "สถานะ REP", width: 24 },
   { key: "income", header: "มูลค่า (บาท)", width: 14, type: "money" },
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
@@ -172,9 +179,29 @@ export async function GET(request: NextRequest) {
       hisQuery<RawVisit>(`${SELECT}\n${where}\nORDER BY ${order}\nLIMIT ? OFFSET ?`, [...args, limit, offset]),
       xlsx ? null : hisQuery<{ total: number }>(`SELECT COUNT(*) AS total ${FROM}\n${where}`, args),
     ]);
-    const rows = buildRows(raws, (pttype) => fundOf(lk, pttype));
-    if (xlsx) return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, rows);
-    const body: VisitsPage = { rows, total: Number(count?.[0]?.total ?? 0) };
+    // ดู REP ทุก VN ไม่กรองกองทุน ; อ่าน insight ไม่ได้ = ไม่มีสถานะ REP แต่รายการยังแสดง
+    const vns = raws.map((r) => r.vn).filter(Boolean);
+    let reps: RawOpRep[] | undefined = [];
+    let repError = false;
+    if (vns.length) {
+      try {
+        reps = await insightQuery<RawOpRep>(REP_SQL, [vns]);
+      } catch (e) {
+        console.error("opd/admissions rep", e);
+        reps = undefined;
+        repError = true;
+      }
+    }
+    const rows = buildRows(raws, reps, (pttype) => fundOf(lk, pttype));
+    if (xlsx) {
+      const out: XlsxRow[] = rows.map((r) => ({
+        ...r,
+        rep_no: r.rep?.rep_no ?? "",
+        rep_label: repLabel(r.rep),
+      }));
+      return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
+    }
+    const body: VisitsPage = { rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError };
     return Response.json(body);
   } catch (e) {
     console.error("opd/admissions", e);

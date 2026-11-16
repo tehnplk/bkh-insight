@@ -5,7 +5,7 @@ import { chunks, countMatched, type RepFileDetail } from "./file-detail";
 
 type Num = string | null; // numeric ของ pg มาเป็น string
 const BATCH = 1000;
-// table/col เป็นค่าคงที่ ไม่ใช่ input: OP/OP_APPEAL_* = vn 12 หลัก, IP = an 9 หลัก
+// table/col เป็นค่าคงที่ ไม่ใช่ input: OP*/OP_APPEAL_* = vn 12 หลัก, IP* = an 9 หลัก
 const HIS = {
   op: "SELECT vn AS ref, uc_money FROM vn_stat WHERE vn IN",
   ip: "SELECT an AS ref, uc_money FROM an_stat WHERE an IN",
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   // ชุดละไม่เกิน 1000 ค่า ส่งพร้อมกันได้ เพราะ pool ของ his จำกัดไว้ 3 connection
-  const head = HIS[file.rep_type === "IP" ? "ip" : "op"];
+  const head = HIS[file.rep_type.startsWith("IP") ? "ip" : "op"]; // IP, IPCS, IPLGO
   const found = await Promise.all(
     chunks(refs.map((r) => r.ref), BATCH).map((batch) =>
       hisQuery<{ ref: string; uc_money: string | null }>(`${head} (${batch.map(() => "?").join(", ")})`, batch),

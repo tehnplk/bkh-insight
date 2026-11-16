@@ -82,7 +82,7 @@ ORDER BY ${sort ?? "period_month"} ${dir === "desc" || !sort ? "DESC" : "ASC"} N
       { key: "scheme", header: "สิทธิ", width: 8 },
       { key: "patient_type", header: "OP/IP", width: 8 },
       { key: "doc_no", header: "เลขที่เอกสาร", width: 24 },
-      { key: "transfer_date", header: "วันที่โอน", width: 12 },
+      { key: "transfer_date", header: "วันที่ออก STM", width: 12 },
       { key: "row_count", header: "จำนวนรายการ", width: 12, type: "count" },
       { key: "paid_total", header: "ยอดชดเชย (บาท)", width: 16, type: "money" },
       { key: "deduction", header: "หัก (บาท)", width: 14, type: "money" },
@@ -143,7 +143,7 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) return result({ file: "", docNo: null, status: "error", rows: 0, netTotal: null, error: "ไม่พบไฟล์" }, 400);
   const base = { file: file.name, docNo: null, rows: 0, netTotal: null };
   const transferDate = form.get("transfer_date");
-  if (!validTransferDate(transferDate)) return result({ ...base, status: "error", error: "วันที่โอนไม่ถูกต้อง" }, 400);
+  if (!validTransferDate(transferDate)) return result({ ...base, status: "error", error: "วันที่ออก STM ไม่ถูกต้อง" }, 400);
   if (!/\.xls$/i.test(file.name)) return result({ ...base, status: "unsupported", error: "ไม่ใช่ไฟล์ .xls" });
   if (file.size > MAX_FILE_BYTES) return result({ ...base, status: "error", error: "ไฟล์ใหญ่เกิน 30 MB" }, 400);
 

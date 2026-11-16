@@ -8,7 +8,8 @@ import {
   FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundFilterDef, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
-import { ADJRW_RATES, IPD_MAX_DAYS, REP_FUND, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep } from "./admissions";
+import { latestRepSql, repLabel } from "@/app/api/fund/_lib/rep";
+import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -58,19 +59,7 @@ const COUNT_SELECT = `SELECT COUNT(*) AS total, SUM(i.adjrw) AS adjrw_sum, COUNT
 ${FROM}`;
 type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: number; adjrw_amount: number | string | null; adjrw_amount_n: number };
 
-const REP_SQL = `SELECT DISTINCT ON (r.an)
-       r.an, r.rep_no, f.file_date AS rep_date,
-       CASE WHEN cardinality(r.error_codes) = 0 THEN 'pass'
-            WHEN 'DENY' = ANY(r.error_codes) THEN 'deny'
-            ELSE 'c' END AS status,
-       CASE WHEN cardinality(r.error_codes) = 0 THEN ARRAY[]::text[]
-            WHEN 'DENY' = ANY(r.error_codes)
-              THEN ARRAY(SELECT DISTINCT e.v FROM jsonb_each_text(r.deny) AS e(k, v) WHERE e.v <> 'C' ORDER BY e.v)
-            ELSE r.error_codes END AS codes
-FROM rep_row r
-JOIN rep_file f ON f.id = r.rep_file_id
-WHERE r.patient_type = 'IP' AND r.an = ANY($1::text[])
-ORDER BY r.an, r.tran_id::bigint DESC`;
+const REP_SQL = latestRepSql("an", "an", "IP");
 
 // ตัวกรองหัวคอลัมน์ (allowlist) ; สถานะ REP อยู่อีกฐาน (insight) และค่า RW/AdjRW/เงินเป็นตัวเลขต่อเนื่อง จึงไม่มีตัวกรอง
 const CODES_LABEL: Record<string, string> = {
@@ -107,8 +96,7 @@ const FILTERABLE = [
 ] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
-type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_label", string>;
-const REP_LABEL = { pass: "ผ่าน", c: "ติด C", deny: "Deny" } as const;
+type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_no" | "rep_label", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "an", header: "AN", width: 12 },
   { key: "hn", header: "HN", width: 10 },
@@ -132,7 +120,8 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "adjrw", header: "AdjRW", width: 8 },
   { key: "adjrw_amount", header: "ยอดคำนวณเงิน (บาท)", width: 14, type: "money" },
   { key: "finance_lock_label", header: "ปิดสิทธิการเงิน", width: 12 },
-  { key: "rep_label", header: "สถานะ REP (UCS)", width: 24 },
+  { key: "rep_no", header: "เลขที่ REP", width: 14 },
+  { key: "rep_label", header: "สถานะ REP", width: 24 },
   { key: "income", header: "มูลค่า (บาท)", width: 14, type: "money" },
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
@@ -187,13 +176,13 @@ export async function GET(request: NextRequest) {
     ]);
 
     const toFund = (pttype: string | null) => fundOf(lk, pttype);
-    // REP มีเฉพาะผู้ป่วยใน UCS: ยิงเฉพาะ AN ของแถว UCS
-    const ucsAns = raws.filter((r) => toFund(r.pttype) === REP_FUND).map((r) => r.an).filter(Boolean);
+    // ดู REP ทุก AN ไม่กรองกองทุน (กองทุนอื่นนำเข้า REP ภายหลังได้)
+    const ans = raws.map((r) => r.an).filter(Boolean);
     let reps: RawRep[] | undefined = [];
     let repError = false;
-    if (ucsAns.length) {
+    if (ans.length) {
       try {
-        reps = await insightQuery<RawRep>(REP_SQL, [ucsAns]);
+        reps = await insightQuery<RawRep>(REP_SQL, [ans]);
       } catch (e) {
         console.error("ipd/admissions rep", e);
         reps = undefined;
@@ -207,7 +196,8 @@ export async function GET(request: NextRequest) {
         ...r,
         fund_label: r.fund,
         finance_lock_label: r.finance_lock ? "ปิดแล้ว" : "ยังไม่ปิด",
-        rep_label: r.fund !== REP_FUND || repError ? "" : r.rep ? [REP_LABEL[r.rep.status], ...r.rep.codes].join(" ") : "ยังไม่มี REP",
+        rep_no: r.rep?.rep_no ?? "",
+        rep_label: repLabel(r.rep),
       }));
       return xlsxResponse(`ipd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }

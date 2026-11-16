@@ -2,7 +2,8 @@
 // ไม่อ่านคอลัมน์ชื่อ-สกุล (index 6) และไม่ import ของ server จึงรันทดสอบด้วย node ได้ตรง (rep.test.mjs)
 import { read, utils, type WorkSheet } from "xlsx";
 
-export const FILE_RE = /^eclaim_(\d+)_(.+)_(\d{8})_(\d+)\.xls$/;
+// " (1)" ท้ายชื่อ = browser เปลี่ยนชื่อตอนดาวน์โหลดซ้ำ (ไฟล์เนื้อหาเดียวกันกันซ้ำด้วย sha256)
+export const FILE_RE = /^eclaim_(\d+)_(.+)_(\d{8})_(\d+)(?: \(\d+\))?\.xls$/;
 export const MAX_FILE_BYTES = 30 * 1024 * 1024;
 
 export type RepFileInfo = { hcode: string; type: string; fileDate: string };
@@ -54,7 +55,15 @@ export type RepSummary = {
   paid_total: number | null;
 };
 
-export type ParsedRep = { printedAt: string | null; rows: RepRow[]; summaries: RepSummary[] };
+/** layout "uc" = REP ของ UC (IP/OP/OP_APPEAL_*), "other" = REP สิทธิอื่น (IPCS/IPLGO/OPBKK/OPBMT/OPLGO) */
+export type ParsedRep = { printedAt: string | null; layout: "uc" | "other"; rows: RepRow[]; summaries: RepSummary[] };
+
+/** rep_row.scheme: UC = UCS, สิทธิอื่นจาก TYPE ในชื่อไฟล์ตัด IP/OP นำหน้า (CS = OFC) เช่น IPLGO -> LGO, OPBKK -> BKK */
+export function schemeOf(type: string, layout: ParsedRep["layout"]): string {
+  if (layout === "uc") return "UCS";
+  const s = type.replace(/^(IP|OP)/, "");
+  return s === "CS" ? "OFC" : s;
+}
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -223,10 +232,95 @@ function parseDetail(ws: WorkSheet, sheet: string): RepRow[] {
   return rows;
 }
 
-function parseSummary(ws: WorkSheet, sheet: string): RepSummary[] {
+// REP สิทธิอื่น: หัวตาราง 2 ชั้น (แถว 5-6) ข้อมูลเริ่มแถว 7 ; คอลัมน์ 0-28 และ 33/38 ตำแหน่งเดียวกันทุกประเภท
+// ช่วงกองทุน ("กรณี") ถึง ORS หาจากชื่อหัว เพราะ LGO ไม่มีคอลัมน์ IP*_ORS (58 คอลัมน์ ส่วน CS/BKK/BMT 59)
+// คอลัมน์ 29 ("เรียกเก็บ") ไม่ตรวจชื่อ เพราะ OPBMT พิมพ์หัวเป็น "ชดเชยสุทธิ"
+const OTHER_KEYS: [number, string][] = [
+  [0, "REP"], [2, "TRAN_ID"], [3, "HN"], [4, "AN"], [5, "PID"], [7, "ประเภทผู้ป่วย"], [8, "วันเข้ารักษา"], [9, "วันจำหน่าย"],
+  [10, "ชดเชยสุทธิ"], [12, "Error Code"], [13, "กองทุน"], [18, "สิทธิหลัก"], [19, "สิทธิรอง"], [25, "PROJ"], [27, "DRG"], [28, "RW"],
+  [33, "ชำระเอง"], [38, "AdjRW"],
+];
+
+const add = (a: number | null, b: number | null) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
+
+function parseDetailOther(ws: WorkSheet, sheet: string): RepRow[] {
+  const aoa = toAoa(ws);
+  const { top, label } = headerLabels(aoa, ws["!merges"], 5, 6);
+  checkKeys(sheet, top, OTHER_KEYS);
+  const col = (h: string) => top.indexOf(h);
+  const fundStart = col("กรณี");
+  const denyStart = col("Deny");
+  const ors = col("ORS");
+  const seq = col("SEQ NO");
+  const audit = col("AUDIT RESULTS");
+  if (fundStart < 0 || denyStart < fundStart || ors < denyStart || seq < 0) {
+    throw new Error(`รูปแบบชีต ${sheet} ไม่ตรงกับที่รองรับ (ไม่พบคอลัมน์ กรณี, Deny, ORS หรือ SEQ NO)`);
+  }
+  const fundCols = Array.from({ length: denyStart - fundStart }, (_, i) => fundStart + i);
+  const denyCols = Array.from({ length: ors - denyStart }, (_, i) => denyStart + i);
+  if (new Set(fundCols.map((c) => label[c])).size !== fundCols.length) throw new Error(`ชีต ${sheet} มีหัวคอลัมน์กองทุนซ้ำกัน`);
+
+  const rows: RepRow[] = [];
+  for (let r = 7; r < aoa.length; r++) {
+    const v = aoa[r];
+    const tranId = text(v?.[2]);
+    if (!tranId || !/^\d+$/.test(tranId)) continue;
+    const fund: Record<string, number> = {};
+    for (const c of fundCols) {
+      const n = typeof v[c] === "number" ? (v[c] as number) : null;
+      if (n) fund[label[c]] = n;
+    }
+    // ช่อง Deny มี "C" แทบทุกแถวแม้แถวที่จ่ายแล้ว สถานะผ่าน/ติดดูจาก Error Code
+    const deny: Record<string, string> = {};
+    for (const c of denyCols) {
+      const s = text(v[c]);
+      if (s) deny[label[c]] = s;
+    }
+    rows.push({
+      tran_id: tranId,
+      rep_no: text(v[0]) ?? "",
+      sheet,
+      patient_type: text(v[7]),
+      hn: text(v[3]),
+      an: text(v[4]),
+      pid: text(v[5]),
+      seq_no: text(v[seq]),
+      admit_at: dateTime(v[8]),
+      discharge_at: dateTime(v[9]),
+      // shortcut: ไม่มีคอลัมน์ สปสช./ต้นสังกัด จึงเก็บชดเชยสุทธิ ค่ารักษา ใน net_nhso และ PP ใน net_affiliation ให้ผลรวมสองช่อง = ชดเชยทั้งหมดเหมือน UC
+      net_nhso: num(v[10]),
+      net_affiliation: num(v[11]),
+      claim_total: add(num(v[29]), num(v[30])),
+      central_reimburse: null,
+      self_pay: num(v[33]),
+      paid: null,
+      error_codes: list(v[12]),
+      main_fund: list(v[13]),
+      sub_fund: [],
+      main_inscl: text(v[18]),
+      sub_inscl: text(v[19]),
+      hmain: null,
+      proj: text(v[25]),
+      drg: text(v[27]),
+      rw: num(v[28]),
+      adjrw: num(v[38]),
+      fund_amounts: fund,
+      deny: Object.keys(deny).length ? deny : null,
+      remark: audit < 0 ? null : text(v[audit]),
+      pay_mode: null,
+    });
+  }
+  if (rows.some((r) => !r.rep_no)) throw new Error(`ชีต ${sheet} มีแถวที่ไม่มี REP`);
+  return rows;
+}
+
+function parseSummary(ws: WorkSheet, sheet: string, other = false): RepSummary[] {
   const aoa = toAoa(ws);
   const { top, label } = headerLabels(aoa, ws["!merges"], 1, 4);
-  checkKeys(sheet, top, SUMMARY_KEYS);
+  checkKeys(sheet, top, other ? SUMMARY_KEYS.slice(0, 3) : SUMMARY_KEYS);
+  // สิทธิอื่นไม่มี "จ่ายชดเชยทั้งสิ้น" ใช้ชดเชยสุทธิ ค่ารักษา + PP ของข้อมูลปกติ (CS/BKK/BMT คอลัมน์ 22-23, LGO 20-21)
+  const paidCols = other ? [label.indexOf("ชดเชยสุทธิ / ค่ารักษา"), label.indexOf("ชดเชยสุทธิ / PP (รับจาก สปสช.)")] : [20, 21];
+  if (paidCols.includes(-1)) throw new Error(`รูปแบบชีต ${sheet} ไม่ตรงกับที่รองรับ (ไม่พบคอลัมน์ชดเชยสุทธิ)`);
   const out: RepSummary[] = [];
   for (let r = 5; r < aoa.length; r++) {
     const v = aoa[r];
@@ -235,7 +329,7 @@ function parseSummary(ws: WorkSheet, sheet: string): RepSummary[] {
     const amounts: Record<string, number> = {};
     for (let c = 6; c < v.length; c++) {
       const n = num(v[c]);
-      if (c !== 20 && c !== 21 && n !== null) amounts[label[c]] = n;
+      if (!paidCols.includes(c) && n !== null) amounts[label[c]] = n;
     }
     out.push({
       rep_no: repNo,
@@ -245,8 +339,8 @@ function parseSummary(ws: WorkSheet, sheet: string): RepSummary[] {
       passed: int(v[4]),
       failed: int(v[5]),
       amounts,
-      paid_affiliation: num(v[20]),
-      paid_total: num(v[21]),
+      paid_affiliation: other ? null : num(v[20]),
+      paid_total: other ? add(num(v[paidCols[0]]), num(v[paidCols[1]])) : num(v[21]),
     });
   }
   return out;
@@ -254,7 +348,10 @@ function parseSummary(ws: WorkSheet, sheet: string): RepSummary[] {
 
 const SHEETS = ["Detail", "Summary", "Detail(ST)", "Summary(ST)"];
 
-/** อ่านไฟล์ REP แบบ IP/OP/OP_APPEAL_* (ORF รูปแบบต่างกัน ผู้เรียกต้องกันไว้ก่อน) แถวซ้ำ TRAN_ID เดียวกันในไฟล์เก็บแถวหลังสุด */
+/**
+ * อ่านไฟล์ REP แบบ IP/OP/OP_APPEAL_* ของ UC หรือ REP สิทธิอื่น (เลือกจากหัวคอลัมน์แรก "REP No." / "REP")
+ * ORF รูปแบบต่างกัน ผู้เรียกต้องกันไว้ก่อน แถวซ้ำ TRAN_ID เดียวกันในไฟล์เก็บแถวหลังสุด
+ */
 export function parseRep(buf: Uint8Array): ParsedRep {
   let wb;
   try {
@@ -265,9 +362,16 @@ export function parseRep(buf: Uint8Array): ParsedRep {
   if (!wb.Sheets.Detail || !wb.Sheets.Summary) throw new Error("ไม่พบชีต Detail หรือ Summary");
   const rows = new Map<string, RepRow>();
   const summaries: RepSummary[] = [];
-  for (const [detail, summary] of [["Detail", "Summary"], ["Detail(ST)", "Summary(ST)"]]) {
-    if (wb.Sheets[detail]) for (const row of parseDetail(wb.Sheets[detail], detail)) rows.set(row.tran_id, row);
-    if (wb.Sheets[summary]) summaries.push(...parseSummary(wb.Sheets[summary], summary));
+  // ชีต Data Drug / Data Instrument / Data sheet 0 ของสิทธิอื่นเป็นรายรายการ ยังไม่อ่าน (sheets ด้านบนไม่โหลด)
+  const layout = norm(wb.Sheets.Detail.A6?.v) === "REP" ? "other" : "uc";
+  if (layout === "other") {
+    for (const row of parseDetailOther(wb.Sheets.Detail, "Detail")) rows.set(row.tran_id, row);
+    summaries.push(...parseSummary(wb.Sheets.Summary, "Summary", true));
+  } else {
+    for (const [detail, summary] of [["Detail", "Summary"], ["Detail(ST)", "Summary(ST)"]]) {
+      if (wb.Sheets[detail]) for (const row of parseDetail(wb.Sheets[detail], detail)) rows.set(row.tran_id, row);
+      if (wb.Sheets[summary]) summaries.push(...parseSummary(wb.Sheets[summary], summary));
+    }
   }
-  return { printedAt: printedAt(wb.Sheets.Detail.A1?.v), rows: [...rows.values()], summaries };
+  return { printedAt: printedAt(wb.Sheets.Detail.A1?.v), layout, rows: [...rows.values()], summaries };
 }

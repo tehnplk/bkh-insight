@@ -91,7 +91,8 @@ async function load(view: View, start: string, end: string, codes: string[], nam
   const [cases, [files]] = await Promise.all([
     loadHis(view, start, end, codes),
     insightQuery<{ op: string | null; ip: string | null }>(
-      "SELECT max(file_date) FILTER (WHERE rep_type = 'OP')::text AS op, max(file_date) FILTER (WHERE rep_type = 'IP')::text AS ip FROM rep_file",
+      // ไฟล์ปกติทุกสิทธิ (OP, OPLGO, IPCS ฯลฯ) ไม่นับไฟล์อุทธรณ์
+      "SELECT max(file_date) FILTER (WHERE rep_type LIKE 'OP%')::text AS op, max(file_date) FILTER (WHERE rep_type LIKE 'IP%')::text AS ip FROM rep_file WHERE rep_type NOT LIKE '%APPEAL%'",
     ),
   ]);
   const keys = cases.map((c) => c.key);

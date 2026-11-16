@@ -9,6 +9,7 @@ import {
 } from "@/components/date-range-filter/date-range-filter";
 import { MultiSelect } from "@/components/multi-select/multi-select";
 import { FdhPreviewModal } from "@/components/fdh-preview/fdh-preview";
+import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { usePersistedFilter } from "@/lib/persisted-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
@@ -21,6 +22,7 @@ import {
   type AdmissionDetail,
   type AdmissionRow,
   type AdmissionsPage,
+  type RepInfo,
   type RepStatus,
 } from "@/app/api/ipd/admissions/admissions";
 import {
@@ -37,6 +39,7 @@ import {
   Fact,
   Facts,
   LoadError,
+  RepDetail,
   Section,
 } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 
@@ -69,26 +72,63 @@ const REP: Record<RepStatus | "none", { label: string; tone: string }> = {
 };
 
 
-function RepStatusBadge({
+/**
+ * สถานะ REP ของแถว: พบ REP = ปุ่มเลขที่ REP (เขียวผ่าน / แดงติด C หรือ Deny) กดเปิดรายละเอียด REP
+ * null = ยังไม่มี REP, undefined = ไม่มีสถานะ (กองทุนที่ไม่ได้เบิกผ่าน REP หรือโหลด insight ไม่ได้ บอกในแถบสรุปแล้ว)
+ */
+export function RepBadge({
   rep,
+  type,
+  repKey,
+  title,
 }: {
-  rep?: { rep_no: string | null; rep_date: string | null; status: RepStatus; codes: string[] } | null;
+  rep?: RepInfo | null;
+  type: "opd" | "ipd";
+  /** VN (opd) หรือ AN (ipd) */
+  repKey: string;
+  title: ReactNode;
 }) {
-  if (rep === undefined) return dash; // กองทุนนี้ไม่มี REP หรือโหลด insight ไม่ได้ (บอกในแถบสรุปแล้ว)
-  const s = REP[rep?.status ?? "none"];
+  const [open, setOpen] = useState(false);
+  if (rep === undefined) return dash;
+  if (rep === null) return <span className={`${chip} ${REP.none.tone}`}>{REP.none.label}</span>;
+  const s = REP[rep.status];
+  const date = formatThaiDate(rep.rep_date);
+  const name = rep.rep_no || s.label;
   return (
-    <span
-      className="inline-flex items-center gap-1.5 whitespace-nowrap"
-      title={
-        rep?.rep_no
-          ? `REP ${rep.rep_no} ${formatThaiDate(rep.rep_date)}`.trim()
-          : undefined
-      }
-    >
-      <span className={`${chip} ${s.tone}`}>{s.label}</span>
-      {!!rep?.codes.length && (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`ดูรายละเอียด REP ${name} ${s.label}`}
+        title={`${s.label}${date ? ` · ${date}` : ""}`}
+        className={`${chip} ${s.tone} cursor-pointer tabular-nums hover:underline ${focusRing}`}
+      >
+        {name}
+      </button>
+      {!!rep.codes.length && (
         <span className="text-muted tabular-nums">{rep.codes.join(", ")}</span>
       )}
+      <DetailModal
+        open={open}
+        onClose={() => setOpen(false)}
+        size="medium"
+        title={title}
+      >
+        {/* โหลดรายละเอียดเฉพาะตอนเปิด ไม่ให้ทุกแถวยิง request */}
+        {open && (
+          <div className="text-sm">
+            <Facts>
+              <Fact label="เลขที่ REP">{rep.rep_no}</Fact>
+              <Fact label="สถานะ">
+                <span className={`${chip} ${s.tone}`}>{s.label}</span>
+              </Fact>
+              <Fact label="วันที่ไฟล์ REP">{date}</Fact>
+              <Fact label="รหัส">{rep.codes.join(", ")}</Fact>
+            </Facts>
+            <RepDetail type={type} repKey={repKey} />
+          </div>
+        )}
+      </DetailModal>
     </span>
   );
 }
@@ -279,11 +319,18 @@ const columns = col.columns([
       c.getValue() ? "ปิดแล้ว" : <span className="text-muted">ยังไม่ปิด</span>,
     meta: filterable,
   }),
-  // สถานะ REP มีเฉพาะ UCS แถวกองทุนอื่นแสดงขีด
+  // พบ REP แสดงทุกกองทุน ; "ยังไม่มี REP" เฉพาะ UCS แถวกองทุนอื่นแสดงขีด
   col.display({
     id: "rep",
-    header: "สถานะ REP",
-    cell: (c) => <RepStatusBadge rep={c.row.original.rep} />,
+    header: "REP",
+    cell: (c) => (
+      <RepBadge
+        rep={c.row.original.rep}
+        type="ipd"
+        repKey={c.row.original.an}
+        title={detailTitle(c.row.original)}
+      />
+    ),
   }),
   money("income", "มูลค่า (บาท)"),
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
@@ -518,7 +565,7 @@ const renderSummary = (d: AdmissionsPage) => (
     )}
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
-        โหลดสถานะ REP ไม่ได้ คอลัมน์สถานะ REP จึงว่าง
+        โหลดสถานะ REP ไม่ได้ คอลัมน์ REP จึงว่าง
       </p>
     )}
   </div>

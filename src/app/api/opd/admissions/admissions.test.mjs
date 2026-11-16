@@ -11,7 +11,7 @@ const raw = (vn, extra = {}) => ({
 });
 
 test("row shape: numbers parsed, fund from pttype, codes trimmed, unknown department hidden", () => {
-  const [r] = buildRows([raw("1")], fundOf);
+  const [r] = buildRows([raw("1")], [], fundOf);
   assert.equal(r.income, 1500.5);
   assert.equal(r.fund, "UCS");
   assert.equal(r.pdx, "J189");
@@ -22,12 +22,12 @@ test("row shape: numbers parsed, fund from pttype, codes trimmed, unknown depart
   assert.equal(r.ovst_status_detail, "ตรวจแล้ว");
   assert.equal(r.patient_name, "name");
   assert.equal(r.rcpt_no, "418/52, 418/53");
-  assert.equal(buildRows([raw("2", { dep_code: "UNKNOWN", dep_name: null })], fundOf)[0].dep_name, null);
-  assert.equal(buildRows([raw("3", { dep_code: "077", dep_name: null })], fundOf)[0].dep_name, "077");
+  assert.equal(buildRows([raw("2", { dep_code: "UNKNOWN", dep_name: null })], [], fundOf)[0].dep_name, null);
+  assert.equal(buildRows([raw("3", { dep_code: "077", dep_name: null })], [], fundOf)[0].dep_name, "077");
 });
 
 test("discharge status from export code; queue states = not discharged", () => {
-  const label = (ovst_export, ovst_status) => buildRows([raw("6", { ovst_export, ovst_status })], fundOf)[0].ovst_status;
+  const label = (ovst_export, ovst_status) => buildRows([raw("6", { ovst_export, ovst_status })], [], fundOf)[0].ovst_status;
   assert.equal(label("3", "ส่งต่อสถานพยาบาลอื่น"), "ส่งต่อ");
   assert.equal(label("2", "Admit แผนกอายุรกรรม"), "Admit");
   assert.equal(label("4", "เสียชีวิต"), "เสียชีวิต");
@@ -37,6 +37,19 @@ test("discharge status from export code; queue states = not discharged", () => {
 });
 
 test("no payment = null receipt", () => {
-  assert.equal(buildRows([raw("4", { rcpt_no: null })], fundOf)[0].rcpt_no, null);
-  assert.equal(buildRows([raw("5", { rcpt_no: "" })], fundOf)[0].rcpt_no, null);
+  assert.equal(buildRows([raw("4", { rcpt_no: null })], [], fundOf)[0].rcpt_no, null);
+  assert.equal(buildRows([raw("5", { rcpt_no: "" })], [], fundOf)[0].rcpt_no, null);
+});
+
+test("REP: found = latest on any fund, missing = null only on UCS, not loaded = no rep key", () => {
+  const reps = [
+    { vn: "1", rep_no: "R1", rep_date: "2026-10-20", status: "deny", codes: ["D01"] },
+    { vn: "3", rep_no: "R3", rep_date: "2026-10-21", status: "pass", codes: [] },
+  ];
+  const rows = buildRows([raw("1"), raw("2"), raw("3", { pttype: "O1" }), raw("4", { pttype: "O1" })], reps, fundOf);
+  assert.deepEqual(rows[0].rep, { rep_no: "R1", rep_date: "2026-10-20", status: "deny", codes: ["D01"] });
+  assert.equal(rows[1].rep, null);
+  assert.equal(rows[2].rep.status, "pass");
+  assert.equal("rep" in rows[3], false);
+  assert.equal("rep" in buildRows([raw("1")], undefined, fundOf)[0], false);
 });

@@ -46,7 +46,7 @@ const baseColumns = [
   col.accessor("scheme", { header: "สิทธิ", cell: (c) => SCHEMES[c.getValue()] ?? c.getValue(), meta: { filter: { format: (v) => SCHEMES[v] ?? v } } }),
   col.accessor("patient_type", { header: "OP/IP", meta: { filter: true } }),
   col.accessor("doc_no", { header: "เลขที่เอกสาร", meta: { className: "whitespace-nowrap", filter: true } }),
-  col.accessor("transfer_date", { header: "วันที่โอน", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } } }),
+  col.accessor("transfer_date", { header: "วันที่ออก STM", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } } }),
   col.accessor("row_count", { header: "จำนวนรายการ", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
   col.accessor("paid_total", { header: "ยอดชดเชย (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
   col.accessor("deduction", { header: "หัก (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
@@ -210,7 +210,7 @@ export function StmImport({ admin }: { admin: boolean }) {
   const [key, setKey] = useState(0);
   const [today] = useState(todayIso);
   const [transferDate, setTransferDate] = useState(today);
-  // วันที่โอนต้องเลือกเองทุกรอบ ค่าเริ่มต้น (วันนี้) ยังไม่นับ กันลืมแล้วบันทึกวันผิดทั้งรอบ
+  // วันที่ออก STM ต้องเลือกเองทุกรอบ ค่าเริ่มต้น (วันนี้) ยังไม่นับ กันลืมแล้วบันทึกวันผิดทั้งรอบ
   const [dateChosen, setDateChosen] = useState(false);
   const [needDate, setNeedDate] = useState(false);
 
@@ -257,7 +257,7 @@ export function StmImport({ admin }: { admin: boolean }) {
             }`}
           >
             <ThaiDatePicker
-              label="วันที่โอน"
+              label="วันที่ออก STM"
               value={transferDate}
               max={today}
               onChange={(v) => {
@@ -287,7 +287,7 @@ export function StmImport({ admin }: { admin: boolean }) {
               <span className="text-muted">หรือลากไฟล์ .xls มาวางที่นี่</span>
             ) : (
               <span id="stm-date-hint" role={needDate ? "alert" : undefined} className={needDate ? "text-danger" : "text-warning"}>
-                เลือกวันที่โอนก่อนนำเข้า
+                เลือกวันที่ออก STM ก่อนนำเข้า
               </span>
             )}
           </div>

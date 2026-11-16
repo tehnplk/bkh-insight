@@ -6,7 +6,8 @@ import { formatThaiDate } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson } from "../_components/ui";
 import type { ArJournal } from "@/app/api/fund/ar-journal/route";
 import { CASH_NAME } from "@/app/api/fund/ar-journal/journal";
-import type { AdjustData } from "@/app/api/fund/ar-adjust/route";
+import type { AdjustData, DecideResult } from "@/app/api/fund/ar-adjust/route";
+import { MAX_DECIDE_IDS } from "@/app/api/fund/ar-adjust/adjust";
 import type { ArTrialBalance } from "@/app/api/fund/ar-trial-balance/route";
 import type { TbRow } from "@/app/api/fund/ar-trial-balance/trial-balance";
 
@@ -16,11 +17,12 @@ const FIELD = `h-9 min-w-0 rounded-md border border-line bg-surface px-3 ${focus
 const primary = `inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-accent-fg hover:bg-accent/90 disabled:cursor-wait disabled:opacity-60 ${focusRing}`;
 const thaiDateTime = (s: string) => `${formatThaiDate(s)} ${s.slice(11, 16)} น.`;
 const missing = <span className="text-warning">ยังไม่กำหนด</span>;
+const checkbox = `size-4 cursor-pointer accent-accent ${focusRing}`;
 
-async function send(url: string, init: RequestInit): Promise<{ ok: true } | { ok: false; error: string }> {
+async function send<T = unknown>(url: string, init: RequestInit): Promise<{ ok: true; body: T } | { ok: false; error: string }> {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init }).catch(() => null);
   const body = await res?.json().catch(() => null);
-  return res?.ok ? { ok: true } : { ok: false, error: body?.error ?? `ไม่สำเร็จ${res ? ` (HTTP ${res.status})` : ""}` };
+  return res?.ok ? { ok: true, body } : { ok: false, error: body?.error ?? `ไม่สำเร็จ${res ? ` (HTTP ${res.status})` : ""}` };
 }
 
 function Table({ head, children }: { head: ReactNode; children: ReactNode }) {
@@ -235,9 +237,21 @@ export function AdjustRequests() {
   const { data, error, retry } = useJson<AdjustData>("/api/fund/ar-adjust");
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string }>();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   if (error) return <Notice title={`โหลดคำขอปรับปรุงไม่สำเร็จ: ${error}`} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />;
   if (!data) return null;
   const waiting = data.requests.filter((r) => r.status === "pending").length;
+  const approvable = data.requests.filter((r) => r.status === "pending" && data.canApprove && r.requested_by !== data.me).map((r) => r.id);
+  // ที่เลือกเฉพาะที่ยังอนุมัติได้ในรายการล่าสุด
+  const chosen = approvable.filter((id) => picked.has(id));
+  const toggle = (ids: string[], on: boolean) => {
+    const next = new Set(picked);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    setPicked(next);
+  };
 
   function decide(id: string, approve: boolean) {
     const note = approve ? "" : (prompt("เหตุผลที่ไม่อนุมัติ") ?? "");
@@ -249,18 +263,69 @@ export function AdjustRequests() {
     });
   }
 
+  function approveChosen() {
+    setResult(undefined);
+    startTransition(async () => {
+      const r = await send<{ results: DecideResult[] }>("/api/fund/ar-adjust", { method: "PATCH", body: JSON.stringify({ ids: chosen, approve: true }) });
+      if (!r.ok) setResult({ ok: false, text: r.error });
+      else {
+        const failed = r.body.results.filter((x) => !x.ok);
+        const done = r.body.results.length - failed.length;
+        setResult({
+          ok: !failed.length,
+          text: [
+            `อนุมัติ ${formatCount(done)} รายการ และลงสมุดลูกหนี้แล้ว`,
+            ...failed.map((x) => `#${x.id} อนุมัติไม่ได้: ${"error" in x ? x.error : ""}`),
+          ].join("\n"),
+        });
+        setPicked(new Set());
+      }
+      retry();
+    });
+  }
+
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-title">
         คำขอปรับปรุงลูกหนี้ {waiting > 0 && <span className="text-warning">· รออนุมัติ {formatCount(waiting)}</span>}
       </h2>
-      {result && <p role={result.ok ? "status" : "alert"} className={`text-sm ${result.ok ? "text-success" : "text-danger"}`}>{result.text}</p>}
+      {result && <p role={result.ok ? "status" : "alert"} className={`text-sm whitespace-pre-line ${result.ok ? "text-success" : "text-danger"}`}>{result.text}</p>}
+      {approvable.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={pending || !chosen.length || chosen.length > MAX_DECIDE_IDS}
+            onClick={approveChosen}
+            title={chosen.length > MAX_DECIDE_IDS ? `อนุมัติได้ครั้งละไม่เกิน ${formatCount(MAX_DECIDE_IDS)} รายการ` : undefined}
+            className={`${primary} disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            {`อนุมัติที่เลือก${chosen.length ? ` ${formatCount(chosen.length)} รายการ` : ""}`}
+          </button>
+          {chosen.length > 0 && (
+            <button type="button" disabled={pending} onClick={() => setPicked(new Set())} className={btn}>ล้างที่เลือก</button>
+          )}
+        </div>
+      )}
       {data.requests.length === 0 ? (
         <p className="text-sm text-muted">ยังไม่มีคำขอ ส่งคำขอได้จากหน้ารายละเอียดของรายการในสมุดลูกหนี้</p>
       ) : (
         <Table
           head={
             <>
+              <th className={`${TH} w-8`}>
+                {approvable.length > 0 && (
+                  <input
+                    type="checkbox"
+                    aria-label="เลือกคำขอที่อนุมัติได้ทั้งหมด"
+                    checked={chosen.length === approvable.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = chosen.length > 0 && chosen.length < approvable.length;
+                    }}
+                    onChange={(e) => toggle(approvable, e.target.checked)}
+                    className={checkbox}
+                  />
+                )}
+              </th>
               <th className={TH}>#</th>
               <th className={TH}>ลูกหนี้</th>
               <th className={TH}>บัญชี</th>
@@ -275,6 +340,11 @@ export function AdjustRequests() {
         >
           {data.requests.map((r) => (
             <tr key={r.id} className="border-t border-line hover:bg-surface-sunken">
+              <td className={TD}>
+                {approvable.includes(r.id) && (
+                  <input type="checkbox" aria-label={`เลือกคำขอ #${r.id}`} checked={picked.has(r.id)} onChange={(e) => toggle([r.id], e.target.checked)} className={checkbox} />
+                )}
+              </td>
               <td className={`${TD} tabular-nums`}>{r.id}</td>
               <td className={`${TD} whitespace-nowrap tabular-nums`}>{r.patient_type} {r.an ? `AN ${r.an}` : r.vn ? `VN ${r.vn}` : r.ref}</td>
               <td className={`${TD} tabular-nums`}>{r.account_code ?? "–"}</td>

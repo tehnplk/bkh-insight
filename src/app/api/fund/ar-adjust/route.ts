@@ -1,6 +1,8 @@
 import { auth } from "@/auth";
-import { insightQuery, insightTransaction } from "@/lib/db";
+import { insightQuery, insightTransaction, type InsightTx } from "@/lib/db";
+import { formatBaht } from "@/lib/number-format";
 import { todayIso } from "@/lib/thai-date";
+import { MAX_DECIDE_IDS, overReduces } from "./adjust";
 
 export type AdjustRequest = {
   id: string;
@@ -67,44 +69,76 @@ export async function POST(request: Request) {
   return Response.json(row);
 }
 
-// ตัดสิน (admin เท่านั้น และไม่ใช่คนขอ): { id, approve: boolean, note? } อนุมัติ = ลงสมุดลูกหนี้ source manual ใน transaction เดียวกัน
+// ยอดคงเหลือทางบัญชีทุก source ของหนี้ ณ ตอนอนุมัติ (0 ถ้าไม่มีแถว)
+const BALANCE_SQL = "SELECT COALESCE(SUM(amount), 0) AS balance FROM ar_ledger WHERE patient_type = $1 AND ref = $2";
+const ID_RE = /^[1-9]\d{0,17}$/;
+type Decided = { ok: true; ledgerId: string | null } | { ok?: never; error: string; status: number };
+/** ผลรายรายการของ PATCH แบบหลายรายการ */
+export type DecideResult = { id: string } & ({ ok: true } | { ok: false; error: string });
+
+/** ตัดสินหนึ่งคำขอใน transaction ที่ถือ lock ar_ledger แล้ว อนุมัติ = ลงสมุดลูกหนี้ source manual */
+async function decide(tx: InsightTx, id: string, approve: boolean, note: string | null, me: string): Promise<Decided> {
+  const [q] = await tx<{ patient_type: string; ref: string; amount: string; reason: string; requested_by: string; status: string }>(
+    "SELECT patient_type, ref, amount, reason, requested_by, status FROM ar_adjust_request WHERE id = $1 FOR UPDATE",
+    [id],
+  );
+  if (!q) return { error: "ไม่พบคำขอ", status: 404 };
+  if (q.status !== "pending") return { error: "คำขอนี้ตัดสินไปแล้ว", status: 409 };
+  if (q.requested_by === me) return { error: "อนุมัติคำขอของตัวเองไม่ได้ ต้องให้ผู้ดูแลคนอื่นตัดสิน", status: 403 };
+  let ledgerId: string | null = null;
+  if (approve) {
+    const [debt] = await tx<Record<string, string | null>>(SET_ROW_SQL, [q.patient_type, q.ref]);
+    if (!debt) return { error: "ไม่พบลูกหนี้นี้ในสมุดลูกหนี้แล้ว", status: 409 };
+    const [{ balance }] = await tx<{ balance: string }>(BALANCE_SQL, [q.patient_type, q.ref]);
+    // ยอดอาจเปลี่ยนระหว่างรออนุมัติ (ar-sync/STM/คำขออื่น) ห้ามลดหนี้จนติดลบ
+    if (overReduces(balance, q.amount)) {
+      return { error: `คงเหลือตอนนี้ ${formatBaht(Number(balance))} บาท ลดตามคำขอแล้วจะติดลบ ให้ไม่อนุมัติแล้วขอใหม่ตามยอดปัจจุบัน`, status: 409 };
+    }
+    const [row] = await tx<{ id: string }>(
+      `INSERT INTO ar_ledger (source, kind, ref, vn, an, patient_type, ref_date, entry_date, pttype, hipdata_code, hospmain, hospmain_chwpart, account_code, amount, note)
+VALUES ('manual', 'adjust', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+      [q.ref, debt.vn, debt.an, q.patient_type, debt.ref_date, todayIso(), debt.pttype, debt.hipdata_code, debt.hospmain, debt.hospmain_chwpart, debt.account_code, q.amount,
+        `ปรับปรุงตามคำขอ #${id}: ${q.reason}`.slice(0, 1000)],
+    );
+    ledgerId = row.id;
+  }
+  await tx(
+    "UPDATE ar_adjust_request SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4, ledger_id = $5 WHERE id = $1",
+    [id, approve ? "approved" : "rejected", me, note, ledgerId],
+  );
+  return { ok: true, ledgerId };
+}
+
+// ตัดสิน (admin เท่านั้น และไม่ใช่คนขอ): { id, approve: boolean, note? } หรือหลายรายการ { ids: string[], approve: true }
+// ทั้งชุดอยู่ใน transaction เดียว ; รายการที่ตัดสินไม่ได้ (ของตัวเอง/ตัดสินแล้ว/ยอดจะติดลบ) คืน error รายรายการ ไม่ทำให้ชุดล้ม
 export async function PATCH(request: Request) {
   const session = await auth();
   if (!session) return bad("unauthorized", 401);
   if (session.user.role !== "admin") return bad("forbidden", 403);
   const b = await request.json().catch(() => null);
-  const id = typeof b?.id === "string" ? b.id : "";
-  if (!/^[1-9]\d{0,17}$/.test(id) || typeof b.approve !== "boolean") return bad("ส่ง id และ approve (true/false)");
-  const note = typeof b.note === "string" ? b.note.trim().slice(0, 500) || null : null;
   const me = session.user.name ?? "ไม่ทราบชื่อ";
+  const lock = (tx: InsightTx) => tx("SELECT pg_advisory_xact_lock(hashtext('ar_ledger'))"); // lock เดียวกับ ar-sync ให้ลงสมุดลูกหนี้เรียงคิวกัน
 
-  const result = await insightTransaction(async (tx) => {
-    // lock เดียวกับ ar-sync ให้ลงสมุดลูกหนี้เรียงคิวกัน
-    await tx("SELECT pg_advisory_xact_lock(hashtext('ar_ledger'))");
-    const [q] = await tx<{ patient_type: string; ref: string; amount: string; reason: string; requested_by: string; status: string }>(
-      "SELECT patient_type, ref, amount, reason, requested_by, status FROM ar_adjust_request WHERE id = $1 FOR UPDATE",
-      [id],
-    );
-    if (!q) return { error: "ไม่พบคำขอ", status: 404 };
-    if (q.status !== "pending") return { error: "คำขอนี้ตัดสินไปแล้ว", status: 409 };
-    if (q.requested_by === me) return { error: "อนุมัติคำขอของตัวเองไม่ได้ ต้องให้ผู้ดูแลคนอื่นตัดสิน", status: 403 };
-    let ledgerId: string | null = null;
-    if (b.approve) {
-      const [debt] = await tx<Record<string, string | null>>(SET_ROW_SQL, [q.patient_type, q.ref]);
-      if (!debt) return { error: "ไม่พบลูกหนี้นี้ในสมุดลูกหนี้แล้ว", status: 409 };
-      const [row] = await tx<{ id: string }>(
-        `INSERT INTO ar_ledger (source, kind, ref, vn, an, patient_type, ref_date, entry_date, pttype, hipdata_code, hospmain, hospmain_chwpart, account_code, amount, note)
-VALUES ('manual', 'adjust', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-        [q.ref, debt.vn, debt.an, q.patient_type, debt.ref_date, todayIso(), debt.pttype, debt.hipdata_code, debt.hospmain, debt.hospmain_chwpart, debt.account_code, q.amount,
-          `ปรับปรุงตามคำขอ #${id}: ${q.reason}`.slice(0, 1000)],
-      );
-      ledgerId = row.id;
+  if (Array.isArray(b?.ids)) {
+    const ids = [...new Set(b.ids as unknown[])];
+    if (b.approve !== true || !ids.length || ids.length > MAX_DECIDE_IDS || !ids.every((id): id is string => typeof id === "string" && ID_RE.test(id))) {
+      return bad(`ส่ง ids 1–${MAX_DECIDE_IDS} รายการ และ approve: true (ไม่อนุมัติทำทีละรายการ)`);
     }
-    await tx(
-      "UPDATE ar_adjust_request SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4, ledger_id = $5 WHERE id = $1",
-      [id, b.approve ? "approved" : "rejected", me, note, ledgerId],
-    );
-    return { ok: true as const, ledgerId };
-  });
-  return "error" in result ? bad(result.error!, result.status) : Response.json(result);
+    const results = await insightTransaction(async (tx) => {
+      await lock(tx);
+      const out: DecideResult[] = [];
+      for (const id of ids) {
+        const r = await decide(tx, id, true, null, me);
+        out.push(r.ok ? { id, ok: true } : { id, ok: false, error: r.error });
+      }
+      return out;
+    });
+    return Response.json({ results });
+  }
+
+  const id = typeof b?.id === "string" ? b.id : "";
+  if (!ID_RE.test(id) || typeof b.approve !== "boolean") return bad("ส่ง id และ approve (true/false)");
+  const note = typeof b.note === "string" ? b.note.trim().slice(0, 500) || null : null;
+  const result = await insightTransaction(async (tx) => (await lock(tx), decide(tx, id, b.approve, note, me)));
+  return result.ok ? Response.json(result) : bad(result.error, result.status);
 }

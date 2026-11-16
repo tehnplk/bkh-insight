@@ -1,4 +1,26 @@
-# Handoff: werawat (อัปเดต 14 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 15 พ.ย. 2569)
+
+## รอบ 15 พ.ย. 2569 (PR #41–#45 merge แล้ว, deploy แล้ว main `34b46df`)
+- deploy แล้ว:
+  - #41 16 แฟ้มตามประกาศ e-Claim 2564 รอบ 1 + กฎ C565 (42 รหัส) ; คำถามรอบ 2 อยู่ใน artifact ส่วนตัว https://claude.ai/artifact/QB1TGYVbAVq96KmUDi2VTh (ถ้าจะแชร์ทีมต้องกด Share → anyone with the link เอง)
+  - #42 `/fund/ar-precheck` ตรวจค่ารักษาก่อนตั้งหนี้, งบทดลองใน `/fund/ar-ledger`, ปิดงวด `/admin/ar-periods` (migration `202611151200_ar_period_close.sql`, trigger `ar_ledger_period_guard`) — ปิดงวดยังไม่ได้ เพราะมีแถวไม่มีบัญชี 415 แถว (INS/BKK/NRH/SSI/บาง UCS) ต้องตั้งที่ `/admin/ar-accounts` ก่อน
+  - #43 modal ลากได้ (`DetailModal draggable`)
+  - #44 ปุ่ม "ดึงใหม่" รายคน `POST /api/fund/ar-sync/case` (migration `202611151800_ar_sync_case.sql`, `ar_sync_log.mode='case'`) ; ทดสอบจริงแล้วกับ VN 691115075929 (ครั้งแรกตั้ง 163, กดซ้ำไม่ลงซ้ำ)
+  - #45 สถานะ OPD ใหม่ใน precheck จาก `ovst.finance_lock` (admit แล้ว / ใบลูกหนี้ค้างหลัง admit / ยังไม่ล็อก / ค้างล็อก > 3 วันทำการ / ยอดสรุป HOSxP ไม่อัปเดต / คีย์รายการหลังออกใบ) ; modal ใช้ DataGrid `localState` แบ่งหน้า 100 + ตัวกรองหัวคอลัมน์ + ตรึง ; FdhPreviewModal แบ่งชุดละ 1,000 (เลือกได้ OPD 5,000 / IPD 2,000)
+- ข้อเท็จจริงจากหน้างาน (ตรวจกับฐานแล้ว):
+  - การเงินล็อกรายการ OPD ราว 16:00 ทุกวัน (`ovst.finance_lock='Y'` ไม่มีเวลาที่ล็อก) หลังล็อก ใบลูกหนี้ตรงรายการ 99.6% ; ใบ batch ออกวันถัดไป 16–19 น.
+  - ปิดสิทธิใน HOSxP (`nhso_confirm_privilege`, 1 แถว/vn) ออกใบลูกหนี้วินาทีเดียวกัน ; คีย์เพิ่มหลังปิดสิทธิ → ตอนล็อกได้ใบที่สอง แต่ยอดที่แจ้ง สปสช. ไม่ถูกแก้ (~5% ต่ำกว่าจริง)
+  - HOSxP XE ย้ายรายการทั้งหมดไป AN ตอน admit และไม่แสดงรายการค้าง (v3 ยังเห็น) → ใบลูกหนี้ OPD 50 บาทค้าง ต.ค. ~140 ราย ~7,000 บาท
+  - `his` ต่อกับ replicate ไม่ใช่เครื่องจริง (ล็อก opitemrece แค่ทำ replication ช้า)
+  - ใบลูกหนี้ออกตาม `opitemrece.finance_number` (เคส 691008072732 บิลรอง 40 บาทไม่มีใบ)
+- ค้าง / พรุ่งนี้:
+  1. ใส่คำแนะนำวิธีแก้ในรายละเอียดสถานะ "แยกชำระ/ลูกหนี้ไม่ตรง" + แสดงว่าฝั่งชำระเอง/ลูกหนี้ต่างเท่าไร (รอผู้ใช้ตอบ)
+  2. ถามหน้างาน: XE ยกเลิกใบลูกหนี้ OPD ของรายที่ admit ได้ไหม (ถ้าไม่ได้ ใช้ขอปรับปรุงลูกหนี้ในสมุดแทน)
+  3. AGENTS.md ยังเขียนว่าอ่าน opitemrece นานบล็อก HOSxP ทั้งโรงพยาบาล → เสนอแก้ให้ตรงว่าเป็น replicate (รอผู้ใช้อนุมัติ)
+  4. เทียบยอดปิดสิทธิ (`nhso_privilege_amount`) ใน precheck — ข้อมูลพร้อม (JOIN ด้วย vn ห้าม JOIN ด้วย debt_id ไม่มี index) ยังไม่ได้สั่งทำ
+  5. ดึง SMT (API สาธารณะ budgetSummaryByVendorReport) และ 16 แฟ้มรอบ 2 รอทีมตอบ
+  6. ยังไม่ได้ทดสอบหลัง login: precheck สถานะใหม่/modal, แบ่งชุด 16 แฟ้มเกิน 1,000 ราย
+- ตรวจผล: `node --test src/app/api/fund/ar-precheck/precheck.test.mjs src/app/api/fund/ar-sync/ledger.test.mjs src/components/fdh-preview/batch.test.mjs` ; `npx tsc --noEmit` ; deploy ตามขั้นตอนใน deploy_guide.md (git pull main, npm ci, db:migrate, build, restart ด้วย sudo)
 
 ## รอบ 14 พ.ย. 2569 ค่ำ (PR #37 merge แล้ว, deploy แล้ว main `b32835e`)
 - deploy แล้ว: `/fund/close-privilege` (ปิดสิทธิ สปสช. เลือกทีละราย), `/catalog/service-catalog` (UC 8,775 / OFC 2,019 / STP 6,739 แถว, เทียบ HOSxP 7 กฎ), `/fund/claim-pipeline` OFC ผู้ป่วยนอกขั้น 2 ใช้ Approval Code EDC (`ovst_seq.edc_approve_list_text`)

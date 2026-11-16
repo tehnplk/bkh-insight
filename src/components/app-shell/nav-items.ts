@@ -65,6 +65,7 @@ export const navItems: NavItem[] = [
     icon: "table",
     children: [
       { label: "ตรวจค่ารักษาก่อนตั้งหนี้", href: "/fund/ar-precheck" },
+      { label: "สรุปค่ารักษาก่อนตั้งหนี้", href: "/fund/ar-precheck-summary" },
       { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },

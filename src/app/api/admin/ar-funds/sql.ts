@@ -2,10 +2,10 @@
 import { hisQuery, insightQuery } from "@/lib/db";
 import { inList } from "@/app/api/fund/_lib/fund";
 import type { FundActivity, FundRule } from "./rules";
-// แถวล่าสุดของแต่ละ VN (tran_id มากสุด) เหมือน /fund/claim-errors
+// แถวล่าสุดของแต่ละ VN (tran_id มากสุด) เหมือน /fund/claim-errors เฉพาะ REP UC (visit ที่ส่งใหม่เป็นสิทธิอื่นทีหลังจะหลุดไป)
 export const REP_SQL = `SELECT r.seq_no AS vn, k.key, k.value AS amount
 FROM rep_row r CROSS JOIN LATERAL jsonb_each_text(r.fund_amounts) k
-WHERE r.patient_type = 'OP' AND r.seq_no IS NOT NULL AND r.admit_at >= $1::date AND r.admit_at < $2::date AND k.key = ANY($3)
+WHERE r.scheme = 'UCS' AND r.patient_type = 'OP' AND r.seq_no IS NOT NULL AND r.admit_at >= $1::date AND r.admit_at < $2::date AND k.key = ANY($3)
   AND NOT EXISTS (SELECT 1 FROM rep_row n WHERE n.seq_no = r.seq_no AND n.patient_type = 'OP' AND n.tran_id::bigint > r.tran_id::bigint)`;
 
 

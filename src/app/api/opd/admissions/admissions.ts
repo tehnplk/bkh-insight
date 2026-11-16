@@ -1,6 +1,12 @@
 // OPD แยกรายสิทธิ: ชนิดข้อมูลและการแปลงแถว his แบบ pure
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
+import type { RepInfo } from "@/app/api/ipd/admissions/admissions";
+
+/** = REP_FUND ของ ipd/admissions (ไฟล์นี้ import ค่าข้ามไฟล์ไม่ได้ เพราะ test รัน .ts ตรง) */
+const REP_FUND = "UCS";
+/** แถวจาก SQL REP (insight, latestRepSql) */
+export type RawOpRep = RepInfo & { vn: string };
 
 /** ช่วงวันรับบริการยาวสุด: เท่าหน้าอื่น (31) เพราะ 16 แฟ้มของผู้ป่วยนอกอ่าน opitemrece ตามช่วงวันที่ */
 export const OPD_MAX_DAYS = 31;
@@ -64,9 +70,14 @@ export type VisitRow = {
   claim_status: ClaimStatus;
   /** เลขที่ใบเสร็จ (rcpt_print ที่ไม่ถูกยกเลิก) หลายใบคั่นด้วย ", " ไม่มีการจ่ายเงิน = null */
   rcpt_no: string | null;
+  /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
+  rep?: RepInfo | null;
 };
 
-export type VisitsPage = GridPage<VisitRow>;
+export type VisitsPage = GridPage<VisitRow> & {
+  /** โหลดสถานะ REP จาก insight ไม่ได้ */
+  rep_error: boolean;
+};
 
 /** ovstost.export_code -> สถานะการจำหน่าย (รหัส TYPEOUT 43 แฟ้ม) */
 const DISCHARGE: Record<string, string> = { "1": "กลับบ้าน", "2": "Admit", "3": "ส่งต่อ", "4": "เสียชีวิต", "7": "ปฏิเสธการรักษา", "8": "หนีกลับ" };
@@ -80,28 +91,35 @@ export function dischargeLabel(code: string | null, name: string | null): string
 
 const num = (v: number | string | null) => (v == null || v === "" ? null : Number(v));
 
-/** fundOf = กองทุนของ pttype */
-export function buildRows(raws: RawVisit[], fundOf: (pttype: string | null) => string): VisitRow[] {
-  return raws.map((r) => ({
-    vn: r.vn,
-    hn: r.hn,
-    patient_name: (r.patient_name ?? "").trim(),
-    vstdate: r.vstdate,
-    vsttime: r.vsttime?.slice(0, 5) || null,
-    dep_name: r.dep_name || (r.dep_code && r.dep_code !== "UNKNOWN" ? r.dep_code : null),
-    pttype: r.pttype,
-    pttype_name: r.pttype_name,
-    fund: fundOf(r.pttype),
-    pdx: r.pdx?.trim() || null,
-    pdx_name: r.pdx_name || null,
-    ovst_status: dischargeLabel(r.ovst_export, r.ovst_status),
-    ovst_status_detail: r.ovst_status || null,
-    income: num(r.income) ?? 0,
-    uc_money: num(r.uc_money) ?? 0,
-    auth_code: r.auth_code?.trim() || null,
-    close_code: r.close_code?.trim() || null,
-    claim_status: r.claim_status,
-    // เลขที่ใบเสร็จแสดงแบบ เล่ม/เลขที่ (HOSxP เก็บ "421:123")
-    rcpt_no: r.rcpt_no?.replaceAll(":", "/") || null,
-  }));
+/** reps: undefined = ไม่ได้ดู REP ; fundOf = กองทุนของ pttype */
+export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf: (pttype: string | null) => string): VisitRow[] {
+  const repByVn = reps && new Map(reps.map(({ vn, ...r }) => [vn, r]));
+  return raws.map((r) => {
+    const fund = fundOf(r.pttype);
+    // พบ REP แสดงทุกกองทุน ; ไม่พบ = ยังไม่มี REP เฉพาะ REP_FUND
+    const rep = repByVn?.get(r.vn) ?? (repByVn && fund === REP_FUND ? null : undefined);
+    return {
+      vn: r.vn,
+      hn: r.hn,
+      patient_name: (r.patient_name ?? "").trim(),
+      vstdate: r.vstdate,
+      vsttime: r.vsttime?.slice(0, 5) || null,
+      dep_name: r.dep_name || (r.dep_code && r.dep_code !== "UNKNOWN" ? r.dep_code : null),
+      pttype: r.pttype,
+      pttype_name: r.pttype_name,
+      fund,
+      pdx: r.pdx?.trim() || null,
+      pdx_name: r.pdx_name || null,
+      ovst_status: dischargeLabel(r.ovst_export, r.ovst_status),
+      ovst_status_detail: r.ovst_status || null,
+      income: num(r.income) ?? 0,
+      uc_money: num(r.uc_money) ?? 0,
+      auth_code: r.auth_code?.trim() || null,
+      close_code: r.close_code?.trim() || null,
+      claim_status: r.claim_status,
+      // เลขที่ใบเสร็จแสดงแบบ เล่ม/เลขที่ (HOSxP เก็บ "421:123")
+      rcpt_no: r.rcpt_no?.replaceAll(":", "/") || null,
+      ...(rep !== undefined && { rep }),
+    };
+  });
 }

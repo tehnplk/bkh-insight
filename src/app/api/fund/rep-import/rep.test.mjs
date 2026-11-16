@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { utils, write } from "xlsx";
-import { dateTime, list, num, parseFileName, parseRep, printedAt, text } from "./rep.ts";
+import { dateTime, list, num, parseFileName, parseRep, printedAt, schemeOf, text } from "./rep.ts";
 
 const range = (r0, c0, r1, c1) => ({ s: { r: r0, c: c0 }, e: { r: r1, c: c1 } });
 
@@ -62,7 +62,66 @@ function book(detail = detailSheet()) {
   return write(wb, { type: "buffer", bookType: "xlsx" });
 }
 
+// REP สิทธิอื่น: CS (59 คอลัมน์ มี IPCS_ORS) / LGO (58 คอลัมน์) หัวตาราง 2 ชั้น
+function otherDetailSheet({ lgo = false } = {}) {
+  const funds = lgo ? ["IPLG", "OPLG", "PALG", "INSTLG", "OTLG", "PP", "DRUG"] : ["IPCS", "IPCS_ORS", "OPCS", "PACS", "INSTCS", "OTCS", "PP", "DRUG"];
+  const denies = lgo ? ["IPLG", "OPLG", "PALG", "INSTLG", "OTLG"] : ["IPCS", "OPCS", "PACS", "INSTCS", "OTCS"];
+  const deny = 40 + funds.length;
+  const ors = deny + denies.length;
+  const width = ors + 6;
+  const h5 = Array(width).fill(null);
+  const h6 = Array(width).fill(null);
+  Object.assign(h5, {
+    0: "REP", 1: "ลำดับที่", 2: "TRAN_ID", 3: "HN", 4: "AN", 5: "PID", 6: "ชื่อ - สกุล", 7: "ประเภทผู้ป่วย", 8: "วันเข้ารักษา", 9: "วันจำหน่าย",
+    10: "ชดเชยสุทธิ", 12: "Error Code", 13: "กองทุน", 18: "สิทธิหลัก", 19: "สิทธิรอง", 25: "PROJ", 27: "DRG", 28: "RW",
+    29: lgo ? "เรียกเก็บ" : "ชดเชยสุทธิ", 31: "เบิกได้", 33: "ชำระเอง", 38: "AdjRW", 40: "กรณี", [deny]: "Deny",
+    [ors]: "ORS", [ors + 1]: "VA", [ors + 2]: "AUDIT RESULTS", [ors + 3]: "SEQ NO", [ors + 4]: "INVOICE NO", [ors + 5]: "INVOICE LT",
+  });
+  Object.assign(h6, { 10: "ค่ารักษา", 11: "PP (รับจาก สปสช.)", 29: "ค่ารักษา", 30: "PP" });
+  funds.forEach((f, i) => (h6[40 + i] = f));
+  denies.forEach((f, i) => (h6[deny + i] = f));
+
+  const row = () => Array(width).fill("-");
+  const ip = row();
+  Object.assign(ip, {
+    0: "690000001", 1: 1, 2: "800000001", 3: "0000003", 4: "690000456", 5: "0000000000003", 6: "ทดสอบ", 7: "IP",
+    8: "01/10/2026 09:00:00", 9: "05/10/2026 10:00:00", 10: 1200.5, 11: 0, 13: lgo ? "IPLG,OTLG" : "IPCS,OTCS", 18: lgo ? "LGO" : "OFC",
+    19: lgo ? "L2" : "O4", 27: "06590", 28: "1.2345", 29: 1500, 30: 0, 33: 100, 38: "1.1111", 40: 1000.5, [40 + funds.length - 3]: 200,
+    [deny]: "C", [ors + 2]: null, [ors + 3]: "",
+  });
+  const op = row();
+  Object.assign(op, {
+    0: "690000001", 1: 2, 2: "800000002", 3: "0000004", 4: "", 7: "OP", 8: "02/10/2026 08:00:00", 10: 0, 11: 0, 12: "438,179",
+    13: "", 18: "LGO", 29: 300, 30: 0, 33: 0, [ors + 3]: "691002080001",
+  });
+  const ws = utils.aoa_to_sheet([["ออกรายงานวันที่ 16/11/2569 เวลา 11:20"], [], [], [], [], h5, h6, ip, op, ["PP=ประกอบด้วยกลุ่มกองทุน"]]);
+  ws["!merges"] = [range(5, 10, 5, 11), range(5, 29, 5, 30), range(5, 40, 5, deny - 1), range(5, deny, 5, ors - 1), range(5, 0, 6, 0), range(5, 2, 6, 2)];
+  return ws;
+}
+
+function otherSummarySheet({ lgo = false } = {}) {
+  const pc = lgo ? 20 : 22;
+  const aoa = [["* รายการที่แสดงจะแสดงรายการที่ผ่านเท่านั้น"], [], [], [], [], ["-", "11252", "690000001", 2, 1, 1, 1800, 1200.5]];
+  Object.assign(aoa[1], { 0: "งวด", 1: "HCODE", 2: "REP NO.", 3: "ข้อมูลปกติ", [pc]: "ชดเชยสุทธิ" });
+  Object.assign(aoa[3], { 3: "จำนวนราย", 6: lgo ? "OPLG" : "OPCS", [pc]: "ค่ารักษา", [pc + 1]: "PP (รับจาก สปสช.)" });
+  Object.assign(aoa[4], { 3: "ทั้งหมด", 4: "ผ่าน", 5: "ไม่ผ่าน", 6: "เรียกเก็บ", 7: "ชดเชย" });
+  Object.assign(aoa[5], { [pc]: 1200.5, [pc + 1]: 0 });
+  const ws = utils.aoa_to_sheet(aoa);
+  ws["!merges"] = [range(1, 3, 2, pc - 1), range(1, pc, 2, pc + 1), range(3, 3, 3, 5), range(3, 6, 3, 7)];
+  return ws;
+}
+
+function otherBook(opts) {
+  const wb = utils.book_new();
+  utils.book_append_sheet(wb, otherDetailSheet(opts), "Detail");
+  utils.book_append_sheet(wb, otherSummarySheet(opts), "Summary");
+  return write(wb, { type: "buffer", bookType: "xlsx" });
+}
+
 test("file name -> hcode, type, CE date", () => {
+  assert.deepEqual(parseFileName("eclaim_11252_IPCS_25691005_145720713 (1).xls"), { hcode: "11252", type: "IPCS", fileDate: "2026-10-05" });
+  assert.deepEqual(parseFileName("eclaim_11252_OPLGO_25691103_154808375 (12).xls"), { hcode: "11252", type: "OPLGO", fileDate: "2026-11-03" });
+  assert.equal(parseFileName("eclaim_11252_IPCS_25691005_145720713(1).xls"), null);
   assert.deepEqual(parseFileName("eclaim_11252_OP_APPEAL_CD_25690821_115328402.xls"), { hcode: "11252", type: "OP_APPEAL_CD", fileDate: "2026-08-21" });
   assert.deepEqual(parseFileName("eclaim_11252_IP_25681002_171025461.xls"), { hcode: "11252", type: "IP", fileDate: "2025-10-02" });
   assert.equal(parseFileName("eclaim_11252_IP_25681002_171025461.xlsx"), null);
@@ -126,4 +185,56 @@ test("Detail rows map to records, notes skipped, duplicate TRAN_ID keeps the las
 test("a different layout is rejected with the column that differs", () => {
   assert.throws(() => parseRep(book(detailSheet({ tranHeader: "TRANS" }))), /คอลัมน์ 3 ต้องเป็น "TRAN_ID"/);
   assert.throws(() => parseRep(new Uint8Array([1, 2, 3])), /ไม่พบชีต|อ่านไฟล์ไม่ได้/);
+});
+
+for (const lgo of [false, true]) {
+  test(`non-UC REP (${lgo ? "LGO 58" : "CS 59"} columns) maps to records by header labels`, () => {
+    const { layout, printedAt: at, rows, summaries } = parseRep(otherBook({ lgo }));
+    assert.equal(layout, "other");
+    assert.equal(at, "2026-11-16 11:20:00");
+    assert.deepEqual(rows.map((r) => r.tran_id), ["800000001", "800000002"]);
+    const [ip, op] = rows;
+    assert.equal(ip.rep_no, "690000001");
+    assert.equal(ip.patient_type, "IP");
+    assert.equal(ip.an, "690000456");
+    assert.equal(ip.seq_no, null); // IP ไม่มี SEQ NO ใช้ AN
+    assert.equal(ip.admit_at, "2026-10-01 09:00:00");
+    assert.equal(ip.discharge_at, "2026-10-05 10:00:00");
+    assert.equal(ip.net_nhso, 1200.5);
+    assert.equal(ip.net_affiliation, 0);
+    assert.equal(ip.claim_total, 1500);
+    assert.equal(ip.self_pay, 100);
+    assert.deepEqual(ip.error_codes, []);
+    assert.deepEqual(ip.main_fund, lgo ? ["IPLG", "OTLG"] : ["IPCS", "OTCS"]);
+    assert.equal(ip.main_inscl, lgo ? "LGO" : "OFC");
+    assert.equal(ip.drg, "06590");
+    assert.equal(ip.rw, 1.2345);
+    assert.equal(ip.adjrw, 1.1111);
+    const [f0, ot] = lgo ? ["IPLG", "OTLG"] : ["IPCS", "OTCS"];
+    assert.deepEqual(ip.fund_amounts, { [`กรณี / ${f0}`]: 1000.5, [`กรณี / ${ot}`]: 200 });
+    assert.deepEqual(ip.deny, { [`Deny / ${f0}`]: "C" });
+    assert.equal(Object.values(ip).includes("ทดสอบ"), false);
+    assert.equal(op.seq_no, "691002080001");
+    assert.equal(op.an, null);
+    assert.equal(op.discharge_at, null);
+    assert.deepEqual(op.error_codes, ["438", "179"]);
+    assert.deepEqual(op.fund_amounts, {});
+    assert.equal(op.deny, null);
+
+    assert.equal(summaries.length, 1);
+    const [s] = summaries;
+    assert.deepEqual([s.rep_no, s.total_cases, s.passed, s.failed, s.paid_affiliation, s.paid_total], ["690000001", 2, 1, 1, null, 1200.5]);
+    assert.equal(s.amounts[`ข้อมูลปกติ / ${lgo ? "OPLG" : "OPCS"} / ชดเชย`], 1200.5);
+    assert.equal("ชดเชยสุทธิ / ค่ารักษา" in s.amounts, false);
+  });
+}
+
+test("scheme from file type and layout", () => {
+  assert.equal(schemeOf("OP_APPEAL_CD", "uc"), "UCS");
+  assert.equal(schemeOf("IPCS", "other"), "OFC");
+  assert.equal(schemeOf("IPLGO", "other"), "LGO");
+  assert.equal(schemeOf("OPLGO", "other"), "LGO");
+  assert.equal(schemeOf("OPBKK", "other"), "BKK");
+  assert.equal(schemeOf("OPBMT", "other"), "BMT");
+  assert.equal(parseRep(book()).layout, "uc");
 });
