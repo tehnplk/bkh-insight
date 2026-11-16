@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/ar-precheck/precheck.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows, isMismatch, lockOverdue, matches, sortRows, summarize } from "./precheck.ts";
+import { MAX_STALE_VNS, buildRows, isMismatch, isStaleSlip, lockOverdue, matches, parseStaleVns, planStaleSlip, sortRows, summarize } from "./precheck.ts";
 
 const src = (key, extra = {}) => ({
   key, vn: key, an: null, hn: `hn${key}`, patient_name: `name ${key}`, date: "2026-11-01", regdate: null,
@@ -116,9 +116,67 @@ test("OPD ล็อกแล้ว: ใบลูกหนี้ตรงรา�
   assert.equal(statusOf("opd", src("1", { debt_amount: "50" })), "keyed_after");
   // ค่าใช้จ่ายไม่ตรงนำหน้า
   assert.equal(statusOf("opd", src("1", { uc_money: "50" }), [rx("1", "110", "50", "60")]), "total");
+  // ยกเว้นค่าธรรมเนียม 30 บาทด้วยการลบรายการ: income คำนวณใหม่ 445 แต่ paid_money ค้าง 30 (ข้อมูลจริง 12 พ.ย. 2569)
+  const exempt = src("1", { income: "445", paid_money: "30", rcpt_money: "0", uc_money: "445", debt_amount: "445" });
+  assert.equal(statusOf("opd", exempt, [rx("1", "445", "0", "445")]), "stale_stat");
+  // มีรายการค่าธรรมเนียม 30 บาท (paidst 03) จริงและยอดสรุปตรง = ok
+  const fee = src("1", { income: "475", paid_money: "30", rcpt_money: "30", uc_money: "445", debt_amount: "445" });
+  assert.equal(statusOf("opd", fee, [rx("1", "475", "30", "445")]), "ok");
   assert.ok(isMismatch("stale_stat") && isMismatch("keyed_after"));
   // นับ "ไม่ตรง" ไม่รวมรายที่รอ
   const rows = buildRows("opd", [src("1"), src("2", { finance_lock: null, date: "2026-11-17" }), src("3", { debt_amount: "50" })], [rx("1"), rx("2"), rx("3")], [], TODAY);
   assert.deepEqual(rows.map((r) => r.status), ["ok", "pending_lock", "keyed_after"]);
   assert.equal(summarize(rows).total.mismatch, 1);
+});
+
+test("OPD ใบค้าง: ปรับปรุงในสมุดจนคงเหลือ 0 = stale_fixed (ไม่นับไม่ตรง) ; ยังไม่ลงสมุด/ติดลบ/อ่านสมุดไม่ได้ ยังเป็น stale_slip", () => {
+  const stale = src("1", { an: "690000001", debt_amount: "50" });
+  const status = (booked) => buildRows("opd", [stale], [], booked, TODAY)[0].status;
+  assert.equal(status([{ key: "1", booked: "50.00", balance: "0.00" }]), "stale_fixed");
+  assert.equal(status([{ key: "1", booked: "50.00", balance: "50.00" }]), "stale_slip");
+  assert.equal(status([{ key: "1", booked: "50.00", balance: "-50.00" }]), "stale_slip");
+  assert.equal(status([]), "stale_slip");
+  assert.equal(status(null), "stale_slip");
+  // booked ยังเป็นยอดของ HOSxP ไม่รวม manual
+  assert.equal(buildRows("opd", [stale], [], [{ key: "1", booked: "50.00", balance: "0.00" }], TODAY)[0].booked, 50);
+  assert.ok(!isMismatch("stale_fixed"));
+});
+
+test("isStaleSlip: ค่าจาก mysql2 (has_stat 0/1, debt NULL, n_items string)", () => {
+  const v = { vn: "1", an: "690000001", has_stat: 1, debt_amount: "50.00", n_items: "0" };
+  assert.ok(isStaleSlip(v));
+  assert.ok(!isStaleSlip({ ...v, has_stat: 0 }));
+  assert.ok(!isStaleSlip({ ...v, an: null }));
+  assert.ok(!isStaleSlip({ ...v, debt_amount: null }));
+  assert.ok(!isStaleSlip({ ...v, n_items: 2 }));
+});
+
+test("parseStaleVns: VN 12 หลัก ไม่ซ้ำ ไม่เกิน MAX_STALE_VNS", () => {
+  assert.deepEqual(parseStaleVns(["691001000001", "691001000001"]), ["691001000001"]);
+  assert.ok("error" in parseStaleVns([]));
+  assert.ok("error" in parseStaleVns("691001000001"));
+  assert.ok("error" in parseStaleVns(["69100100000"]));
+  assert.ok("error" in parseStaleVns(["691001000001; --"]));
+  assert.ok("error" in parseStaleVns(Array.from({ length: MAX_STALE_VNS + 1 }, (_, i) => String(691001000000 + i))));
+});
+
+test("planStaleSlip: ลดให้คงเหลือ 0 ต่อ debt_id ข้ามพร้อมเหตุผล", () => {
+  const visit = (vn, extra = {}) => ({ vn, an: "690000001", has_stat: 1, debt_amount: "50.00", n_items: 0, ...extra });
+  const debt = (vn, ref, balance, settled = false) => ({ vn, ref, balance, settled });
+  const vns = ["A", "B", "C", "D", "E", "F"];
+  const { requests, skipped } = planStaleSlip(
+    vns,
+    [visit("A", { debt_amount: "80.10" }), visit("B", { n_items: "3" }), visit("C"), visit("D"), visit("E")],
+    [debt("A", "11", "50.00"), debt("A", "12", "30.10"), debt("D", "41", "50.00", true), debt("E", "51", "0.00"), debt("E", "52", "50.00"), debt("C2", "99", "50.00")],
+    new Set(["52"]),
+  );
+  // vn เดียวหลายใบ = หลายคำขอ ยอดเป็นสตางค์
+  assert.deepEqual(requests, [{ vn: "A", ref: "11", amount: "-50.00" }, { vn: "A", ref: "12", amount: "-30.10" }]);
+  assert.deepEqual(skipped.map((s) => [s.vn, s.ref]), [["B", null], ["C", null], ["D", "41"], ["E", "51"], ["E", "52"], ["F", null]]);
+  assert.match(skipped[0].reason, /ไม่ได้เป็นใบลูกหนี้ค้าง/);
+  assert.match(skipped[1].reason, /ยังไม่ลงสมุด/);
+  assert.match(skipped[2].reason, /STM/);
+  assert.match(skipped[3].reason, /ไม่มากกว่า 0/);
+  assert.match(skipped[4].reason, /รออนุมัติ/);
+  assert.match(skipped[5].reason, /ไม่พบ visit/);
 });

@@ -31,20 +31,27 @@ test("row shape: numbers parsed, fund from pttype, PDx kept", () => {
   assert.equal(buildRows([raw("4", "h", { pdx: "", pdx_name: null })], [], fundOf)[0].pdx, null);
 });
 
-test("REP only on UCS rows: found = latest, missing = null; other funds have no rep key", () => {
-  const reps = [{ an: "1", rep_no: "R1", rep_date: "2026-10-20", status: "c", codes: ["438"] }];
+test("REP: found = latest on any fund, missing = null only on UCS; other funds without REP have no rep key", () => {
+  const reps = [
+    { an: "1", rep_no: "R1", rep_date: "2026-10-20", status: "c", codes: ["438"] },
+    { an: "5", rep_no: "R5", rep_date: "2026-10-21", status: "pass", codes: [] },
+  ];
   const rows = buildRows(
-    [raw("1", "h", { days_since_dch: 45 }), raw("2", "h", { days_since_dch: 45 }), raw("3", "h", { days_since_dch: 30 }), raw("4", "h", { pttype: "S1", days_since_dch: 45 })],
+    [
+      raw("1", "h", { days_since_dch: 45 }), raw("2", "h", { days_since_dch: 45 }), raw("3", "h", { days_since_dch: 30 }),
+      raw("4", "h", { pttype: "S1", days_since_dch: 45 }), raw("5", "h", { pttype: "O1", days_since_dch: 45 }),
+    ],
     reps,
     fundOf,
   );
   assert.deepEqual(rows[0].rep, { rep_no: "R1", rep_date: "2026-10-20", status: "c", codes: ["438"] });
   assert.equal(rows[1].rep, null);
   assert.equal("rep" in rows[3], false);
-  // overdue = เกิน 30 วันและยังไม่มี REP ; กองทุนที่ไม่มี REP ดูจากจำนวนวันอย่างเดียว
-  assert.deepEqual(rows.map((r) => r.overdue), [false, true, false, true]);
+  assert.equal(rows[4].rep.rep_no, "R5");
+  // overdue = เกิน 30 วันและยังไม่มี REP ; กองทุนที่ไม่มีสถานะ REP ดูจากจำนวนวันอย่างเดียว
+  assert.deepEqual(rows.map((r) => r.overdue), [false, true, false, true, false]);
   // โหลด REP ไม่ได้ (reps undefined): แถว UCS ไม่มีสถานะ REP
-  assert.equal("rep" in buildRows([raw("5", "h")], undefined, fundOf)[0], false);
+  assert.equal("rep" in buildRows([raw("8", "h")], undefined, fundOf)[0], false);
   assert.equal(buildRows([raw("6", "h", { days_since_dch: null })], [], fundOf)[0].overdue, false);
 });
 

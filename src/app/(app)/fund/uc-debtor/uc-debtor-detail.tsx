@@ -60,11 +60,6 @@ const Codes = ({ codes }: { codes: string[] }) =>
 
 /** เนื้อหา modal ของลูกหนี้หนึ่งราย: ยอดจากแถวของ grid แสดงทันที ส่วน REP โหลดเมื่อเปิด */
 export function UcDebtorDetail({ row, status }: { row: UcDebtorRow; status: ReactNode }) {
-  const type = row.an ? "ipd" : "opd";
-  const { loading, data, error, retry } = useJson<RepDetailResponse>(
-    `/api/fund/uc-debtor/detail?${new URLSearchParams({ type, key: row.key })}`,
-  );
-
   return (
     <div className="text-sm">
       <Facts>
@@ -74,16 +69,24 @@ export function UcDebtorDetail({ row, status }: { row: UcDebtorRow; status: Reac
         <Fact label="สถานะ">{status}</Fact>
       </Facts>
       <DebtorItems vn={row.key} an={row.an} debtor={row.debtor} />
-      {loading ? (
-        <div className="mt-6"><Skeleton rows={6} /></div>
-      ) : error || !data ? (
-        <div className="mt-6"><LoadError what="ข้อมูล REP" error={error} retry={retry} /></div>
-      ) : !data.latest ? (
-        <p className="mt-6 rounded-lg border border-line px-4 py-8 text-center text-muted">ยังไม่มี REP</p>
-      ) : (
-        <RepSections data={data} latest={data.latest} ipd={type === "ipd"} />
-      )}
+      <RepDetail type={row.an ? "ipd" : "opd"} repKey={row.key} />
     </div>
+  );
+}
+
+/** REP ของ visit (opd, repKey = VN) หรือ admission (ipd, repKey = AN): ยอดจัดสรร, Error และประวัติการส่ง โหลดเมื่อแสดง */
+export function RepDetail({ type, repKey }: { type: "opd" | "ipd"; repKey: string }) {
+  const { loading, data, error, retry } = useJson<RepDetailResponse>(
+    `/api/fund/uc-debtor/detail?${new URLSearchParams({ type, key: repKey })}`,
+  );
+  return loading ? (
+    <div className="mt-6"><Skeleton rows={6} /></div>
+  ) : error || !data ? (
+    <div className="mt-6"><LoadError what="ข้อมูล REP" error={error} retry={retry} /></div>
+  ) : !data.latest ? (
+    <p className="mt-6 rounded-lg border border-line px-4 py-8 text-center text-muted">ยังไม่มี REP</p>
+  ) : (
+    <RepSections data={data} latest={data.latest} ipd={type === "ipd"} />
   );
 }
 

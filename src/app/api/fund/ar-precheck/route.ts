@@ -46,10 +46,14 @@ FROM ipt i LEFT JOIN an_stat s ON s.an = i.an LEFT JOIN patient p ON p.hn = i.hn
 WHERE i.dchdate BETWEEN ? AND ?`;
 const ipRx = (n: number) =>
   `SELECT an AS \`key\`, ${RX_COLS} FROM opitemrece FORCE INDEX (ix_an) WHERE an IN (${Array(n).fill("?").join(", ")}) GROUP BY an`;
-// ยอดคงเหลือของหนี้ที่ตั้งแล้ว = SUM ทุกแถวของ (source, ref) เดียวกัน
+// booked = ยอดของ source HOSxP ของหนี้ที่ตั้งแล้ว, balance = คงเหลือทางบัญชีทุก source ของ (patient_type, ref) เดียวกัน
 const ledgerSql = (col: "vn" | "an", source: "rcpt_debt" | "ipt") =>
-  `SELECT s.${col} AS key, SUM(x.amount) AS booked FROM ar_ledger s JOIN ar_ledger x ON x.source = s.source AND x.ref = s.ref
-   WHERE s.kind = 'set' AND s.source = '${source}' AND s.${col} = ANY($1::text[]) GROUP BY s.${col}`;
+  `SELECT s.${col} AS key,
+  SUM(x.amount) FILTER (WHERE x.source = s.source) AS booked,
+  SUM(x.amount) AS balance
+FROM ar_ledger s JOIN ar_ledger x ON x.patient_type = s.patient_type AND x.ref = s.ref
+WHERE s.kind = 'set' AND s.source = '${source}' AND s.${col} = ANY($1::text[])
+GROUP BY s.${col}`;
 
 async function chunked<T>(keys: string[], run: (part: string[]) => Promise<T[]>): Promise<T[]> {
   const out: T[] = [];

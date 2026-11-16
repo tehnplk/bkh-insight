@@ -6,7 +6,7 @@ import { escapeLike, insightQuery, insightTransaction } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
-import { MAX_FILE_BYTES, parseFileName, parseRep, type RepRow } from "./rep";
+import { MAX_FILE_BYTES, parseFileName, parseRep, schemeOf, type RepRow } from "./rep";
 import { UC_DASHBOARD_TAG } from "../uc-dashboard/dashboard";
 
 /** แถวของรายการไฟล์ (GET) */
@@ -110,12 +110,16 @@ const ROW_COLS: [keyof RepRow, string][] = [
   ["rw", "numeric"], ["adjrw", "numeric"], ["fund_amounts", "jsonb"], ["deny", "jsonb"], ["remark", "text"], ["pay_mode", "text"],
 ];
 const names = ROW_COLS.map(([n]) => n).join(", ");
-// TRAN_ID เดิม (ไฟล์อุทธรณ์ส่งแถวเดิมซ้ำ) เขียนทับด้วยไฟล์ที่นำเข้าล่าสุด
-const UPSERT_ROWS = `INSERT INTO rep_row (rep_file_id, ${names})
-SELECT $2, ${names} FROM jsonb_to_recordset($1::jsonb) AS x(${ROW_COLS.map(([n, t]) => `${n} ${t}`).join(", ")})
+// TRAN_ID เดิม (ไฟล์อุทธรณ์ส่งแถวเดิมซ้ำ) เขียนทับด้วยไฟล์ที่นำเข้าล่าสุด ; $3 = scheme
+// ทับเฉพาะ scheme เดียวกัน: TRAN_ID ที่ชนกับ REP ของสิทธิอื่นไม่คืนแถว ผู้เรียกนับแล้ว ROLLBACK ทั้งไฟล์ (กันแถว UC ถูกทับ)
+const UPSERT_ROWS = `INSERT INTO rep_row (rep_file_id, scheme, ${names})
+SELECT $2, $3, ${names} FROM jsonb_to_recordset($1::jsonb) AS x(${ROW_COLS.map(([n, t]) => `${n} ${t}`).join(", ")})
 ON CONFLICT (tran_id) DO UPDATE SET rep_file_id = EXCLUDED.rep_file_id, ${ROW_COLS.filter(([n]) => n !== "tran_id")
   .map(([n]) => `${n} = EXCLUDED.${n}`)
-  .join(", ")}, updated_at = now()`;
+  .join(", ")}, updated_at = now()
+WHERE rep_row.scheme = EXCLUDED.scheme
+RETURNING tran_id`;
+const TRAN_CLASH = "TRAN_ID ซ้ำกับ REP ของสิทธิอื่นที่นำเข้าแล้ว";
 const INSERT_SUMMARY = `INSERT INTO rep_summary (rep_file_id, rep_no, sheet, period, total_cases, passed, failed, amounts, paid_affiliation, paid_total)
 SELECT $2, rep_no, sheet, period, total_cases, passed, failed, amounts, paid_affiliation, paid_total
 FROM jsonb_to_recordset($1::jsonb) AS x(rep_no varchar, sheet text, period text, total_cases int, passed int, failed int,
@@ -155,6 +159,7 @@ export async function POST(request: Request) {
   }
   const reps = [...new Set(parsed.rows.map((r) => r.rep_no))].sort();
   const sha = createHash("sha256").update(buf).digest("hex");
+  const scheme = schemeOf(info.type, parsed.layout);
 
   try {
     const imported = await insightTransaction(async (tx) => {
@@ -167,7 +172,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING RETURNING id`,
       if (!row) return false;
       if (parsed.summaries.length) await tx(INSERT_SUMMARY, [JSON.stringify(parsed.summaries), row.id]);
       for (let i = 0; i < parsed.rows.length; i += CHUNK) {
-        await tx(UPSERT_ROWS, [JSON.stringify(parsed.rows.slice(i, i + CHUNK)), row.id]);
+        const chunk = parsed.rows.slice(i, i + CHUNK);
+        const done = await tx(UPSERT_ROWS, [JSON.stringify(chunk), row.id, scheme]);
+        if (done.length !== chunk.length) throw new Error(TRAN_CLASH);
       }
       return true;
     });
@@ -176,6 +183,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING RETURNING id`,
     return result({ ...typed, status: "imported", rows: parsed.rows.length, reps });
   } catch (e) {
     console.error("rep-import", file.name, (e as Error).message);
+    if ((e as Error).message === TRAN_CLASH) return result({ ...typed, status: "error", reps, error: TRAN_CLASH }, 409);
     return result({ ...typed, status: "error", reps, error: "บันทึกลงฐานข้อมูลไม่สำเร็จ" }, 500);
   }
 }

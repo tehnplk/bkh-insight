@@ -13,12 +13,12 @@ type Debtor = { key: string; date: string; debtor: number };
 type Rep = { comp: string; error_codes: string[] };
 type Num = string | null;
 
-// REP ล่าสุด (tran_id มากสุด) ต่อ visit/admission ในช่วงปีงบ ชดเชย = net_nhso + net_affiliation (กฎเดียวกับ compensationOf)
+// REP UC (scheme = 'UCS') ล่าสุด (tran_id มากสุด) ต่อ visit/admission ในช่วงปีงบ ชดเชย = net_nhso + net_affiliation (กฎเดียวกับ compensationOf)
 const OPD_REP = `SELECT DISTINCT ON (seq_no) seq_no, (net_nhso + COALESCE(net_affiliation, 0)) AS comp, error_codes FROM rep_row
-WHERE patient_type = 'OP' AND seq_no IS NOT NULL AND admit_at >= $1::date AND admit_at < ($2::date + 1) ORDER BY seq_no, tran_id::bigint DESC`;
+WHERE scheme = 'UCS' AND patient_type = 'OP' AND seq_no IS NOT NULL AND admit_at >= $1::date AND admit_at < ($2::date + 1) ORDER BY seq_no, tran_id::bigint DESC`;
 const IPD_REP = `SELECT DISTINCT ON (an) an, (net_nhso + COALESCE(net_affiliation, 0)) AS comp, error_codes FROM rep_row
-WHERE patient_type = 'IP' AND an IS NOT NULL AND discharge_at >= $1::date AND discharge_at < ($2::date + 1) ORDER BY an, tran_id::bigint DESC`;
-const latest = (cols: string) => `WITH latest AS ((SELECT DISTINCT ON (seq_no) ${cols} FROM rep_row WHERE patient_type = 'OP' AND seq_no IS NOT NULL AND admit_at >= $1::date AND admit_at < ($2::date + 1) ORDER BY seq_no, tran_id::bigint DESC) UNION ALL (SELECT DISTINCT ON (an) ${cols} FROM rep_row WHERE patient_type = 'IP' AND an IS NOT NULL AND discharge_at >= $1::date AND discharge_at < ($2::date + 1) ORDER BY an, tran_id::bigint DESC))`;
+WHERE scheme = 'UCS' AND patient_type = 'IP' AND an IS NOT NULL AND discharge_at >= $1::date AND discharge_at < ($2::date + 1) ORDER BY an, tran_id::bigint DESC`;
+const latest = (cols: string) => `WITH latest AS ((SELECT DISTINCT ON (seq_no) ${cols} FROM rep_row WHERE scheme = 'UCS' AND patient_type = 'OP' AND seq_no IS NOT NULL AND admit_at >= $1::date AND admit_at < ($2::date + 1) ORDER BY seq_no, tran_id::bigint DESC) UNION ALL (SELECT DISTINCT ON (an) ${cols} FROM rep_row WHERE scheme = 'UCS' AND patient_type = 'IP' AND an IS NOT NULL AND discharge_at >= $1::date AND discharge_at < ($2::date + 1) ORDER BY an, tran_id::bigint DESC))`;
 // ยอดรวม fund_amounts ต่างจาก net_nhso ราว 0.2% จึงไม่อ้างว่าเท่ากัน
 const FUNDS = `${latest("fund_amounts")} SELECT e.key AS fund_key, SUM(e.value::numeric) AS amount FROM latest, jsonb_each_text(latest.fund_amounts) AS e WHERE e.key NOT LIKE 'base rate%' GROUP BY e.key ORDER BY amount DESC`;
 const AFFILIATION = `${latest("net_nhso, net_affiliation")} SELECT COUNT(*) AS n, SUM(net_nhso) AS nhso, SUM(net_affiliation) AS affiliation FROM latest`;
@@ -51,7 +51,7 @@ async function latestRepFy(): Promise<number | null> {
   "use cache";
   cacheTag(UC_DASHBOARD_TAG);
   cacheLife("hours");
-  const [row] = await insightQuery<{ latest: string | null }>("SELECT MAX(admit_at)::date AS latest FROM rep_row");
+  const [row] = await insightQuery<{ latest: string | null }>("SELECT MAX(admit_at)::date AS latest FROM rep_row WHERE scheme = 'UCS'");
   return row?.latest ? fiscalYearOf(row.latest) : null;
 }
 

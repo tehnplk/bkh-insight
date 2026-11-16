@@ -4,11 +4,12 @@
 export type PrecheckType = "opd" | "ipd";
 /** ค่าเดียวต่อราย ตามลำดับการตรวจ (ข้อแรกที่ไม่ผ่าน) */
 export type PrecheckStatus =
-  | "no_stat" | "stale_slip" | "admitted" | "overdue_lock" | "pending_lock"
+  | "no_stat" | "stale_slip" | "stale_fixed" | "admitted" | "overdue_lock" | "pending_lock"
   | "total" | "stale_stat" | "split" | "keyed_after" | "debt" | "unlocked" | "unpaid" | "ok";
 export const STATUS_LABEL: Record<PrecheckStatus, string> = {
   no_stat: "ไม่มีข้อมูลสรุป",
   stale_slip: "ใบลูกหนี้ค้างหลัง admit",
+  stale_fixed: "ปรับปรุงในสมุดแล้ว",
   admitted: "admit แล้ว ตรวจที่ผู้ป่วยใน",
   overdue_lock: "ค้างล็อกเกินกำหนด",
   pending_lock: "ยังไม่ล็อกรายการ",
@@ -22,7 +23,7 @@ export const STATUS_LABEL: Record<PrecheckStatus, string> = {
   ok: "ตรง",
 };
 /** สถานะที่ยังไม่ต้องแก้: ตรง หรือรอขั้นตอนปกติของ HOSxP (นับ "ไม่ตรง" และ only=mismatch จากนี้ที่เดียว) */
-const SETTLED = new Set<PrecheckStatus>(["ok", "admitted", "pending_lock"]);
+const SETTLED = new Set<PrecheckStatus>(["ok", "admitted", "pending_lock", "stale_fixed"]);
 export const isMismatch = (s: PrecheckStatus) => !SETTLED.has(s);
 export const lockLabel = (financeLock: string | null) => (financeLock === "Y" ? "ล็อกแล้ว" : "ยังไม่ล็อก");
 
@@ -68,7 +69,8 @@ export type PrecheckSource = {
   finance_lock: string | null;
 };
 export type RxSum = { key: string; n_items: Num; rx_total: Num; rx_pay: Num; rx_debt: Num };
-export type Booked = { key: string; booked: Num };
+/** booked = ยอดของ source HOSxP, balance = คงเหลือทางบัญชีทุก source (รวม stm/manual) */
+export type Booked = { key: string; booked: Num; balance: Num };
 
 export type PrecheckRow = Omit<PrecheckSource, "has_stat" | "income" | "paid_money" | "rcpt_money" | "uc_money" | "debt_amount"> & {
   admit: keyof typeof ADMIT_LABEL;
@@ -93,10 +95,14 @@ export type PrecheckRow = Omit<PrecheckSource, "has_stat" | "income" | "paid_mon
 const cents = (v: Num) => Math.round(Number(v ?? 0) * 100);
 const baht = (c: number) => c / 100;
 
+/** HOSxP ย้ายรายการไป AN ตอน admit แต่ไม่ยกเลิกใบลูกหนี้ OPD ที่ออกก่อน admit: มีใบ > 0 แต่ไม่เหลือรายการที่ vn */
+export const isStaleSlip = (v: { has_stat: boolean | number | string; an: string | null; debt_amount: Num; n_items: Num }) =>
+  Boolean(Number(v.has_stat)) && !!v.an && cents(v.debt_amount) > 0 && Number(v.n_items ?? 0) === 0;
+
 /** booked = null คืออ่านสมุดลูกหนี้ไม่ได้ (ทุกแถวเป็น null) ไม่มีแถวในสมุด = 0 ; today = วันนี้เวลาไทย ISO */
 export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxSum[], booked: Booked[] | null, today: string): PrecheckRow[] {
   const rxBy = new Map(rx.map((r) => [r.key, r]));
-  const bookedBy = booked && new Map(booked.map((b) => [b.key, cents(b.booked)]));
+  const bookedBy = booked && new Map(booked.map((b) => [b.key, { booked: cents(b.booked), balance: cents(b.balance) }]));
   return sources.map(({ has_stat, income, paid_money, rcpt_money, uc_money, debt_amount, ...s }) => {
     const x = rxBy.get(s.key);
     const total = cents(x?.rx_total), pay = cents(x?.rx_pay), rxDebt = cents(x?.rx_debt);
@@ -106,21 +112,23 @@ export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxS
     const opd = type === "opd";
     const debt = opd ? cents(debt_amount) : locked ? uc : 0;
     const nItems = Number(x?.n_items ?? 0);
+    const ledger = bookedBy ? (bookedBy.get(s.key) ?? { booked: 0, balance: 0 }) : null;
     const status: PrecheckStatus =
       !stat ? "no_stat"
-      // HOSxP ย้ายรายการไป AN ตอน admit แต่ไม่ยกเลิกใบลูกหนี้ OPD ที่ออกก่อน admit
-      : opd && s.an ? (debt > 0 && nItems === 0 ? "stale_slip" : "admitted")
+      : opd && s.an
+        ? !isStaleSlip({ has_stat, an: s.an, debt_amount, n_items: nItems }) ? "admitted"
+          // ลงสมุดแล้วและปรับปรุงจนคงเหลือ 0 (HOSxP ยังมีใบอยู่) ; ติดลบยังเป็น stale_slip ให้เห็นว่าลดเกิน
+          : ledger && ledger.booked > 0 && ledger.balance === 0 ? "stale_fixed" : "stale_slip"
       : opd && !locked ? (lockOverdue(s.date, today) ? "overdue_lock" : "pending_lock")
       : total !== inc ? "total"
-      // ใบลูกหนี้ตรงกับรายการ paidst 02 แล้ว แต่ vn_stat.uc_money ยังเป็นยอดเดิม
-      : opd && debt === rxDebt && uc !== rxDebt ? "stale_stat"
+      // ใบลูกหนี้ตรงกับรายการ paidst 02 แล้ว แต่ vn_stat.uc_money ยังเป็นยอดเดิม หรือลบค่าธรรมเนียม 30 บาทตอนยกเว้น HOSxP คำนวณ income ใหม่แต่ paid_money ค้าง
+      : opd && debt === rxDebt && (uc !== rxDebt || paid + uc !== inc) ? "stale_stat"
       : pay !== paid || rxDebt !== uc ? "split"
       : opd && debt < rxDebt ? "keyed_after"
       : opd && debt > rxDebt ? "debt"
       : !locked ? "unlocked"
       : paid - rcpt > 0 ? "unpaid"
       : "ok";
-    const b = bookedBy ? (bookedBy.get(s.key) ?? 0) : null;
     return {
       ...s,
       admit: s.an ? "yes" : "no",
@@ -133,7 +141,7 @@ export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxS
       rcpt_money: stat ? baht(rcpt) : null,
       uc_money: stat ? baht(uc) : null,
       debt: baht(debt),
-      booked: b == null ? null : baht(b),
+      booked: ledger ? baht(ledger.booked) : null,
       diff_total: stat ? baht(total - inc) : null,
       diff_debt: stat ? baht(uc - debt) : null,
       status,
@@ -207,4 +215,45 @@ export function sortRows(rows: PrecheckRow[], key: SortKey, dir: "asc" | "desc")
       : String(x).localeCompare(String(y), "th", { numeric: true });
     return sign * c || a.date.localeCompare(b.date) || a.key.localeCompare(b.key);
   });
+}
+
+/* ---------- ขอปรับปรุงใบลูกหนี้ค้างหลัง admit หลายราย (POST /api/fund/ar-adjust/stale-slip) ---------- */
+
+export const MAX_STALE_VNS = 200;
+export const STALE_SLIP_REASON = "ใบลูกหนี้ผู้ป่วยนอกค้างหลัง admit: ค่าบริการผู้ป่วยนอกถูกแทนด้วยค่าบริการผู้ป่วยใน HOSxP XE ยกเลิกใบไม่ได้";
+/** ผลตรวจซ้ำจาก HOSxP ต่อ vn */
+export type StaleVisit = { vn: string; an: string | null; has_stat: number | string; debt_amount: Num; n_items: Num };
+/** หนี้ OPD ในสมุดของ vn (หนึ่งแถวต่อ debt_id) balance = คงเหลือทุก source */
+export type StaleDebt = { vn: string; ref: string; balance: Num; settled: boolean };
+export type StaleRequest = { vn: string; ref: string; amount: string };
+export type StaleSkip = { vn: string; ref: string | null; reason: string };
+/** response ของ POST /api/fund/ar-adjust/stale-slip */
+export type StaleSlipResult = { created: (StaleRequest & { id: string })[]; skipped: StaleSkip[] };
+
+/** body.vns: VN 12 หลัก ไม่ซ้ำ 1..MAX_STALE_VNS ราย */
+export function parseStaleVns(raw: unknown): string[] | { error: string } {
+  if (!Array.isArray(raw) || !raw.length || raw.length > MAX_STALE_VNS) return { error: `ส่ง vns 1–${MAX_STALE_VNS} ราย` };
+  if (!raw.every((v) => typeof v === "string" && /^\d{12}$/.test(v))) return { error: "VN ต้องเป็นตัวเลข 12 หลัก" };
+  return [...new Set(raw as string[])];
+}
+
+/** คำขอลดหนี้ให้คงเหลือ 0 ต่อ ref ของ vn ที่ยังเป็นใบค้างใน HOSxP ; ข้ามพร้อมเหตุผลเป็นรายราย */
+export function planStaleSlip(vns: string[], visits: StaleVisit[], debts: StaleDebt[], pending: Set<string>): { requests: StaleRequest[]; skipped: StaleSkip[] } {
+  const visitBy = new Map(visits.map((v) => [v.vn, v]));
+  const requests: StaleRequest[] = [];
+  const skipped: StaleSkip[] = [];
+  for (const vn of vns) {
+    const v = visitBy.get(vn);
+    if (!v) { skipped.push({ vn, ref: null, reason: "ไม่พบ visit ใน HOSxP" }); continue; }
+    if (!isStaleSlip(v)) { skipped.push({ vn, ref: null, reason: "HOSxP ไม่ได้เป็นใบลูกหนี้ค้างหลัง admit แล้ว" }); continue; }
+    const own = debts.filter((d) => d.vn === vn);
+    if (!own.length) { skipped.push({ vn, ref: null, reason: "ยังไม่ลงสมุดลูกหนี้ กดดึงใหม่ก่อน" }); continue; }
+    for (const d of own) {
+      const c = cents(d.balance);
+      const reason = d.settled ? "ตัดหนี้ด้วย STM แล้ว" : pending.has(d.ref) ? "มีคำขอรออนุมัติอยู่แล้ว" : c <= 0 ? "คงเหลือไม่มากกว่า 0 แล้ว" : null;
+      if (reason) skipped.push({ vn, ref: d.ref, reason });
+      else requests.push({ vn, ref: d.ref, amount: (-c / 100).toFixed(2) });
+    }
+  }
+  return { requests, skipped };
 }

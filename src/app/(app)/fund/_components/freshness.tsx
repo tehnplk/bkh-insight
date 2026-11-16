@@ -25,7 +25,7 @@ export function DataFreshness() {
       {item("REP ผู้ป่วยในถึง", data.repIp && formatThaiDate(data.repIp))}
       {data.stm.length === 0
         ? item("STM", null)
-        : data.stm.map((s) => item(`STM ${s.scheme} ${s.patient_type} งวด`, `${month(s.period_month)} (โอน ${formatThaiDate(s.transfer_date)})`))}
+        : data.stm.map((s) => item(`STM ${s.scheme} ${s.patient_type} งวด`, `${month(s.period_month)} (ออก ${formatThaiDate(s.transfer_date)})`))}
     </ul>
   );
 }

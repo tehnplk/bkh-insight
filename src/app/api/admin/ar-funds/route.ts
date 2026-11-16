@@ -31,7 +31,7 @@ async function adminSession() {
 }
 const bad = (error: string) => Response.json({ error }, { status: 400 });
 
-const repKeysSql = `SELECT DISTINCT k AS key FROM rep_row r, jsonb_object_keys(r.fund_amounts) k WHERE r.patient_type = 'OP' ORDER BY 1`;
+const repKeysSql = `SELECT DISTINCT k AS key FROM rep_row r, jsonb_object_keys(r.fund_amounts) k WHERE r.scheme = 'UCS' AND r.patient_type = 'OP' ORDER BY 1`;
 
 export async function GET() {
   const { error } = await adminSession();
@@ -40,7 +40,7 @@ export async function GET() {
     loadFundRules(),
     insightQuery<Option>("SELECT code, name FROM ar_account ORDER BY code"),
     insightQuery<{ key: string }>(repKeysSql),
-    insightQuery<{ month: string | null }>("SELECT to_char(max(admit_at), 'YYYY-MM') AS month FROM rep_row WHERE patient_type = 'OP'"),
+    insightQuery<{ month: string | null }>("SELECT to_char(max(admit_at), 'YYYY-MM') AS month FROM rep_row WHERE scheme = 'UCS' AND patient_type = 'OP'"),
     loadLookups(),
   ]);
   const body: ArFundsData = {

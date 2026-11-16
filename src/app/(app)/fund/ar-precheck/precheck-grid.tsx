@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import { Money, focusRing, num, useUrlParams } from "../_components/ui";
+import { Money, btn, focusRing, num, useUrlParams } from "../_components/ui";
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { CaseResync } from "../_components/case-resync";
 import {
-  STATUS_LABEL, lockLabel,
-  type PrecheckPage, type PrecheckRow, type PrecheckStatus, type PrecheckTotals, type PrecheckType,
+  MAX_STALE_VNS, STALE_SLIP_REASON, STATUS_LABEL, lockLabel,
+  type PrecheckPage, type PrecheckRow, type PrecheckStatus, type PrecheckTotals, type PrecheckType, type StaleSlipResult,
 } from "@/app/api/fund/ar-precheck/precheck";
 
 const FILTER_KEYS = ["type", "only"] as const;
@@ -26,17 +26,18 @@ const TONE = {
 };
 // รอขั้นตอนปกติของ HOSxP = muted, ต้องตามแต่ไม่ใช่ใบลูกหนี้ผิด = warning, ต้องแก้ใบลูกหนี้/รายการ = danger
 const STATUS_TONE: Record<PrecheckStatus, keyof typeof TONE> = {
-  no_stat: "danger", stale_slip: "danger", admitted: "muted", overdue_lock: "warning", pending_lock: "muted",
+  no_stat: "danger", stale_slip: "danger", stale_fixed: "muted", admitted: "muted", overdue_lock: "warning", pending_lock: "muted",
   total: "danger", stale_stat: "warning", split: "danger", keyed_after: "danger", debt: "danger",
   unlocked: "warning", unpaid: "warning", ok: "success",
 };
 /** วิธีแก้ แสดงใน modal รายละเอียดของแถว */
 const STATUS_HINT: Partial<Record<PrecheckStatus, string>> = {
-  stale_slip: "ยกเลิกใบลูกหนี้ผู้ป่วยนอกใน HOSxP แล้วกดดึงใหม่",
+  stale_slip: "HOSxP XE ยกเลิกใบนี้ไม่ได้ เลือกรายนี้ในตารางแล้วกดขอปรับปรุงลูกหนี้ ผู้ดูแลระบบคนอื่นอนุมัติที่สมุดลูกหนี้",
+  stale_fixed: "ปรับปรุงยอดใบนี้ในสมุดลูกหนี้จนคงเหลือ 0 แล้ว ใบใน HOSxP ยังอยู่ ไม่ต้องแก้ต่อ",
   admitted: "รายการย้ายไป AN แล้ว ตรวจยอดที่ผู้ป่วยใน",
   overdue_lock: "เกิน 3 วันทำการหลังวันรับบริการแล้วยังไม่ล็อกรายการใน HOSxP",
   pending_lock: "HOSxP ล็อกรายการทุกวันราว 16.00 น. ตรวจอีกครั้งหลังล็อก",
-  stale_stat: "ใบลูกหนี้ตรงกับรายการลูกหนี้แล้ว ยอดสรุปของ HOSxP ยังเป็นค่าเดิม ไม่ต้องแก้ใบลูกหนี้",
+  stale_stat: "ใบลูกหนี้ตรงกับรายการลูกหนี้แล้ว ยอดสรุปของ HOSxP ยังเป็นค่าเดิม (เช่น ลบค่าธรรมเนียม 30 บาทตอนยกเว้น) ไม่ต้องแก้ใบลูกหนี้",
   keyed_after: "ออกใบลูกหนี้เพิ่มสำหรับรายการที่คีย์หลังออกใบ แล้วกดดึงใหม่",
 };
 const TYPES = [
@@ -82,6 +83,43 @@ const amounts = [
   col.accessor("status", { header: "สถานะ", cell: (c) => <Status status={c.getValue()} />, meta: { filter: true } }),
 ];
 
+/** ใบค้างหลัง admit ที่เลือกไว้ขอปรับปรุง (key = vn คงอยู่ข้ามหน้าและตัวกรอง) */
+type Selection = { picked: Set<string>; toggle: (keys: string[], on: boolean) => void };
+const SelectionContext = createContext<Selection>({ picked: new Set(), toggle: () => {} });
+const checkbox = `size-4 cursor-pointer accent-accent ${focusRing}`;
+const selectable = (r: PrecheckRow) => r.status === "stale_slip";
+
+function SelectRow({ row }: { row: PrecheckRow }) {
+  const { picked, toggle } = useContext(SelectionContext);
+  if (!selectable(row)) return null;
+  return <input type="checkbox" aria-label={`เลือก VN ${row.vn}`} checked={picked.has(row.key)} onChange={(e) => toggle([row.key], e.target.checked)} className={checkbox} />;
+}
+
+function SelectPage({ rows }: { rows: PrecheckRow[] }) {
+  const { picked, toggle } = useContext(SelectionContext);
+  const stale = rows.filter(selectable);
+  const n = stale.filter((r) => picked.has(r.key)).length;
+  if (!stale.length) return null;
+  return (
+    <input
+      type="checkbox"
+      aria-label="เลือกใบลูกหนี้ค้างหลัง admit ทุกแถวในหน้านี้"
+      checked={n === stale.length}
+      ref={(el) => {
+        if (el) el.indeterminate = n > 0 && n < stale.length;
+      }}
+      onChange={(e) => toggle(stale.map((r) => r.key), e.target.checked)}
+      className={checkbox}
+    />
+  );
+}
+
+const selectColumn = col.display({
+  id: "select",
+  header: (h) => <SelectPage rows={h.table.getRowModel().rows.map((r) => r.original)} />,
+  cell: (c) => <SelectRow row={c.row.original} />,
+});
+
 const COLUMNS = {
   opd: col.columns([
     dateCol("วันที่รับบริการ"), text("vn", "VN"), text("hn", "HN"), text("patient_name", "ชื่อ-สกุล"),
@@ -95,6 +133,9 @@ const COLUMNS = {
     ...rights, ...amounts,
   ]),
 };
+
+// คอลัมน์เลือกเฉพาะตารางหลัก OPD (ตารางใน modal ไม่มีปุ่มส่งคำขอ)
+const MAIN_COLUMNS = { opd: col.columns([selectColumn, ...COLUMNS.opd]), ipd: COLUMNS.ipd };
 
 const renderDetail = (r: PrecheckRow) => {
   // HOSxP ย้ายรายการของ visit ไปที่ AN ตอน admit (opitemrece.vn เป็น NULL) แต่ vn_stat ยังเป็นยอดเดิม จึงต้องดูที่ AN
@@ -269,15 +310,114 @@ function PickRows({ type, start, end, pick }: { type: PrecheckType; start: strin
   );
 }
 
+const primary = `inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-accent-fg hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
+
+/** ส่งคำขอปรับปรุงลูกหนี้ของใบค้างที่เลือก แล้วแสดงผลรายราย (server ตรวจซ้ำกับ HOSxP และสมุดก่อนสร้างคำขอ) */
+function StaleSlipDialog({ open, onClose, vns, onSent }: { open: boolean; onClose: () => void; vns: string[]; onSent: () => void }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<StaleSlipResult | null>(null);
+  const close = () => {
+    setResult(null);
+    setError(null);
+    onClose();
+  };
+
+  async function send() {
+    setSending(true);
+    setError(null);
+    const res = await fetch("/api/fund/ar-adjust/stale-slip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vns }),
+    }).catch(() => null);
+    const body = await res?.json().catch(() => null);
+    setSending(false);
+    if (!res?.ok) return setError(body?.error ?? (res ? `ส่งคำขอไม่สำเร็จ (HTTP ${res.status})` : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"));
+    setResult(body as StaleSlipResult);
+    onSent();
+  }
+
+  const total = result?.created.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0) ?? 0;
+  return (
+    <DetailModal open={open} onClose={close} title={result ? "ผลการส่งคำขอปรับปรุงลูกหนี้" : `ขอปรับปรุงลูกหนี้ ${formatCount(vns.length)} ราย`}>
+      {result ? (
+        <div className="space-y-3 text-base">
+          <p role="status">
+            {result.created.length
+              ? `ส่งคำขอ ${formatCount(result.created.length)} ใบ ลดหนี้รวม ${formatBaht(-total / 100)} บาท รอผู้ดูแลระบบคนอื่นอนุมัติที่สมุดลูกหนี้`
+              : "ไม่ได้ส่งคำขอ ทุกรายการถูกข้าม"}
+          </p>
+          {result.skipped.length > 0 && (
+            <div className={box}>
+              <table className="w-full border-collapse text-sm tabular-nums">
+                <caption className="px-3 py-1.5 text-left font-medium">ข้าม {formatCount(result.skipped.length)} รายการ</caption>
+                <thead className="bg-surface-sunken text-left text-xs text-muted">
+                  <tr>
+                    <th className={th}>VN</th>
+                    <th className={th}>เลขที่ลูกหนี้</th>
+                    <th className={th}>เหตุผล</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.skipped.map((s) => (
+                    <tr key={`${s.vn}-${s.ref ?? ""}`} className="border-t border-line">
+                      <td className={td}>{s.vn}</td>
+                      <td className={td}>{s.ref ?? dash}</td>
+                      <td className={td}>{s.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button type="button" onClick={close} className={btn}>ปิด</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4 text-base">
+          <Facts>
+            <Fact label="จำนวนเงิน">ลดหนี้ให้คงเหลือ 0 ทุกใบของรายที่เลือก</Fact>
+            <Fact label="เหตุผล">{STALE_SLIP_REASON}</Fact>
+          </Facts>
+          {error && <p role="alert" className="text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={close} className={btn}>ยกเลิก</button>
+            <button type="button" disabled={sending} onClick={send} className={primary}>
+              {sending ? "กำลังส่ง…" : `ส่งคำขอ ${formatCount(vns.length)} ราย`}
+            </button>
+          </div>
+        </div>
+      )}
+    </DetailModal>
+  );
+}
+
 export function PrecheckGrid() {
   const { start, end } = useDateRange();
   const { type: typeRaw, only, set } = useUrlParams(["type", "only", "sort", "dir", "cf"]);
   const type: PrecheckType = typeRaw === "ipd" ? "ipd" : "opd";
   const t = TYPES.find((x) => x.value === type)!;
   const [pick, setPick] = useState<Scope | null>(null);
+  // ที่เลือกผูกกับประเภทและช่วงวันที่ เปลี่ยนแล้วถือว่าว่าง
+  const scope = `${type}|${start}|${end}`;
+  const [sel, setSel] = useState<{ scope: string; picked: Set<string> }>({ scope, picked: new Set() });
+  const picked = sel.scope === scope ? sel.picked : new Set<string>();
+  const toggle = (keys: string[], on: boolean) => {
+    const next = new Set(picked);
+    for (const k of keys) {
+      if (on) next.add(k);
+      else next.delete(k);
+    }
+    setSel({ scope, picked: next });
+  };
+  const [asking, setAsking] = useState(false);
+  const n = picked.size;
 
   return (
-    <>
+    <SelectionContext.Provider value={{ picked, toggle }}>
+      <StaleSlipDialog open={asking} onClose={() => setAsking(false)} vns={[...picked]} onSent={() => setSel({ scope, picked: new Set() })} />
       <DataGrid<PrecheckRow, PrecheckPage>
         endpoint="/api/fund/ar-precheck"
         params={{ start, end }}
@@ -311,15 +451,35 @@ export function PrecheckGrid() {
             </label>
           </>
         }
-        columns={COLUMNS[type]}
+        columns={MAIN_COLUMNS[type]}
         getRowId={(r) => r.key}
         renderDetail={renderDetail}
         detailTitle={detailTitle}
         detailSize="medium"
         renderSummary={(data) => <Summary data={data} onOpen={setPick} />}
         exportPlacement="summary"
+        summaryActions={
+          type === "opd" && (
+            <>
+              {n > 0 && (
+                <button type="button" onClick={() => setSel({ scope, picked: new Set() })} className={btn}>
+                  ล้างที่เลือก
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!n || n > MAX_STALE_VNS}
+                onClick={() => setAsking(true)}
+                title={n > MAX_STALE_VNS ? `ขอได้ครั้งละไม่เกิน ${formatCount(MAX_STALE_VNS)} ราย` : !n ? "เลือกแถวสถานะใบลูกหนี้ค้างหลัง admit ก่อน" : undefined}
+                className={primary}
+              >
+                {`ขอปรับปรุงลูกหนี้${n ? ` ${formatCount(n)} ราย` : ""}`}
+              </button>
+            </>
+          )
+        }
         fitScreen
-        pinColumns={3}
+        pinColumns={type === "opd" ? 4 : 3}
         reorderable
         hideable
       />
@@ -339,7 +499,7 @@ export function PrecheckGrid() {
       >
         {pick && <PickRows type={type} start={start} end={end} pick={pick} />}
       </DetailModal>
-    </>
+    </SelectionContext.Provider>
   );
 }
 

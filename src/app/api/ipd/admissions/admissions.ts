@@ -2,7 +2,7 @@
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
 
-/** REP ของผู้ป่วยในมีเฉพาะกองทุนนี้ (ตรวจกับฐานจริงแล้ว) แถวกองทุนอื่นจึงไม่มีสถานะ REP */
+/** กองทุนที่เบิกผ่าน REP e-Claim: ไม่พบ REP = "ยังไม่มี REP" ; กองทุนอื่นแสดงเฉพาะเมื่อพบ REP */
 export const REP_FUND = "UCS";
 /** หลังจำหน่ายเกินจำนวนวันนี้และยังไม่มี REP = ตัวชี้ให้ตาม ไม่ได้แปลว่าผิด */
 export const OVERDUE_DAYS = 30;
@@ -50,6 +50,8 @@ export type RawAdmission = {
 export type RepStatus = "pass" | "c" | "deny";
 /** แถวจาก SQL REP (insight) */
 export type RawRep = { an: string; rep_no: string | null; rep_date: string | null; status: RepStatus; codes: string[] };
+/** REP ล่าสุดของแถว (ใช้ทั้ง OPD และ IPD) */
+export type RepInfo = Omit<RawRep, "an">;
 
 export type AdmissionRow = {
   an: string;
@@ -83,8 +85,8 @@ export type AdmissionRow = {
   /** AdjRW × อัตราตามวันจำหน่าย (ADJRW_RATES) null = ไม่มี AdjRW หรือไม่มีอัตรา */
   adjrw_amount: number | null;
   days_since_dch: number | null;
-  /** undefined = ไม่มีสถานะ REP (กองทุนอื่น หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
-  rep?: Omit<RawRep, "an"> | null;
+  /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
+  rep?: RepInfo | null;
   overdue: boolean;
 };
 
@@ -108,7 +110,8 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
   const repByAn = reps && new Map(reps.map(({ an, ...r }) => [an, r]));
   return raws.map((r) => {
     const fund = fundOf(r.pttype);
-    const rep = fund === REP_FUND && repByAn ? (repByAn.get(r.an) ?? null) : undefined;
+    // พบ REP แสดงทุกกองทุน ; ไม่พบ = ยังไม่มี REP เฉพาะ REP_FUND
+    const rep = repByAn?.get(r.an) ?? (repByAn && fund === REP_FUND ? null : undefined);
     const days = num(r.days_since_dch);
     const adjrw = num(r.adjrw);
     const rate = rateFor(r.dchdate);
@@ -139,7 +142,7 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
       adjrw_amount: adjrw != null && rate != null ? Math.round(adjrw * rate * 100) / 100 : null,
       days_since_dch: days,
       ...(rep !== undefined && { rep }),
-      // แถว UCS ที่โหลด REP ไม่ได้ (rep undefined) ดูจากจำนวนวันอย่างเดียว เหมือนกองทุนที่ไม่มี REP
+      // ไม่มีสถานะ REP (rep undefined) ดูจากจำนวนวันอย่างเดียว
       overdue: days != null && days > OVERDUE_DAYS && !rep,
     };
   });

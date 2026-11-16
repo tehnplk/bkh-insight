@@ -58,7 +58,7 @@ export function StmFileDetailView({ id }: { id: string }) {
         <Fact label="งวด">{`${periodLabel(f.period_month)} ครั้งที่ ${f.run_no}`}</Fact>
         <Fact label="สิทธิ">{`${SCHEMES[f.scheme] ?? f.scheme} ${f.patient_type}`}</Fact>
         <Fact label="HCODE">{f.hcode}</Fact>
-        <Fact label="วันที่โอน">{formatThaiDate(f.transfer_date)}</Fact>
+        <Fact label="วันที่ออก STM">{formatThaiDate(f.transfer_date)}</Fact>
         <Fact label="วันที่ออกรายงาน">{dateTime(f.printed_at)}</Fact>
         <Fact label="นำเข้าเมื่อ">{dateTime(f.imported_at)}</Fact>
         <Fact label="ผู้นำเข้า">{f.imported_by}</Fact>
