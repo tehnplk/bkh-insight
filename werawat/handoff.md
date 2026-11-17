@@ -1,4 +1,30 @@
-# Handoff: werawat (อัปเดต 15 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 16 พ.ย. 2569)
+
+## รอบ 16 พ.ย. 2569 (PR #46 และ #47 merge แล้ว, deploy แล้ว main `5a62cea`)
+- deploy แล้ว:
+  - #46
+    - **precheck:** ใบลูกหนี้ตรงแต่ vn_stat ค้าง (ลบค่าธรรมเนียม 30 บาทตอนยกเว้น: income คำนวณใหม่ แต่ paid_money ค้าง) ขึ้นเป็น stale_stat
+    - **ใบค้างหลัง admit:** เลือกหลายรายบน precheck แล้วส่งคำขอปรับปรุงลูกหนี้ (`POST /api/fund/ar-adjust/stale-slip`) ; อนุมัติหลายรายการใน ar-ledger ; guard ห้ามลดหนี้จนติดลบทุกการอนุมัติ ; สถานะ stale_fixed
+    - **admissions:** คอลัมน์ REP ใน `/opd/admissions` และ `/ipd/admissions` (badge เลขที่ REP กดเปิด RepDetail, `fund/_lib/rep.ts`)
+    - **REP สิทธิอื่น:** นำเข้า REP IPCS/IPLGO/OPBKK/OPBMT/OPLGO ; migration `202611161200_rep_scheme.sql` (`rep_row.scheme`) **รันแล้ว** ; uc-dashboard/ar-funds/freshness กรอง UCS
+    - **stm-import:** ป้ายวันที่เป็น "วันที่ออก STM"
+    - **หน้าใหม่ `/fund/ar-precheck-summary`:** ลูกหนี้ = income − rcpt − PPFS (PPFS = income 21 paidst 02)
+  - #47 `/fund/claim-pipeline` กดเงินเข้า STM / ชดเชยสุทธิ REP เปิด modal รายละเอียด (`/api/fund/claim-pipeline/stm` SQL ต้องเลือกแถวชุดเดียวกับ `STM_SQL`)
+- ข้อเท็จจริง (ตรวจกับฐานแล้ว):
+  - **ใบค้างหลัง admit:** ค่าบริการผู้ป่วยนอก 3001647 (50 บาท, income 12 → `vn_stat.inc14` เพราะ inc = income_group) ถูกแทนด้วยค่าบริการ IPD 300 ; หน้าจอ HOSxP XE ไม่แสดงรายการให้ลบ (กดบันทึกแล้วยอดค้างบนจอหาย แต่ฐานไม่เปลี่ยน ใบ 711294 ยังอยู่) ; ต.ค. 140 ราย ใบละ 50 บาท ลงสมุดแล้วครบ
+  - คู่มือ BMS XE การเงิน OPD-IPD ข้อ 10 มี "ยกเลิกใบแจ้งหนี้" ใน Finance Entry → ให้การเงินลองกับ VN 691001000140 ก่อนใช้ปรับปรุงในสมุด
+  - แหล่งอ้างอิงยืนยันวิธีเดิม: OPD = `rcpt_debt` − cancel ; IPD = `finance_lock` + `an_stat.uc_money` ; `vn_stat` เป็น snapshot ใช้แค่เทียบ
+  - **e-Claim:** TRAN_ID เป็นเลขกลางทุกสิทธิ ไม่ชนกัน ; rep-import กันซ้ำด้วยชื่อไฟล์ + sha256
+  - **NHSO Secure SmartCard Agent 1.2.4** (`C:\secureagent-1.2.4`, localhost:8189, prod) มี `POST /api/nhso-service/save-endpoint` (ปิดสิทธิผ่าน kiosk token) ไม่มี recorderPid/sourceId ; ความหมาย paidAmount/privilegeAmount ใน swagger สลับกับของเรา ; ไม่มีเอกสาร → ยังไม่ใช้ ; API อ่าน token ได้โดยไม่ต้องยืนยันตัวตน (แจ้งผู้ดูแลเครื่อง)
+- ค้าง:
+  1. **นำเข้า REP สิทธิอื่นบน server:** ไฟล์อยู่ที่ Desktop `IPเบิกได้ตค_พย69` (26 ไฟล์) แล้วตรวจ badge REP / ภาพรวม UC ไม่ปน
+  2. **ทดสอบหลัง login:** ar-precheck-summary, ปุ่มปรับปรุงลูกหนี้ (ลอง 1–2 รายก่อน, อนุมัติต้องใช้ admin อีกคน), คอลัมน์ REP, modal STM/REP ใน claim-pipeline
+  3. **ถามงานบัญชี:** ลงรับเงินตาม "วันที่ออก STM" ได้ไหม (ตอนนี้ settle ใช้ `stm_file.transfer_date` เป็น entry_date) ; วันที่ออก STM = วันที่ออกรายงานในไฟล์หรือไม่
+  4. **แก้ต่อได้ทันที:** uc-debtor กรอง REP เฉพาะ UCS ; claim-pipeline แยกวันที่ไฟล์ REP ล่าสุดตามสิทธิ ; อปท./กทม./ขสมก. ไม่มี STM จะค้าง "รอ Statement" ตลอด
+  5. ar-sync `planCancels` ควรคิดจากยอดทุก source (ถ้าวันหลังยกเลิกใบได้ จะลด −50 ซ้ำกับ manual)
+  6. ar-precheck-summary SQL ซ้ำกับ ar-precheck → รวม loader เดียว
+  7. ข้อค้างของรอบ 15 พ.ย. ข้อ 3–5 ยังอยู่
+- ตรวจผล: `node --test src/app/api/fund/ar-precheck/precheck.test.mjs src/app/api/fund/ar-adjust/adjust.test.mjs src/app/api/fund/rep-import/rep.test.mjs src/app/api/opd/admissions/admissions.test.mjs src/app/api/ipd/admissions/admissions.test.mjs src/app/api/fund/ar-precheck-summary/summary.test.mjs src/app/api/fund/claim-pipeline/pipeline.test.mjs` ; `npx tsc --noEmit` ; deploy: merge PR (รอ CI) → `npm run db:migrate` (ถ้ามี) → server `git pull` main, `npm run build`, `sudo systemctl restart bkh-insight`
 
 ## รอบ 15 พ.ย. 2569 (PR #41–#45 merge แล้ว, deploy แล้ว main `34b46df`)
 - deploy แล้ว:
