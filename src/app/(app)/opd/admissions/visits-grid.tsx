@@ -283,7 +283,7 @@ export function VisitsGrid({ pttypeOptions, depOptions }: { pttypeOptions: CodeO
         reorderable
         hideable
         fitScreen
-        pinColumns={4}
+        pinColumns={6}
       />
     </SelectionContext.Provider>
   );

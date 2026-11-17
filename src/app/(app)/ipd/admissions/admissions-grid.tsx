@@ -765,7 +765,7 @@ export function AdmissionsGrid({
         reorderable
         hideable
         fitScreen
-        pinColumns={4}
+        pinColumns={6}
       />
     </SelectionContext.Provider>
   );
