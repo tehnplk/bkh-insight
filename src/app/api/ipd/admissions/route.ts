@@ -3,6 +3,7 @@ import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
+import { dxGroupSql, parseDx } from "@/lib/dx-groups";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import {
   FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundFilterDef, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
@@ -126,7 +127,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
 
-/** GET ?start&end[&pttypes=89,77][&wards=01,02] + พารามิเตอร์ DataGrid: admission ที่จำหน่ายในช่วง ไม่ส่ง = ทุกสิทธิ/ทุก ward */
+/** GET ?start&end[&pttypes=89,77][&wards=01,02][&dx=malnutrition[&dxpos=pdx|sdx]] + พารามิเตอร์ DataGrid: admission ที่จำหน่ายในช่วง ไม่ส่ง = ทุกสิทธิ/ทุก ward/ทุกโรค */
 export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
   const params = request.nextUrl.searchParams;
@@ -137,6 +138,10 @@ export async function GET(request: NextRequest) {
   if (rawPttypes === "invalid") return badRequest("pttypes ไม่ถูกต้อง");
   const wards = parseCodes(params.get("wards"));
   if (wards === "invalid") return badRequest("wards ไม่ถูกต้อง");
+  const dxSel = parseDx(params.get("dx"), params.get("dxpos"));
+  if (dxSel === "invalid") return badRequest("dx หรือ dxpos ไม่ถูกต้อง");
+  // มีรหัสในกลุ่มที่เลือก (OR ข้ามกลุ่ม) ตามตำแหน่งรหัส ; alias dg เพราะ d ใช้กับ dchstts ใน FROM
+  const dx = dxSel && dxGroupSql({ icd10: "dg.icd10", diagtype: "dg.diagtype" }, dxSel.keys, dxSel.pos);
   const grid = parseGridQuery<SortKey>(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
@@ -152,9 +157,9 @@ export async function GET(request: NextRequest) {
   /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet) */
   const whereFor = (except: FilterKey | null) => {
     const like = `%${escapeLike(q)}%`;
-    const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
+    const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${dx ? ` AND EXISTS (SELECT 1 FROM iptdiag dg WHERE dg.an = i.an AND ${dx.sql})` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
     const cfw = columnFilterWhere(defs, filters, except);
-    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(q ? [like, like, like] : []), ...cfw.params];
+    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...cfw.params];
     return { sql: cfw.parts.length ? `${base}\n  AND ${cfw.parts.join("\n  AND ")}` : base, params };
   };
   if (facet) {

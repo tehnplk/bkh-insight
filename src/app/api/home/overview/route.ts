@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
+import { dxGroupSql } from "@/lib/dx-groups";
 import {
   DAY_MS, badRequest, depNameSql, depSql, fundSql, int, isAuthed, isoDate, loadLookups, parseRange, previousRange, unauthorized,
 } from "@/app/api/fund/_lib/fund";
@@ -48,13 +49,15 @@ const WARD_SQL = `
   WHERE w.ward_active = 'Y' GROUP BY w.ward, w.name, w.bedcount ORDER BY w.ward`;
 
 // ภาวะทุพโภชนาการของผู้ป่วยในที่จำหน่ายในช่วง (ลงรหัสหลังจำหน่าย จึงนับตาม dchdate) สรุปต่อ AN ใน summarizeMalnutrition
+// ช่วงรหัสจากกลุ่มโรคเดียวกับตัวกรองของ /ipd/admissions ; params: start, end, ...MAL.params
+const MAL = dxGroupSql({ icd10: "d.icd10" }, ["malnutrition"]);
 const MALNUTRITION_SQL = `
   SELECT d.an, d.icd10, d.diagtype, c.name AS icd_name, c.tname AS icd_tname, i.adjrw
   FROM ipt i
   JOIN iptdiag d ON d.an = i.an
   LEFT JOIN icd101 c ON c.code = d.icd10
   WHERE i.dchdate BETWEEN ? AND ?
-    AND LEFT(d.icd10, 3) BETWEEN 'E40' AND 'E46'
+    AND ${MAL.sql}
   ORDER BY d.an, d.diagtype, d.ipt_diag_id`;
 
 const DISCHARGED_SQL = "SELECT COUNT(*) AS discharged FROM ipt WHERE dchdate BETWEEN ? AND ?";
@@ -84,7 +87,7 @@ export async function GET(request: NextRequest) {
     hisQuery<{ fund: string; visits: Num; patients: Num }>(FUND_SQL, range),
     hisQuery<{ sex: Num; age_group: Num; patients: Num }>(PYRAMID_SQL, range),
     hisQuery<{ ward: string; name: string | null; beds: Num; admitted: Num }>(WARD_SQL),
-    hisQuery<MalnutritionDiag>(MALNUTRITION_SQL, range),
+    hisQuery<MalnutritionDiag>(MALNUTRITION_SQL, [...range, ...MAL.params]),
     hisQuery<{ discharged: Num }>(DISCHARGED_SQL, range),
   ]);
 

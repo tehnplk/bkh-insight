@@ -4,7 +4,7 @@ import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import {
-  FULL_NAME_SQL, activePttypes, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
+  FULL_NAME_SQL, activePttypes, fundSql, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
 import { CLAIM_JOINS, STATUS_SQL } from "@/app/api/fund/_lib/claim";
@@ -24,11 +24,19 @@ const XLSX_MAX = 30_000;
 // เลขที่ใบเสร็จ: rcpt_print (index vn) เฉพาะ status OK (ABORT = ยกเลิก) visit จ่ายหลายใบคั่นด้วย ", "
 // visit ผู้ป่วยนอก (ไม่ใช่ visit ที่ถูกรับไว้นอน ซึ่งไปอยู่หน้า IPD) PDx/มูลค่าจาก vn_stat ชื่อโรคจาก icd101 (PK)
 // authen/เลขปิดสิทธิ/สถานะปิดสิทธิ ใช้หลักเดียวกับ /fund/claim-status (CLAIM_JOINS: c = nhso_confirm_privilege, vp = visit_pttype)
-// เลขปิดสิทธิ: ยืนยันกับ สปสช. แล้ว (ไม่ถูกยกเลิก) หรือ EP ; ใช้ทั้งแสดงผลและตัวกรอง unclosed
-const CLOSE_CODE_SQL = `COALESCE(IF(c.nhso_status = 'Y' AND c.nhso_cancel_datetime IS NULL, NULLIF(c.nhso_authen_code, ''), NULL),
-         IF(vp.auth_code LIKE 'EP%', vp.auth_code, NULL))`;
+// เลขปิดสิทธิ: OFC = Approval Code จาก EDC ตัวล่าสุด (ตัวท้ายของ ovst_seq.edc_approve_list_text) ไม่ fallback
+// สูตรเดียวกับ PERMITNO ของ fdh/files/sql.ts ; สิทธิอื่น = ยืนยันกับ สปสช. แล้ว (ไม่ถูกยกเลิก) หรือ EP
+// ใช้ทั้งแสดงผล สถานะ ตัวกรอง unclosed และ facet codes (prove-query ผ่านแล้ว)
+const IS_OFC_SQL = `${fundSql("t")} = 'OFC'`;
+const APPROVE_CODE_SQL = `NULLIF(SUBSTRING_INDEX(sq.edc_approve_list_text, ',', -1), '')`;
+const CLOSE_CODE_SQL = `IF(${IS_OFC_SQL}, ${APPROVE_CODE_SQL},
+         COALESCE(IF(c.nhso_status = 'Y' AND c.nhso_cancel_datetime IS NULL, NULLIF(c.nhso_authen_code, ''), NULL),
+                  IF(vp.auth_code LIKE 'EP%', vp.auth_code, NULL)))`;
 const AUTH_CODE_SQL = `COALESCE(IF(vp.auth_code LIKE 'PP%', vp.auth_code, NULL), (SELECT s2.claim_code FROM nhso_smartcard_agent s2
          WHERE s2.vn = o.vn AND s2.claim_code LIKE 'PP%' ORDER BY s2.nhso_smartcard_agent_id DESC LIMIT 1))`;
+const CLAIM_STATUS_SQL = `IF(${IS_OFC_SQL},
+         CASE WHEN ${APPROVE_CODE_SQL} IS NOT NULL THEN 'closed' WHEN ${AUTH_CODE_SQL} IS NOT NULL THEN 'authen_only' ELSE 'none' END,
+         ${STATUS_SQL})`;
 const RCPT_SQL = `(SELECT GROUP_CONCAT(r.rcpno ORDER BY r.finance_number SEPARATOR ', ') FROM rcpt_print r
          WHERE r.vn = o.vn AND r.status = 'OK')`;
 const FROM = `FROM ovst o
@@ -38,13 +46,14 @@ LEFT JOIN icd101 cd ON cd.code = vs.pdx
 LEFT JOIN ovstost os ON os.ovstost = o.ovstost
 LEFT JOIN pttype t ON t.pttype = o.pttype
 LEFT JOIN kskdepartment k ON k.depcode = o.main_dep
+LEFT JOIN ovst_seq sq ON sq.vn = o.vn
 ${CLAIM_JOINS}`;
 const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.vsttime,
        ${depSql("o")} AS dep_code, k.department AS dep_name,
        o.pttype, t.name AS pttype_name, vs.pdx, cd.name AS pdx_name, os.name AS ovst_status, os.export_code AS ovst_export, vs.income, vs.uc_money,
        ${AUTH_CODE_SQL} AS auth_code,
        ${CLOSE_CODE_SQL} AS close_code,
-       ${STATUS_SQL} AS claim_status,
+       ${CLAIM_STATUS_SQL} AS claim_status,
        ${RCPT_SQL} AS rcpt_no
 ${FROM}`;
 
@@ -98,7 +107,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "fund", header: "กองทุน", width: 8 },
   { key: "pttype_name", header: "สิทธิ", width: 28 },
   { key: "auth_code", header: "Authen", width: 16 },
-  { key: "close_code", header: "ปิดสิทธิ", width: 16 },
+  { key: "close_code", header: "ปิดสิทธิ/Approval Code", width: 16 },
   { key: "vstdate", header: "วันที่มา", width: 12 },
   { key: "vsttime", header: "เวลา", width: 8 },
   { key: "dep_name", header: "แผนก", width: 22 },

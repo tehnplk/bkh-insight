@@ -11,6 +11,7 @@ import { MultiSelect } from "@/components/multi-select/multi-select";
 import { FdhPreviewModal } from "@/components/fdh-preview/fdh-preview";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { usePersistedFilter } from "@/lib/persisted-filter";
+import { DX_GROUPS, DX_POSITIONS } from "@/lib/dx-groups";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
@@ -43,7 +44,8 @@ import {
   Section,
 } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 
-const FILTERS = ["pttypes", "wards"] as const;
+const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
+const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
 /** ข้อความอัตรา เช่น "จำหน่ายตั้งแต่ 1 ต.ค. 2569: 5,119.00 บาท/AdjRW · ..." */
 const RATE_NOTE = `AdjRW × อัตราตามวันจำหน่าย: ${ADJRW_RATES.map((r) => `ตั้งแต่ ${formatThaiDate(r.from)} ${formatBaht(r.rate)} บาท`).join(" · ")}`;
 const dash = <span className="text-muted">–</span>;
@@ -683,7 +685,7 @@ export function AdmissionsGrid({
 }) {
   usePersistedFilter("ipd/admissions", FILTERS);
   const { start, end } = useDateRange(IPD_MAX_DAYS);
-  const { pttypes, wards, set } = useUrlParams(FILTERS);
+  const { pttypes, wards, dx, dxpos, set } = useUrlParams(FILTERS);
   const [picked, setPicked] = useState<Map<string, string>>(() => new Map());
   const toggle = (rows: AdmissionRow[], on: boolean) =>
     setPicked((prev) => {
@@ -711,7 +713,7 @@ export function AdmissionsGrid({
       />
       <DataGrid<AdmissionRow, AdmissionsPage>
         endpoint="/api/ipd/admissions"
-        params={{ start, end, pttypes, wards }}
+        params={{ start, end, pttypes, wards, dx, dxpos }}
         liveSearch
         // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง) ห้ามห่อด้วย div ที่ wrap แยก
         toolbar={
@@ -735,6 +737,31 @@ export function AdmissionsGrid({
               value={split(wards)}
               onChange={(v) => set({ wards: v.join(",") })}
             />
+            <MultiSelect
+              label="กรองตามกลุ่มโรค"
+              hideLabel
+              allLabel="ทุกกลุ่มโรค"
+              groups={DX_OPTIONS}
+              value={split(dx)}
+              // ไม่เลือกกลุ่มโรค = ตำแหน่งรหัสไม่มีความหมาย ล้างไปด้วย
+              onChange={(v) => set(v.length ? { dx: v.join(",") } : { dx: null, dxpos: null })}
+            />
+            {dx && (
+              <label className="flex items-center gap-2 text-sm" title="ตำแหน่งรหัสโรค">
+                <span className="sr-only">ตำแหน่งรหัสโรค</span>
+                <select
+                  value={dxpos || "all"}
+                  onChange={(e) => set({ dxpos: e.target.value === "all" ? null : e.target.value })}
+                  className={SELECT_CLASS}
+                >
+                  {DX_POSITIONS.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div
               role="group"
               aria-label="วันที่จำหน่าย"
