@@ -7,8 +7,10 @@ import { useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { DataTableToggle, DonutChart, RankedBarChart, type DonutSegment, type RankedItem } from "@/components/charts/charts";
 import { StackedBarChart, type StackedBarCategory, type StackedBarSeries } from "@/components/stacked-bar-chart/stacked-bar-chart";
 import { formatCount } from "@/lib/number-format";
-import { THAI_MONTHS_SHORT, formatThaiDate, parseIsoDate, todayIso } from "@/lib/thai-date";
-import { AGE_GROUPS, type Compare, type CountRow, type HomeOverviewResponse } from "@/app/api/home/overview/types";
+import { THAI_MONTHS, THAI_MONTHS_SHORT, formatThaiDate, parseIsoDate, todayIso } from "@/lib/thai-date";
+import { AGE_GROUPS, type Compare, type CountRow, type HomeOverviewResponse, type MalnutritionFyResponse } from "@/app/api/home/overview/types";
+import { FY_BACK, fiscalYearOf, parseFiscalYear } from "@/app/api/fund/uc-dashboard/dashboard";
+import { useUrlParams } from "@/app/(app)/fund/_components/ui";
 
 const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const btn = `inline-flex h-8 items-center rounded-md border border-line px-3 text-sm hover:bg-hover ${focusRing}`;
@@ -34,20 +36,21 @@ const Num = ({ children }: { children: ReactNode }) => <span className="font-sem
 
 /* ---------- data ---------- */
 
-type Result = { key: string; data?: HomeOverviewResponse; error?: string };
+type Result<T> = { key: string; data?: T; error?: string };
 
-function useOverview(start: string, end: string) {
+/** GET JSON ตาม url ระหว่างโหลด url ใหม่คงผลเดิมไว้ (data) ไม่กระพริบ */
+function useKeptJson<T>(url: string) {
   const [nonce, setNonce] = useState(0);
-  const key = `${start}|${end}|${nonce}`;
-  const [res, setRes] = useState<Result | null>(null);
+  const key = `${url}|${nonce}`;
+  const [res, setRes] = useState<Result<T> | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
-    fetch(`/api/home/overview?${new URLSearchParams({ start, end })}`, { signal: ac.signal })
+    fetch(url, { signal: ac.signal })
       .then(async (r) => {
         const body = await r.json().catch(() => null);
         if (!r.ok) throw new Error(body?.error ?? `เซิร์ฟเวอร์ตอบกลับ HTTP ${r.status}`);
-        setRes({ key, data: body as HomeOverviewResponse });
+        setRes({ key, data: body as T });
       })
       .catch((e: unknown) => {
         if (ac.signal.aborted) return;
@@ -55,7 +58,7 @@ function useOverview(start: string, end: string) {
         setRes((prev) => ({ key, data: prev?.data, error: message }));
       });
     return () => ac.abort();
-  }, [key, start, end]);
+  }, [key, url]);
 
   const settled = res?.key === key;
   return {
@@ -508,6 +511,147 @@ function Pyramid({ data, className }: { data: HomeOverviewResponse; className?: 
   );
 }
 
+/* ---------- ภาวะทุพโภชนาการผู้ป่วยใน: ตารางรายรหัส (ส่วนใหญ่ลงเป็นโรคร่วม จึงแสดง 0 ของโรคหลักตามจริง) ---------- */
+
+const countCell = (n: number) => <td className={`py-1.5 pl-3 text-right ${n ? "font-medium" : "text-muted"}`}>{formatCount(n)}</td>;
+/** AdjRW ไม่ใช่เงิน: ทศนิยม 4 ตำแหน่งตาม HOSxP */
+const adjrwFmt = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const formatAdjrw = (n: number) => adjrwFmt.format(n);
+const adjrwCell = (n: number) => <td className={`py-1.5 pl-3 text-right ${n ? "" : "text-muted"}`}>{formatAdjrw(n)}</td>;
+
+function Malnutrition({ data }: { data: HomeOverviewResponse }) {
+  const m = data.malnutrition;
+  const total = m.pdx + m.sdx;
+  const head = "pb-1.5 pl-3 text-right font-medium whitespace-nowrap";
+  return (
+    <Card
+      id="home-malnutrition"
+      title="ภาวะทุพโภชนาการผู้ป่วยใน (E40–E46)"
+      sub={`จำหน่าย ${rangeText(data.start, data.end)} · หน่วย: ราย`}
+      aside={
+        <>
+          <Num>{formatCount(total)}</Num> ราย · <Num>{share(total, m.discharged)}</Num> ของผู้จำหน่าย {formatCount(m.discharged)} ราย
+        </>
+      }
+    >
+      {total === 0 ? (
+        <p className="py-6 text-center text-sm text-muted">ไม่พบรหัส E40–E46 ในผู้ป่วยที่จำหน่ายช่วงนี้</p>
+      ) : (
+        <table className="w-full border-collapse text-sm tabular-nums">
+          <caption className="sr-only">ผู้ป่วยในที่จำหน่ายและมีรหัส E40–E46 แยกตามรหัสและประเภทการวินิจฉัย</caption>
+          <thead className="text-xs text-muted">
+            <tr>
+              <th scope="col" className="pb-1.5 text-left font-medium">รหัส</th>
+              <th scope="col" className="pb-1.5 pl-3 text-left font-medium">การวินิจฉัย</th>
+              <th scope="col" className={head}>โรคหลัก</th>
+              {/* diagtype 2–5: โรคร่วม แทรกซ้อน อื่นๆ และสาเหตุภายนอก */}
+              <th scope="col" className={head}>โรคร่วม/แทรกซ้อน</th>
+              <th scope="col" className={head}>รวม</th>
+              <th scope="col" className={head}>Sum AdjRW</th>
+            </tr>
+          </thead>
+          <tbody>
+            {m.codes.map((c) => (
+              <tr key={c.code} className="border-t border-line">
+                <th scope="row" className="py-1.5 text-left font-normal whitespace-nowrap">{c.code}</th>
+                <td className="w-full max-w-0 py-1.5 pl-3">
+                  <span className="block truncate" title={c.name}>
+                    {c.name}
+                  </span>
+                </td>
+                {countCell(c.pdx)}
+                {countCell(c.sdx)}
+                {countCell(c.pdx + c.sdx)}
+                {adjrwCell(c.adjrw)}
+              </tr>
+            ))}
+          </tbody>
+          {/* AN เดียวมีได้หลายรหัส แถวรวมจึงนับ AN ไม่ซ้ำ ไม่ใช่ผลบวกของแถวบน */}
+          <tfoot>
+            <tr className="border-t border-line font-medium">
+              <th scope="row" colSpan={2} className="py-1.5 text-left font-medium">รวม (นับ AN ไม่ซ้ำ)</th>
+              {countCell(m.pdx)}
+              {countCell(m.sdx)}
+              {countCell(total)}
+              {adjrwCell(m.adjrw)}
+            </tr>
+          </tfoot>
+        </table>
+      )}
+      {m.noAdjrw > 0 && <p className="mt-2 text-xs text-muted">ยังไม่มี AdjRW {formatCount(m.noAdjrw)} ราย ไม่รวมใน Sum AdjRW</p>}
+    </Card>
+  );
+}
+
+const FY_CASES: StackedBarSeries[] = [{ key: "cases", label: "จำนวนราย", color: "var(--chart-1)" }];
+const FY_ADJRW: StackedBarSeries[] = [{ key: "adjrw", label: "Sum AdjRW", color: "var(--chart-1)" }];
+
+const EMPTY_MONTHS: MalnutritionFyResponse["months"] = [];
+
+/** สองกราฟแยกกันเพราะจำนวนรายกับ AdjRW คนละหน่วย (ไม่ทำแกน y สองแกน) ใช้เดือนชุดเดียวกัน
+ *  ปีงบเลือกเองได้ (?mfy=) ไม่เลือกใช้ปีงบของวันสุดท้ายในช่วงของหน้า โหลดแยกจากภาพรวมจึงไม่ยิงทั้งหน้าใหม่ */
+function MalnutritionFy({ end }: { end: string }) {
+  const { mfy, set } = useUrlParams(["mfy"]);
+  const currentFy = fiscalYearOf(todayIso());
+  const fy = parseFiscalYear(mfy, currentFy) ?? Math.max(fiscalYearOf(end), currentFy - FY_BACK);
+  const { data, error, loading, retry } = useKeptJson<MalnutritionFyResponse>(`/api/home/malnutrition-fy?fy=${fy}`);
+  const months = data?.months ?? EMPTY_MONTHS;
+  const { categories, cases, adjrw } = useMemo(() => {
+    const categories = months.map<StackedBarCategory>(({ month }) => {
+      const y = Number(month.slice(0, 4)) + 543;
+      const i = Number(month.slice(5, 7)) - 1;
+      return { key: month, label: `${THAI_MONTHS_SHORT[i]} ${String(y).slice(2)}`, title: `${THAI_MONTHS[i]} ${y}` };
+    });
+    return { categories, cases: months.map((m) => [m.cases]), adjrw: months.map((m) => [m.adjrw]) };
+  }, [months]);
+  const total = months.reduce((s, m) => s + m.cases, 0);
+  const sum = months.reduce((s, m) => s + m.adjrw, 0);
+  return (
+    <Card
+      id="home-malnutrition-fy"
+      title="ภาวะทุพโภชนาการผู้ป่วยในรายเดือน"
+      sub="ตามวันจำหน่าย"
+      aside={
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <select
+            aria-label="ปีงบประมาณ"
+            value={fy}
+            onChange={(e) => set({ mfy: e.target.value })}
+            className={`h-8 rounded-md border border-line bg-surface px-2 text-sm text-foreground hover:bg-hover ${focusRing}`}
+          >
+            {Array.from({ length: FY_BACK + 1 }, (_, i) => currentFy - i).map((y) => (
+              <option key={y} value={y}>
+                ปีงบ {y}
+              </option>
+            ))}
+          </select>
+          {data && (
+            <span>
+              <Num>{formatCount(total)}</Num> ราย · Sum AdjRW <Num>{formatAdjrw(sum)}</Num>
+            </span>
+          )}
+        </span>
+      }
+    >
+      {error ? (
+        <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm">
+          <p className="text-muted">โหลดปีงบ {fy} ไม่สำเร็จ: {error}</p>
+          <button type="button" className={btn} onClick={retry}>
+            ลองอีกครั้ง
+          </button>
+        </div>
+      ) : !data ? (
+        <div aria-busy="true" aria-label="กำลังโหลด" className="h-56 animate-pulse rounded-lg bg-surface-sunken motion-reduce:animate-none" />
+      ) : (
+        <div aria-busy={loading} className={`grid gap-4 transition-opacity duration-200 sm:grid-cols-2 ${loading ? "opacity-60" : ""}`}>
+          <StackedBarChart label={`จำนวนราย ปีงบประมาณ ${data.fy}`} categoryHeader="เดือน" categories={categories} series={FY_CASES} values={cases} format={formatCount} integer height={200} />
+          <StackedBarChart label={`Sum AdjRW ปีงบประมาณ ${data.fy}`} categoryHeader="เดือน" categories={categories} series={FY_ADJRW} values={adjrw} format={formatAdjrw} height={200} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ---------- page body ---------- */
 
 export function HomeDashboardSkeleton() {
@@ -533,7 +677,7 @@ export function HomeDashboardSkeleton() {
 
 export function HomeDashboard() {
   const { start, end } = useDateRange();
-  const { data, error, loading, retry } = useOverview(start, end);
+  const { data, error, loading, retry } = useKeptJson<HomeOverviewResponse>(`/api/home/overview?${new URLSearchParams({ start, end })}`);
 
   if (error) {
     return (
@@ -582,6 +726,10 @@ export function HomeDashboard() {
           </div>
         </>
       )}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Malnutrition data={data} />
+        <MalnutritionFy end={data.end} />
+      </div>
     </div>
   );
 }

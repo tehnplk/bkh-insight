@@ -3,7 +3,7 @@ import { hisQuery } from "@/lib/db";
 import {
   DAY_MS, badRequest, depNameSql, depSql, fundSql, int, isAuthed, isoDate, loadLookups, parseRange, previousRange, unauthorized,
 } from "@/app/api/fund/_lib/fund";
-import { AGE_GROUPS, type CountRow, type HomeOverviewResponse } from "./types";
+import { AGE_GROUPS, summarizeMalnutrition, type CountRow, type HomeOverviewResponse, type MalnutritionDiag } from "./types";
 
 const TOP_DEPARTMENTS = 15;
 
@@ -47,6 +47,18 @@ const WARD_SQL = `
   FROM ward w LEFT JOIN ipt i ON i.ward = w.ward AND i.dchdate IS NULL
   WHERE w.ward_active = 'Y' GROUP BY w.ward, w.name, w.bedcount ORDER BY w.ward`;
 
+// ภาวะทุพโภชนาการของผู้ป่วยในที่จำหน่ายในช่วง (ลงรหัสหลังจำหน่าย จึงนับตาม dchdate) สรุปต่อ AN ใน summarizeMalnutrition
+const MALNUTRITION_SQL = `
+  SELECT d.an, d.icd10, d.diagtype, c.name AS icd_name, c.tname AS icd_tname, i.adjrw
+  FROM ipt i
+  JOIN iptdiag d ON d.an = i.an
+  LEFT JOIN icd101 c ON c.code = d.icd10
+  WHERE i.dchdate BETWEEN ? AND ?
+    AND LEFT(d.icd10, 3) BETWEEN 'E40' AND 'E46'
+  ORDER BY d.an, d.diagtype, d.ipt_diag_id`;
+
+const DISCHARGED_SQL = "SELECT COUNT(*) AS discharged FROM ipt WHERE dchdate BETWEEN ? AND ?";
+
 // shortcut: แยก Home ward (ดูแลที่บ้าน ผู้ป่วยเกินจำนวน "เตียง" ได้) ด้วยชื่อ เพราะ query ward ที่พิสูจน์แล้วไม่มีคอลัมน์ประเภท ward
 //   ถ้าพบคอลัมน์ประเภทใน ward ของ HOSxP ให้เปลี่ยนมาใช้คอลัมน์นั้นแทน
 const isHomeCare = (name: string) => /home\s*ward/i.test(name);
@@ -63,7 +75,7 @@ export async function GET(request: NextRequest) {
   const range = [start, end];
   const kpiBlock = [start, prev.start, end];
 
-  const [lk, kpiRows, dailyRows, depRows, hourRows, fundRows, pyramidRows, wardRows] = await Promise.all([
+  const [lk, kpiRows, dailyRows, depRows, hourRows, fundRows, pyramidRows, wardRows, malRows, dchRows] = await Promise.all([
     loadLookups(),
     hisQuery<{ kpi: "opd" | "adm" | "er"; cur: Num; n: Num; patients: Num }>(KPI_SQL, [...kpiBlock, ...kpiBlock, ...kpiBlock]),
     hisQuery<{ d: string; visits: Num; patients: Num }>(DAILY_SQL, range),
@@ -72,6 +84,8 @@ export async function GET(request: NextRequest) {
     hisQuery<{ fund: string; visits: Num; patients: Num }>(FUND_SQL, range),
     hisQuery<{ sex: Num; age_group: Num; patients: Num }>(PYRAMID_SQL, range),
     hisQuery<{ ward: string; name: string | null; beds: Num; admitted: Num }>(WARD_SQL),
+    hisQuery<MalnutritionDiag>(MALNUTRITION_SQL, range),
+    hisQuery<{ discharged: Num }>(DISCHARGED_SQL, range),
   ]);
 
   // ช่วงที่ไม่มีแถว (ไม่มีข้อมูล) = 0
@@ -126,6 +140,7 @@ export async function GET(request: NextRequest) {
       const name = w.name ?? w.ward;
       return { code: w.ward, name, beds: int(w.beds), admitted: int(w.admitted), homeCare: isHomeCare(name) };
     }),
+    malnutrition: summarizeMalnutrition(malRows, int(dchRows[0]?.discharged ?? 0)),
   };
   return Response.json(body);
 }
