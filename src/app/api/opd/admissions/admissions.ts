@@ -15,7 +15,7 @@ export const MAX_EXPORT_VNS = 1000;
 /** เลือกส่ง FDH ได้รวมสูงสุด (modal ยิงทีละชุด MAX_EXPORT_VNS) เพดานจากขนาดข้อมูลที่ browser ถือ */
 export const MAX_SELECT_VNS = 5000;
 
-/** สถานะปิดสิทธิ (หลักเดียวกับ /fund/claim-status): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
+/** สถานะปิดสิทธิ (หลักเดียวกับ /fund/claim-status ; OFC closed = มี Approval Code EDC): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
 export type ClaimStatus = "closed" | "authen_only" | "none";
 
 /** แถวจาก SQL รายการ (his) ตัวเลข DECIMAL อาจมาเป็น string */
@@ -65,7 +65,7 @@ export type VisitRow = {
   uc_money: number;
   /** เลข authen (PP) จาก visit */
   auth_code: string | null;
-  /** เลขปิดสิทธิ (ยืนยันกับ สปสช. หรือ EP) */
+  /** เลขปิดสิทธิ (ยืนยันกับ สปสช. หรือ EP ; OFC = Approval Code EDC ล่าสุด) */
   close_code: string | null;
   claim_status: ClaimStatus;
   /** เลขที่ใบเสร็จ (rcpt_print ที่ไม่ถูกยกเลิก) หลายใบคั่นด้วย ", " ไม่มีการจ่ายเงิน = null */

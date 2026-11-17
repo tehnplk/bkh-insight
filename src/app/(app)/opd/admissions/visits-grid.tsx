@@ -28,13 +28,13 @@ function Code({ value, missing }: { value: string | null; missing: string }) {
   );
 }
 
-/** Authen / ปิดสิทธิ คั่นด้วย "/" */
+/** Authen / ปิดสิทธิ คั่นด้วย "/" ; OFC ปิดสิทธิด้วย Approval Code จาก EDC */
 function Codes({ row }: { row: VisitRow }) {
   return (
     <span className="tabular-nums whitespace-nowrap">
       <Code value={row.auth_code} missing="ไม่พบ Authen" />
       <span className="mx-1 text-muted">/</span>
-      <Code value={row.close_code} missing="ไม่พบเลขปิดสิทธิ" />
+      <Code value={row.close_code} missing={row.fund === "OFC" ? "ไม่พบ Approval Code" : "ไม่พบเลขปิดสิทธิ"} />
     </span>
   );
 }
@@ -135,7 +135,7 @@ const renderDetail = (r: VisitRow) => (
       <Fact label="วันที่มา">{`${formatThaiDate(r.vstdate)} ${r.vsttime ?? ""}`.trim()}</Fact>
       <Fact label="แผนก">{r.dep_name}</Fact>
       <Fact label="Authen">{r.auth_code}</Fact>
-      <Fact label="ปิดสิทธิ">{r.close_code}</Fact>
+      <Fact label={r.fund === "OFC" ? "Approval Code (EDC)" : "ปิดสิทธิ"}>{r.close_code}</Fact>
       <Fact label="สถานะปิดสิทธิ">{CLAIM_LABEL[r.claim_status]}</Fact>
       <Fact label="สถานะผู้ป่วย">{r.ovst_status && r.ovst_status_detail && r.ovst_status !== r.ovst_status_detail ? `${r.ovst_status} (${r.ovst_status_detail})` : r.ovst_status}</Fact>
       <Fact label="เลขที่ใบเสร็จ">{r.rcpt_no}</Fact>
