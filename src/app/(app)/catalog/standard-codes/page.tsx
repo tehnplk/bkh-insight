@@ -4,7 +4,7 @@ import { Mapcode } from "./mapcode";
 
 export const metadata = { title: "รหัสมาตรฐาน" };
 
-// ทุกคนที่ login ดูได้ ปุ่มนำเข้าแสดงเฉพาะ admin และ /api/catalog/drug-nhso (POST) เช็ค role ซ้ำ
+// ทุกคนที่ login ดูได้ ปุ่มนำเข้าแสดงเฉพาะ admin และ /api/catalog/drug-nhso, /api/catalog/lab-fdh (POST) เช็ค role ซ้ำ
 async function Catalog() {
   const session = await auth();
   return <Mapcode canImport={session?.user.role === "admin"} />;

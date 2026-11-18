@@ -7,13 +7,16 @@ import type { GridPage } from "@/lib/grid-query";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CatalogFileInfo, DrugNhsoImportResult, DrugNhsoItem } from "@/app/api/catalog/drug-nhso/drug-nhso";
+import type { LabFdhItem } from "@/app/api/catalog/lab-fdh/parse";
 import { Money, Notice, btn, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { Segmented } from "@/app/(app)/quality/pending/segmented";
+import { LabCompare } from "./lab-compare";
 
 const TABS = [
   { value: "drug-nhso", label: "Drug catalog สปสช." },
   { value: "drug-chi", label: "Drug catalog สกส." },
   { value: "lab-chi", label: "Lab catalog สกส." },
+  { value: "lab-fdh", label: "Lab catalog FDH" },
 ] as const;
 type Tab = (typeof TABS)[number]["value"];
 const isTab = (v: string): v is Tab => TABS.some((t) => t.value === v);
@@ -46,10 +49,33 @@ const columns = col.columns([
   col.accessor("versions", { header: "แถวในไฟล์", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
 ]);
 
+const lab = gridColumnHelper<LabFdhItem>();
+// ปี 9999 = ไม่มีวันสิ้นสุด (formatThaiDate จะได้ปี 10542)
+const noEnd = (v: string) => v.startsWith("9999");
+const labDate = (v: string | null) => (!v ? dash : noEnd(v) ? <span className="text-muted">ไม่สิ้นสุด</span> : formatThaiDate(v));
+const labDateFilter = { ...dateCell, filter: { format: (v: string) => (noEnd(v) ? "ไม่สิ้นสุด" : formatThaiDate(v) || v) } } as const;
+const labColumns = lab.columns([
+  lab.accessor("benefit_plan", { header: "สิทธิประโยชน์", meta: filterable }),
+  lab.accessor("lab_code", { header: "Lab Code", meta: dateCell }),
+  lab.accessor("name", { header: "ชื่อ" }),
+  lab.accessor("cgd_code", { header: "รหัสกรมบัญชีกลาง", cell: (c) => textOr(c.getValue()), meta: codeFilter }),
+  lab.accessor("unit", { header: "หน่วย", cell: (c) => textOr(c.getValue()), meta: filterable }),
+  lab.accessor("price", { header: "ราคากลาง (บาท)", cell: (c) => (c.getValue() == null ? dash : <Money value={Number(c.getValue())} />), meta: { className: num } }),
+  lab.accessor("gyear", { header: "gyear", cell: (c) => c.getValue() ?? dash, meta: codeFilter }),
+  lab.accessor("start_at", { header: "วันที่เริ่มต้น", cell: (c) => labDate(c.getValue()), meta: labDateFilter }),
+  lab.accessor("end_at", { header: "วันที่สิ้นสุด", cell: (c) => labDate(c.getValue()), meta: labDateFilter }),
+  lab.accessor("flag", { header: "flag", cell: (c) => textOr(c.getValue()), meta: filterable }),
+  lab.accessor("tmlt_code", { header: "TMLT Code", cell: (c) => textOr(c.getValue()), meta: dateCell }),
+  lab.accessor("tmlt_name", { header: "TMLT Name", cell: (c) => textOr(c.getValue()) }),
+  lab.accessor("loinc", { header: "LOINC", cell: (c) => textOr(c.getValue()), meta: dateCell }),
+  lab.accessor("exception", { header: "Exception", cell: (c) => textOr(c.getValue()), enableSorting: false, meta: filterable }),
+]);
+
 type DrugPage = GridPage<DrugNhsoItem> & { file: CatalogFileInfo };
-const renderSummary = ({ total, file }: DrugPage) => (
+type LabPage = GridPage<LabFdhItem> & { file: CatalogFileInfo };
+const summaryLine = (noun: string, { total, file }: { total: number; file: CatalogFileInfo }) => (
   <p className="text-muted tabular-nums">
-    <span className="font-semibold text-foreground">{formatCount(total)}</span> รายการยา
+    <span className="font-semibold text-foreground">{formatCount(total)}</span> {noun}
     {file && (
       <>
         <span aria-hidden="true"> · </span>
@@ -59,9 +85,13 @@ const renderSummary = ({ total, file }: DrugPage) => (
     )}
   </p>
 );
+const drugSummary = (d: DrugPage) => summaryLine("รายการยา", d);
+const labSummary = (d: LabPage) => summaryLine("รายการ", d);
 
-/** อัปโหลดไฟล์ APPROVED ของ สปสช. (ไฟล์ใหม่แทนที่ชุดเดิมทั้งหมด) */
-function DrugNhsoUpload({ onImported }: { onImported: () => void }) {
+type UploadProps = { endpoint: string; accept: string; fileLabel: string; buttonLabel: string; hint: string; itemNoun: string; onImported: () => void };
+
+/** อัปโหลดไฟล์ catalog (ไฟล์ใหม่แทนที่ชุดเดิมทั้งหมด) route ตอบรูปแบบเดียวกับ /api/catalog/drug-nhso */
+function CatalogUpload({ endpoint, accept, fileLabel, buttonLabel, hint, itemNoun, onImported }: UploadProps) {
   const input = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<{ busy: boolean; result?: DrugNhsoImportResult }>({ busy: false });
 
@@ -69,7 +99,7 @@ function DrugNhsoUpload({ onImported }: { onImported: () => void }) {
     setState({ busy: true });
     const form = new FormData();
     form.set("file", file);
-    const res = await fetch("/api/catalog/drug-nhso", { method: "POST", body: form }).catch(() => null);
+    const res = await fetch(endpoint, { method: "POST", body: form }).catch(() => null);
     const result: DrugNhsoImportResult = (await res?.json().catch(() => null)) ?? { status: "error", file: file.name, errors: [`นำเข้าไม่สำเร็จ${res ? ` (HTTP ${res.status})` : ""}`] };
     setState({ busy: false, result });
     if (result.status === "imported") onImported();
@@ -83,20 +113,20 @@ function DrugNhsoUpload({ onImported }: { onImported: () => void }) {
         <input
           ref={input}
           type="file"
-          accept=".xls,.xlsx"
-          aria-label="ไฟล์ Drug catalog ที่อนุมัติแล้วของ สปสช."
+          accept={accept}
+          aria-label={fileLabel}
           className="sr-only"
           onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
         />
         <button type="button" disabled={state.busy} onClick={() => input.current?.click()} className={`${btn} gap-1.5 disabled:cursor-wait disabled:opacity-60`}>
           <Upload aria-hidden className="size-4" />
-          {state.busy ? "กำลังนำเข้า…" : "นำเข้าไฟล์ APPROVED (.xls)"}
+          {state.busy ? "กำลังนำเข้า…" : buttonLabel}
         </button>
-        <span className="text-xs text-muted">ไฟล์จาก drug.nhso.go.th นำเข้าใหม่จะแทนที่รายการเดิมทั้งหมด</span>
+        <span className="text-xs text-muted">{hint}</span>
       </div>
       {r?.status === "imported" && (
         <p role="status" className="text-sm text-success">
-          นำเข้า {r.file} แล้ว {formatCount(r.rows ?? 0)} แถว ({formatCount(r.items ?? 0)} รายการยา)
+          นำเข้า {r.file} แล้ว {formatCount(r.rows ?? 0)} แถว ({formatCount(r.items ?? 0)} {itemNoun})
         </p>
       )}
       {r && r.status !== "imported" && (
@@ -122,13 +152,75 @@ function DrugNhsoTab({ canImport }: { canImport: boolean }) {
   const [gridKey, setGridKey] = useState(0);
   return (
     <div className="flex flex-col gap-4">
-      {canImport && <DrugNhsoUpload onImported={() => setGridKey((k) => k + 1)} />}
+      {canImport && (
+        <CatalogUpload
+          endpoint="/api/catalog/drug-nhso"
+          accept=".xls,.xlsx"
+          fileLabel="ไฟล์ Drug catalog ที่อนุมัติแล้วของ สปสช."
+          buttonLabel="นำเข้าไฟล์ APPROVED (.xls)"
+          hint="ไฟล์จาก drug.nhso.go.th นำเข้าใหม่จะแทนที่รายการเดิมทั้งหมด"
+          itemNoun="รายการยา"
+          onImported={() => setGridKey((k) => k + 1)}
+        />
+      )}
       <DataGrid<DrugNhsoItem, DrugPage>
         key={gridKey}
         endpoint="/api/catalog/drug-nhso"
         columns={columns}
         getRowId={(r) => r.hosp_drug_code}
-        renderSummary={renderSummary}
+        renderSummary={drugSummary}
+        exportPlacement="summary"
+        reorderable
+        hideable
+        fitScreen
+        pinColumns={3}
+      />
+    </div>
+  );
+}
+
+const LAB_VIEWS = [
+  { value: "list", label: "รายการ" },
+  { value: "compare", label: "เทียบกับ HOSxP" },
+] as const;
+
+function LabFdhTab({ canImport }: { canImport: boolean }) {
+  const { view, set } = useUrlParams(["view", "q", "sort", "dir", "cf"] as const);
+  const current = view === "compare" ? "compare" : "list";
+  return (
+    <div className="flex flex-col gap-4">
+      {/* สองมุมมองเป็นคนละตาราง เปลี่ยนแล้วล้างคำค้น sort และตัวกรองคอลัมน์ */}
+      <Segmented label="มุมมอง Lab catalog FDH" options={LAB_VIEWS} value={current} onChange={(v) => set({ view: v === "list" ? null : v, q: null, sort: null, dir: null, cf: null })} />
+      {current === "compare" ? (
+        <LabCompare />
+      ) : (
+        <LabFdhList canImport={canImport} />
+      )}
+    </div>
+  );
+}
+
+function LabFdhList({ canImport }: { canImport: boolean }) {
+  const [gridKey, setGridKey] = useState(0);
+  return (
+    <div className="flex flex-col gap-4">
+      {canImport && (
+        <CatalogUpload
+          endpoint="/api/catalog/lab-fdh"
+          accept=".xlsx"
+          fileLabel="ไฟล์ Lab Catalog จาก FDH"
+          buttonLabel="นำเข้าไฟล์ Lab Catalog (.xlsx)"
+          hint="ไฟล์จาก FDH ของโรงพยาบาลนี้ นำเข้าใหม่จะแทนที่รายการเดิมทั้งหมด"
+          itemNoun="รายการ Lab"
+          onImported={() => setGridKey((k) => k + 1)}
+        />
+      )}
+      <DataGrid<LabFdhItem, LabPage>
+        key={gridKey}
+        endpoint="/api/catalog/lab-fdh"
+        columns={labColumns}
+        getRowId={(r) => String(r.line_no)}
+        renderSummary={labSummary}
         exportPlacement="summary"
         reorderable
         hideable
@@ -141,14 +233,16 @@ function DrugNhsoTab({ canImport }: { canImport: boolean }) {
 
 /** canImport: ผู้ดูแลระบบนำเข้าไฟล์ได้ (API เช็ค role ซ้ำ) ผู้ใช้อื่นดูอย่างเดียว */
 export function Mapcode({ canImport }: { canImport: boolean }) {
-  const { tab, set } = useUrlParams(["tab", "q", "sort", "dir"] as const);
+  const { tab, set } = useUrlParams(["tab", "q", "sort", "dir", "cf", "view"] as const);
   const current: Tab = isTab(tab) ? tab : "drug-nhso";
   return (
     <div className="flex flex-col gap-5">
-      {/* เปลี่ยนแท็บ = ล้างคำค้นและ sort ของ DataGrid (set ล้าง page ให้แล้ว) เพราะคนละตาราง */}
-      <Segmented label="ชนิดรหัสมาตรฐาน" options={TABS} value={current} onChange={(t) => set({ tab: t === "drug-nhso" ? null : t, q: null, sort: null, dir: null })} />
+      {/* เปลี่ยนแท็บ = ล้างคำค้น sort และตัวกรองคอลัมน์ของ DataGrid (set ล้าง page ให้แล้ว) เพราะคนละตาราง ตัวกรองค้างทำให้ API ตอบ 400 */}
+      <Segmented label="ชนิดรหัสมาตรฐาน" options={TABS} value={current} onChange={(t) => set({ tab: t === "drug-nhso" ? null : t, q: null, sort: null, dir: null, cf: null, view: null })} />
       {current === "drug-nhso" ? (
         <DrugNhsoTab canImport={canImport} />
+      ) : current === "lab-fdh" ? (
+        <LabFdhTab canImport={canImport} />
       ) : (
         <Notice title="ยังไม่รองรับการนำเข้า" detail="รอไฟล์ตัวอย่างจริงเพื่อตรวจหัวคอลัมน์ก่อนเขียนตัวนำเข้า" />
       )}
