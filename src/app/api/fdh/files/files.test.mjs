@@ -63,6 +63,15 @@ test("ADP.TMLTCODE: filled in code from icode helper column (not a file column)"
   );
   assert.deepEqual(rows.map((r) => r.TMLTCODE), ["320151", "350001", "", ""]);
   assert.ok(rows.every((r) => !("icode" in r)), "ลบคอลัมน์ช่วย icode");
+
+  // C914 ใช้ตัดสินเดียวกับ applyLabTmlt: icode ที่ได้ TMLT ไม่ว่าง
+  const { resolvedLabIcodes } = await import("./sql.ts");
+  const ok = resolvedLabIcodes(
+    [{ lab_code: "3000408", tmlt_code: "320151" }, { lab_code: "3000500", tmlt_code: "A" }, { lab_code: "3000500", tmlt_code: "B" }],
+    [{ icode: "3003344", tmlt_code: "350001" }, { icode: "3009999", tmlt_code: "1" }, { icode: "3009999", tmlt_code: "2" }],
+  );
+  assert.deepEqual(ok.sort(), ["3000408", "3003344"], "catalog หลายค่าไม่ยืนยัน และ lab_items ขัดกัน ไม่นับ");
+  assert.deepEqual(resolvedLabIcodes([], []), []);
 });
 
 test("toTxt: header, | separator, CRLF, null empty, cleans | CR LF and quotes", () => {

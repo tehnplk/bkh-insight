@@ -5,6 +5,7 @@ import { CASE_LIMIT, casesSql, maskFound, ruleCodes, ruleParams } from "@/app/ap
 import { closedByVns } from "@/app/api/fdh/c-check/closed";
 import { STP_RULES } from "@/app/api/fdh/c-check/files";
 import { opDruCheckSql } from "@/app/api/fdh/files/sql";
+import { labRuleCsv } from "@/app/api/fdh/files/lab-tmlt";
 import { DRUG_CATALOG_CODES, checkDru, type CatalogVersion, type CheckResult, type DruCheckRow } from "@/app/api/ipd/fdh-check/check";
 import { parseOpdSelection } from "../fdh-files";
 
@@ -33,7 +34,8 @@ export async function POST(request: NextRequest) {
     if (codes.length) {
       result.rules = [...codes];
       // ขอเกิน 1 แถว: ได้ครบ CASE_LIMIT พอดีจะไม่ขึ้นว่าถูกตัด
-      const rows = await hisQuery<CaseRow>(casesSql("op", file, CASE_LIMIT + 1), ruleParams(sel.start, sel.end, sel.vns, await closedByVns(sel.vns)));
+      const lab = file === "ADP" ? await labRuleCsv() : { labCsv: "", catCsv: "" };
+      const rows = await hisQuery<CaseRow>(casesSql("op", file, CASE_LIMIT + 1), ruleParams(sel.start, sel.end, sel.vns, await closedByVns(sel.vns), lab.labCsv, lab.catCsv));
       const cases = rows.slice(0, CASE_LIMIT);
       result.truncated = rows.length > CASE_LIMIT;
       result.findings = cases.map((c) => ({ hn: c.hn || null, seq: c.seq || null, codes: [c.c_code], found: c.found == null ? undefined : String(maskFound(c.c_code, String(c.found))) }));

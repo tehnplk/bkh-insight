@@ -192,6 +192,12 @@ export function applyLabTmlt(rows: FileRow[], cat: { lab_code: string; tmlt_code
   return rows;
 }
 
+/** icode ที่ pickTmlt ให้ค่าไม่ว่าง (กฎ C914 ใช้ตัดสินเดียวกับ applyLabTmlt) */
+export function resolvedLabIcodes(cat: { lab_code: string; tmlt_code: string }[], his: { icode: string; tmlt_code: string }[]) {
+  const c = byCode(cat.map((r) => [r.lab_code, r.tmlt_code])), h = byCode(his.map((r) => [r.icode, r.tmlt_code]));
+  return [...new Set([...c.keys(), ...h.keys()])].filter((icode) => pickTmlt(c.get(icode), h.get(icode)));
+}
+
 /** /api/fdh/files/summary */
 export type FilesSummary = { type: FdhType; files: { file: string; rows: number }[] };
 /** /api/fdh/files (json) */
