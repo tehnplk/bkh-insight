@@ -34,6 +34,37 @@ test("every file has one page SQL: date params first, LIMIT/OFFSET last", () => 
   assert.ok(pageSql("ip", "IPD").includes("ROUND(COALESCE(i.bw, 0) / 1000, 3) AS `ADM_W`"));
 });
 
+test("ADP.TMLTCODE: filled in code from icode helper column (not a file column)", async () => {
+  const { pickTmlt, applyLabTmlt } = await import("./sql.ts");
+  for (const t of FDH_TYPES) {
+    assert.ok(exportSql(t, "ADP").includes("'' AS `TMLTCODE`, ") && exportSql(t, "ADP").includes("op.icode AS icode\n"), t);
+    assert.ok(!fileColumns(t, "ADP").includes("icode"), t);
+  }
+  assert.equal(fileColumns("op", "ADP")[16], "TMLTCODE");
+
+  assert.equal(pickTmlt(["A"], ["B"]), "A", "catalog ก่อน");
+  assert.equal(pickTmlt(["A", "B"], ["B"]), "B", "catalog หลายค่า: lab_items ยืนยัน");
+  assert.equal(pickTmlt(["A", "B"], ["C"]), "", "catalog หลายค่า: lab_items ไม่อยู่ในตัวเลือก");
+  assert.equal(pickTmlt(["A", "B"], undefined), "");
+  assert.equal(pickTmlt(undefined, ["C"]), "C", "ไม่อยู่ใน catalog → lab_items");
+  assert.equal(pickTmlt(undefined, ["C", "D"]), "", "lab_items ขัดกัน → ว่าง");
+  assert.equal(pickTmlt(undefined, undefined), "");
+
+  const rows = [
+    { CODE: "x", TMLTCODE: "", icode: "3000408" },
+    { CODE: "y", TMLTCODE: "", icode: "3003344" },
+    { CODE: "z", TMLTCODE: "", icode: "3009999" },
+    { CODE: "w", TMLTCODE: "", icode: null },
+  ];
+  applyLabTmlt(
+    rows,
+    [{ lab_code: "3000408", tmlt_code: "320151" }],
+    [{ icode: "3000408", tmlt_code: "999999" }, { icode: "3003344", tmlt_code: "350001" }, { icode: "3009999", tmlt_code: "1" }, { icode: "3009999", tmlt_code: "2" }],
+  );
+  assert.deepEqual(rows.map((r) => r.TMLTCODE), ["320151", "350001", "", ""]);
+  assert.ok(rows.every((r) => !("icode" in r)), "ลบคอลัมน์ช่วย icode");
+});
+
 test("toTxt: header, | separator, CRLF, null empty, cleans | CR LF and quotes", () => {
   assert.equal(toTxt(["HN", "SEQ"], []), "HN|SEQ\r\n");
   assert.equal(

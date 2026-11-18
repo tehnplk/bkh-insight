@@ -6,6 +6,7 @@ import { badRequest, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
 import { FILE_ORDER } from "@/app/api/fdh/c-check/files";
 import { fileColumns, ipAnExportSql, type FileRow } from "@/app/api/fdh/files/sql";
 import { toTxt } from "@/app/api/fdh/files/txt";
+import { fillLabTmlt } from "@/app/api/fdh/files/lab-tmlt";
 import { MAX_EXPORT_ANS, type FdhPreview } from "../admissions/admissions";
 
 /**
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   const files: FdhPreview["files"] = [];
   try {
     for (const file of FILE_ORDER.ip) {
-      const rows = await hisQuery<FileRow>(ipAnExportSql(file, ans.length), [today, today, ...(ans as string[])]);
+      const rows = await fillLabTmlt(file, await hisQuery<FileRow>(ipAnExportSql(file, ans.length), [today, today, ...(ans as string[])]));
       files.push({ file, columns: fileColumns("ip", file), rows });
     }
   } catch (e) {

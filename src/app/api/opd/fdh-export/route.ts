@@ -6,6 +6,7 @@ import { badRequest, isAuthed, unauthorized } from "@/app/api/fund/_lib/fund";
 import { FILE_ORDER } from "@/app/api/fdh/c-check/files";
 import { exportSql, fileColumns, type FileRow } from "@/app/api/fdh/files/sql";
 import { toTxt } from "@/app/api/fdh/files/txt";
+import { fillLabTmlt } from "@/app/api/fdh/files/lab-tmlt";
 import type { FdhPreview } from "@/components/fdh-preview/fdh-preview";
 import { keepSelected, parseOpdSelection } from "../fdh-files";
 
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
   const files: FdhPreview["files"] = [];
   try {
     for (const file of FILE_ORDER.op) {
-      const rows = (await hisQuery<FileRow>(exportSql("op", file), [sel.start, sel.end])).filter(keepSelected(file, sel));
+      const rows = await fillLabTmlt(file, (await hisQuery<FileRow>(exportSql("op", file), [sel.start, sel.end])).filter(keepSelected(file, sel)));
       files.push({ file, columns: fileColumns("op", file), rows });
     }
   } catch (e) {
