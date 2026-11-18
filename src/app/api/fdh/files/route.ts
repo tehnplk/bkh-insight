@@ -6,6 +6,7 @@ import { isFile, parseType } from "../c-check/files";
 import { countDef } from "../c-check/checks";
 import { exportSql, fileColumns, pageSql, type FilePage, type FileRow } from "./sql";
 import { toTxt } from "./txt";
+import { fillLabTmlt } from "./lab-tmlt";
 
 /** GET ?type=op|ip&file=&start=&end=&page=&pageSize= ข้อมูลหนึ่งหน้าของแฟ้ม { rows, total, columns }
  *  &format=txt ส่งออกทั้งแฟ้มของช่วงเป็น <FILE>.txt (คั่นด้วย |, CRLF, UTF-8 ไม่มี BOM) ไม่มี sort/ค้นหา */
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   try {
     if (params.get("format") === "txt") {
       // shortcut: สร้างทั้งไฟล์ในหน่วยความจำ (ใหญ่สุด ~160k แถว / ~13 MB คือ OP LABFU ทั้งเดือน) ถ้าช่วงยาวขึ้นให้เปลี่ยนเป็น stream
-      const rows = await hisQuery<FileRow>(exportSql(type, file), dates);
+      const rows = await fillLabTmlt(file, await hisQuery<FileRow>(exportSql(type, file), dates));
       return new Response(toTxt(columns, rows), {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       hisQuery<FileRow>(pageSql(type, file), [...dates, pageSize, (page - 1) * pageSize]),
       hisQuery<Record<string, string | number | null>>(sql, dates),
     ]);
-    const body: FilePage = { rows, total: Number(count[0]?.[col] ?? 0), columns };
+    const body: FilePage = { rows: await fillLabTmlt(file, rows), total: Number(count[0]?.[col] ?? 0), columns };
     return Response.json(body);
   } catch (e) {
     console.error("fdh/files", e);

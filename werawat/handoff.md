@@ -1,4 +1,44 @@
-# Handoff: werawat (อัปเดต 16 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 17 พ.ย. 2569)
+
+## รอบ 17 พ.ย. 2569 (PR #48–#50 merge แล้ว, deploy แล้ว main `b78a309`)
+- deploy แล้ว:
+  - **#48** หน้าแรก `/`
+    - การ์ดภาวะทุพโภชนาการผู้ป่วยใน E40–E46: ตามวันจำหน่าย แยกรหัส โรคหลัก/โรคร่วม, % ของผู้จำหน่าย, Sum AdjRW ต่อ AN ไม่ซ้ำ
+    - การ์ดรายเดือนเลือกปีงบได้ (`?mfy=`, `GET /api/home/malnutrition-fy`)
+    - **อัปเดต Next.js 16.4.6:** ปิด advisory moderate 7 ตัว ; server รัน `npm ci` แล้ว ; ถ้า dev ตอบ 500 (Turbopack 0xc0000142) ให้ลบ `.next` แล้วเปิดใหม่
+  - **#49** `/opd/admissions` และ `/ipd/admissions` ตรึงคอลัมน์ถึงคอลัมน์สิทธิ (`pinColumns` 6)
+  - **#50**
+    - `/opd/admissions`: OFC ปิดสิทธิด้วย Approval Code EDC ล่าสุด (สูตร PERMITNO) ต.ค. OFC 1,134 ราย มี code 866 ราย
+    - `/ipd/admissions`: ตัวกรองกลุ่มโรค `?dx=` และ `?dxpos=all|pdx|sdx` ; นิยามกลุ่มใน `src/lib/dx-groups.ts` (ผู้ใช้เลือกเก็บในไฟล์ ยังไม่ทำหน้า admin)
+- ข้อเท็จจริง:
+  - **E40–E46 ทั้งหมดลงเป็นโรคร่วม:** FY2569 มี 68 ราย Sum AdjRW 115.0292 (ค่า 17 พ.ย.) คิดเป็นราว 0.6% ของผู้จำหน่าย อาจลงรหัสไม่ครบ ต้องถามเวชระเบียน
+  - **มี 61 visit ใน opd/admissions ที่มีเลขปิดสิทธิแต่ claim_status ไม่ใช่ closed:** `CLOSED_SQL` กับ `CLOSE_CODE_SQL` นิยามต่างกัน ยังไม่แก้
+- **กองทุนต่างด้าว (FWF/NRH)** ศึกษาไฟล์ Downloads แล้ว ยังไม่ลงมือ
+  - **ไฟล์ "หมวดรายการเบิกจ่าย 19 หมวด และการบันทึกข้อมูลต่างด้าว.xlsx":**
+    - mapping หมวด→CHA→ADP เหมือน STP
+    - FWF จ่ายเฉพาะ 79 รหัส: IP RW≥4/โรคเฉพาะ/SC01, OPCA/OPHD/crypto, อุปกรณ์, ARV/Lab HIV, Norplant, วัคซีน
+  - **ไฟล์ "รหัสปฏิเสธ ประกันสุขภาพคนต่างด้าว...xlsx":** มี 48 รหัส เลข 186/193/999 ชนกับรหัส C ของ สปสช. → ต้องใส่ prefix `FWF-`
+  - **เสี่ยงในแฟ้มที่เราส่งออกตอนนี้:** CHA แยกตามวัน (5504), ADP TYPE หมวด 2/9/15/19 (5505/5509), UUC=1 ตายตัว
+  - **P0 รอการเงินตอบ:** ส่งผ่าน FDH ไหม, INSCL/PERMITNO ของต่างด้าว, จ่ายเฉพาะ 79 รหัสจริงไหม
+  - ขั้นต่อไปเมื่อได้คำตอบ: P1 นำเข้ารายการเข้า `fund_claim_item` → P2 กฎ `FWF-` โครงสร้าง → P3 กฎรายการ/อายุ → P4 กฎ ICD
+- **Lab catalog** ผู้ใช้ให้พักไว้ ทำต่อทีหลัง
+  - **`Downloads/11252 - โรงพยาบาลบางระกำ - LabCatalog.xlsx` (จาก FDH, ยึดไฟล์นี้):**
+    - header แถว 5, 15 คอลัมน์: สิทธิประโยชน์, รหัสกรมบัญชีกลาง, ชื่อ, หน่วย, ราคากลาง, gyear, วันที่เริ่ม/สิ้นสุด `dd-mm-yyyy HH:MM`, flag, TMLT Code/Name, Lab Code, LOINC, Exception
+    - 141 รายการ × 4 สิทธิ (OFC/SSS/STP/UCS) = 564 แถว
+    - Lab Code 7 หลัก (น่าจะ `nondrugitems.icode` ยังไม่พิสูจน์)
+    - 7 รายการไม่มีรหัสกรมบัญชีกลาง (6 รายการ TMLT 390013 ราคา 0)
+  - **`Downloads/eclaimexport-11252.xls` (e-Claim, OFC):**
+    - 199 รายการไม่ซ้ำ จาก 394 แถว
+    - LABCode เป็น `lab_items_code` คนละชุดกับ FDH → เทียบด้วย TMLT ได้ตรง 126 รหัส
+    - ราคาไม่ตรง FDH 33 รายการ
+  - **แผน:**
+    1. migration `catalog_file.kind` + `lab_fdh` และตาราง `lab_catalog_fdh` (UNIQUE file_id, line_no)
+    2. parser + test
+    3. แท็บ "Lab catalog FDH" ใน `/catalog/standard-codes` (คงแท็บ สกส. ไว้รอไฟล์ สกส.)
+    4. เทียบ HOSxP: icode มีและเปิดใช้, `nondrugitems.tmlt_code` เทียบ FDH (กระทบ ADP), Lab ที่คิดเงินแต่ไม่อยู่ใน catalog, ราคา — ต้อง prove คอลัมน์ `lab_items`/`nondrugitems` ก่อน
+- **NHSO Secure SmartCard Agent:** ดูหัวข้อรอบ 16 พ.ย. ยังไม่ใช้ รอเอกสาร `save-endpoint` จาก สปสช.
+- **ค้างจากรอบก่อน:** นำเข้า REP สิทธิอื่นบน server, ถามบัญชีเรื่องวันที่ออก STM, uc-debtor กรอง UCS, claim-pipeline แยกวันที่ REP ตามสิทธิ
+- **ตรวจผล:** `node --test src/lib/dx-groups.test.mjs src/app/api/home/overview/malnutrition.test.mjs src/app/api/ipd/admissions/admissions.test.mjs src/app/api/opd/admissions/admissions.test.mjs` ; `npx tsc --noEmit` ; `npx eslint src`
 
 ## รอบ 16 พ.ย. 2569 (PR #46 และ #47 merge แล้ว, deploy แล้ว main `5a62cea`)
 - deploy แล้ว:

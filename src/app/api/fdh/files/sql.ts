@@ -36,7 +36,8 @@ const CHA = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESC
 const CHA_GROUP = "GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid\nHAVING ROUND(SUM(op.sum_price), 2) > 0";
 const AER = `v.hn AS \`HN\`, COALESCE(v.an, '') AS \`AN\`, DATE_FORMAT(er.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(NULLIF(ac.claim_code, ''), '') AS \`AUTHAE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, er.vstdate), '%Y-%m-%d') AS \`AEDATE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, v.vsttime), '%H%i') AS \`AETIME\`, COALESCE(ac.ac_type, '') AS \`AETYPE\`, COALESCE(rin.referin_number, rin.docno, '') AS \`REFER_NO\`, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS \`REFMAINI\`, CASE WHEN rin.vn IS NOT NULL THEN '1100' ELSE '' END AS \`IREFTYPE\`, COALESCE(rout.refer_hospcode, '') AS \`REFMAINO\`, CASE WHEN rout.vn IS NOT NULL THEN '1100' ELSE '' END AS \`OREFTYPE\`, COALESCE(NULLIF(ac.ac_ae, ''), NULLIF(ept.ucae, 'N'), '') AS \`UCAE\`, '' AS \`EMTYPE\`, er.vn AS \`SEQ\`, '' AS \`AESTATUS\`, '' AS \`DALERT\`, '' AS \`TALERT\``;
 const AER_JOIN = "LEFT JOIN er_nursing_detail ed ON ed.vn = er.vn LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn LEFT JOIN er_pt_type ept ON ept.er_pt_type = er.er_pt_type LEFT JOIN ipt_accident ac ON ac.an = v.an";
-const ADP = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATEOPD\`, ${ADP_TYPE} AS \`TYPE\`, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS \`CODE\`, ROUND(op.qty, 2) AS \`QTY\`, ROUND(op.unitprice, 2) AS \`RATE\`, COALESCE(op.vn, '') AS \`SEQ\`, '' AS \`CAGCODE\`, '' AS \`DOSE\`, '' AS \`CA_TYPE\`, '' AS \`SERIALNO\`, ${TOTCOPAY}, '' AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, '' AS \`QTYDAY\`, COALESCE(nd.tmlt_code, '') AS \`TMLTCODE\`, '' AS \`STATUS1\`, '' AS \`BI\`, ${ITEM_CLINIC} AS \`CLINIC\`, '1' AS \`ITEMSRC\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`GRAVIDA\`, '' AS \`GA_WEEK\`, '' AS \`DCIP/E_screen\`, '' AS \`LMP\`, '' AS \`SP_ITEM\``;
+// TMLTCODE เติมในโค้ดด้วย applyLabTmlt จาก icode (alias ไม่มี backtick จึงไม่อยู่ใน fileColumns และถูกลบก่อนส่งออก)
+const ADP = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATEOPD\`, ${ADP_TYPE} AS \`TYPE\`, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS \`CODE\`, ROUND(op.qty, 2) AS \`QTY\`, ROUND(op.unitprice, 2) AS \`RATE\`, COALESCE(op.vn, '') AS \`SEQ\`, '' AS \`CAGCODE\`, '' AS \`DOSE\`, '' AS \`CA_TYPE\`, '' AS \`SERIALNO\`, ${TOTCOPAY}, '' AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, '' AS \`QTYDAY\`, '' AS \`TMLTCODE\`, '' AS \`STATUS1\`, '' AS \`BI\`, ${ITEM_CLINIC} AS \`CLINIC\`, '1' AS \`ITEMSRC\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`GRAVIDA\`, '' AS \`GA_WEEK\`, '' AS \`DCIP/E_screen\`, '' AS \`LMP\`, '' AS \`SP_ITEM\`, op.icode AS icode`;
 const ADP_JOIN = "INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN ovst v ON v.vn = op.vn LEFT JOIN doctor doc ON doc.code = op.doctor LEFT JOIN income inc ON inc.income = op.income LEFT JOIN ipt ia ON ia.an = op.an LEFT JOIN spclty sp ON sp.spclty = COALESCE(v.spclty, ia.spclty)";
 // remark = DRUGREMARK: OP = เหตุผลใช้ยานอกบัญชี EA–EF (ต้องอยู่บรรทัดเดียว opDruCheckSql ตัดที่ "\nSELECT "/"\nFROM ")
 const dru = (remark: string) => `${HCODE} AS \`HCODE\`, op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, ${ITEM_CLINIC} AS \`CLINIC\`, pt.cid AS \`PERSON_ID\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE_SERV\`, op.icode AS \`DID\`, d.name AS \`DIDNAME\`, ROUND(op.qty, 0) AS \`AMOUNT\`, ROUND(op.unitprice, 2) AS \`DRUGPRICE\`, ROUND(COALESCE(d.unitcost, 0), 2) AS \`DRUGCOST\`, COALESCE(d.did, '') AS \`DIDSTD\`, d.units AS \`UNIT\`, COALESCE(d.packqty, '1') AS \`UNIT_PACK\`, COALESCE(op.vn, '') AS \`SEQ\`, ${remark} AS \`DRUGREMARK\`, '' AS \`PA_NO\`, ${TOTCOPAY}, CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS \`USE_STATUS\`, ROUND(op.sum_price, 2) AS \`TOTAL\`, COALESCE(du.shortlist, op.drugusage, '') AS \`SIGCODE\`, TRIM(CONCAT(COALESCE(du.name1, ''), ' ', COALESCE(du.name2, ''), ' ', COALESCE(du.name3, ''))) AS \`SIGTEXT\`, COALESCE(doc.licenseno, op.staff, '') AS \`PROVIDER\`, '' AS \`SP_ITEM\``;
@@ -161,6 +162,35 @@ export const fileColumns = (type: FdhType, file: string) => [...pageSql(type, fi
 // รูปแบบไฟล์ txt (toTxt) อยู่ที่ txt.ts: client ใช้สร้าง zip ได้โดยไม่ลาก SQL ไปด้วย และไฟล์นี้ไม่มี import ค่า (node --test อ่านได้)
 import type { FileRow } from "./txt";
 export type { FileRow };
+
+// TMLT ของรายการแล็บ (แฟ้ม ADP): Lab Catalog FDH (insight) ก่อน แล้ว lab_items ของ HOSxP ; ทั้งสองไม่มี params (ผ่าน prove-query แล้ว)
+export const LAB_TMLT_HIS_SQL = "SELECT DISTINCT icode, TRIM(tmlt_code) AS tmlt_code FROM lab_items WHERE active_status = 'Y' AND icode IS NOT NULL AND icode <> '' AND TRIM(tmlt_code) <> ''";
+export const LAB_TMLT_INSIGHT_SQL = "SELECT DISTINCT btrim(lab_code) AS lab_code, btrim(tmlt_code) AS tmlt_code FROM lab_catalog_fdh WHERE btrim(tmlt_code) <> '' AND (end_at IS NULL OR end_at >= localtimestamp)";
+
+/** catalog ค่าเดียว → ใช้ ; catalog หลายค่า → ใช้ของ lab_items เมื่อเป็นหนึ่งในนั้น ; ไม่อยู่ใน catalog → lab_items ค่าเดียว ; ไม่งั้นว่าง (ไม่เดา) */
+export function pickTmlt(cat?: string[], his?: string[]) {
+  const h = his?.length === 1 ? his[0] : "";
+  if (!cat?.length) return h;
+  if (cat.length === 1) return cat[0];
+  return cat.includes(h) ? h : "";
+}
+
+const byCode = (pairs: [string, string][]) => {
+  const m = new Map<string, string[]>();
+  for (const [k, v] of pairs) m.set(k, [...(m.get(k) ?? []), v]);
+  return m;
+};
+
+/** ตั้ง TMLTCODE ของแถว ADP ตาม icode แล้วลบคอลัมน์ช่วย icode (แก้แถวเดิม) */
+export function applyLabTmlt(rows: FileRow[], cat: { lab_code: string; tmlt_code: string }[], his: { icode: string; tmlt_code: string }[]) {
+  const c = byCode(cat.map((r) => [r.lab_code, r.tmlt_code])), h = byCode(his.map((r) => [r.icode, r.tmlt_code]));
+  for (const r of rows) {
+    const icode = String(r.icode ?? "");
+    delete r.icode;
+    r.TMLTCODE = pickTmlt(c.get(icode), h.get(icode));
+  }
+  return rows;
+}
 
 /** /api/fdh/files/summary */
 export type FilesSummary = { type: FdhType; files: { file: string; rows: number }[] };
