@@ -4,6 +4,7 @@ import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_
 import { STP_RULES, compareCode, isFile, parseType, type ValidateResponse } from "../files";
 import { casesSql, countDef, maskFound, ruleCodes, ruleParams, ruleSummarySql } from "../checks";
 import { closedByRange } from "../closed";
+import { labRuleCsv } from "../../files/lab-tmlt";
 
 type Raw = { c_code: string; hn: string | null; an: string | null; seq: string | null; found: string | number | null };
 const str = (v: string | number | null) => (v == null ? "" : String(v));
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest) {
   const codes = ruleCodes(type, file);
   const { sql, col } = countDef(type, file);
   try {
-    const rp = codes.length ? ruleParams(start, end, [], type === "op" ? await closedByRange(start, end) : []) : [];
+    const lab = file === "ADP" ? await labRuleCsv() : { labCsv: "", catCsv: "" };
+    const rp = codes.length ? ruleParams(start, end, [], type === "op" ? await closedByRange(start, end) : [], lab.labCsv, lab.catCsv) : [];
     const [count, grouped, raw, info] = await Promise.all([
       hisQuery<Record<string, string | number | null>>(sql, dates),
       codes.length ? hisQuery<{ c_code: string; n: number }>(ruleSummarySql(type, file), rp) : [],

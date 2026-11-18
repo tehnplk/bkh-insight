@@ -4,6 +4,7 @@ import { badRequest, isAuthed, parseRange, unauthorized } from "@/app/api/fund/_
 import { FILE_ORDER, codeLevel, parseType, type Level, type SummaryResponse } from "../files";
 import { RULES, countDef, itemFiles, ruleParams, ruleSummarySql } from "../checks";
 import { closedByRange } from "../closed";
+import { labRuleCsv } from "../../files/lab-tmlt";
 
 type Count = Record<string, string | number | null>;
 type RuleCount = { c_code: string; fdh_file: string; n: number };
@@ -26,7 +27,8 @@ export async function GET(request: NextRequest) {
   // กฎ: แฟ้มที่ไม่อ่าน opitemrece รวม statement เดียว ส่วนแฟ้ม items รันทีละแฟ้ม
   const ruleSql = [ruleSummarySql(type), ...itemFiles(type).map((f) => ruleSummarySql(type, f))];
   try {
-    const rp = ruleParams(start, end, [], type === "op" ? await closedByRange(start, end) : []);
+    const [closed, { labCsv, catCsv }] = await Promise.all([type === "op" ? closedByRange(start, end) : [], labRuleCsv()]);
+    const rp = ruleParams(start, end, [], closed, labCsv, catCsv);
     const [counts, ruleRows] = await Promise.all([
       Promise.all(statements.map((sql) => hisQuery<Count>(sql, dates))),
       Promise.all(ruleSql.map((sql) => hisQuery<RuleCount>(sql, rp))),

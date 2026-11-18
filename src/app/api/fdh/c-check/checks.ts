@@ -1,5 +1,5 @@
 // SQL นับแถวและกฎตรวจรหัส C ของแต่ละแฟ้ม FDH บน HOSxP (MariaDB 10.11, อ่านอย่างเดียว ผ่าน prove-query แล้ว) แบบ pure ไม่มี import ค่า
-// statement นับแถวขึ้นต้นด้วย H params [start, end] ; statement กฎขึ้นต้นด้วย H4 params ruleParams() = [start, end, selJson, closedJson]
+// statement นับแถวขึ้นต้นด้วย H params [start, end] ; statement กฎขึ้นต้นด้วย H4 params ruleParams() = [start, end, selJson, closedJson, labCsv, catCsv] (? ของ lab อยู่ใน LAB_CAT)
 // mysql2 แทน `?` ตามลำดับโดยไม่สนเครื่องหมายคำพูด จึงห้ามมี `?` อื่นใน SQL (regex ใช้ 0{0,1}) ; ชื่อแฟ้มเลือก SQL จาก record นี้เท่านั้น (whitelist)
 import type { FdhType, IpFile, OpFile } from "./files";
 
@@ -16,6 +16,10 @@ const AI = "p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e";
 const DRUG_INC = "INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4)";
 const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
 const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+// แล็บหมวด 07: LAB (C914) = icode ที่ไม่ได้ TMLT ตาม pickTmlt (param 5 labCsv) ; CAT (C190) = icode ที่ไม่อยู่ใน Lab Catalog FDH (param 6 catCsv)
+// FIND_IN_SET แทน JSON_TABLE เพราะเร็วกว่า (prove) ; ? สองตัวนี้อยู่หลัง H4 เสมอ ลำดับ labCsv แล้ว catCsv
+const LAB_CAT = `GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN_SET(ICODE, ?) THEN ICODE END ORDER BY ICODE) AS LAB,
+         GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN_SET(ICODE, ?) THEN ICODE END ORDER BY ICODE) AS CAT`;
 
 /** sql = statement นับแถว, col = คอลัมน์ของจำนวน (ADP/PHDB/DRU ใช้ statement เดียวกัน) */
 type CountDef = { sql: string; col: string };
@@ -262,7 +266,7 @@ it AS (
          COALESCE(nd.icode IS NOT NULL AND ${NOT_DRUG}, 0) AS IS_ADP,
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
-         ${ADP_TYPE} AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+         ${ADP_TYPE} AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
          op.qty AS QTY, op.sum_price AS SP, ROUND(op.sum_price, 2) AS TOTAL
   FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e
   LEFT JOIN income inc ON inc.income = op.income
@@ -283,7 +287,9 @@ ia AS (
          MAX(CODE = '30014') AS PRT,
          MAX(CODE = '30010') AS USG,
          GROUP_CONCAT(DISTINCT CASE WHEN CODE IN ('8901', '8902', '8706', '8707', '8711') THEN CODE END ORDER BY CODE) AS DEV,
-         GROUP_CONCAT(DISTINCT CASE WHEN CODE IN ('12003', '12004') THEN CODE END ORDER BY CODE) AS PRM
+         GROUP_CONCAT(DISTINCT CASE WHEN CODE IN ('12003', '12004') THEN CODE END ORDER BY CODE) AS PRM,
+         ${LAB_CAT},
+         GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM IN ('06', '07') AND TRIM(COALESCE(ADPCODE, '')) = '' THEN ICODE END ORDER BY ICODE) AS NOC
   FROM it WHERE IS_ADP GROUP BY HN, AN, SEQ, K
 ),
 ${CHA_CMP},
@@ -295,7 +301,7 @@ it AS (
          COALESCE(nd.icode IS NOT NULL AND ${NOT_DRUG}, 0) AS IS_ADP,
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
-         ${ADP_TYPE} AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+         ${ADP_TYPE} AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
          op.qty AS QTY, op.sum_price AS SP, ROUND(op.sum_price, 2) AS TOTAL
   FROM a JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.AN
   LEFT JOIN income inc ON inc.income = op.income
@@ -413,12 +419,13 @@ UNION ALL SELECT '152', 'ODX', c.HN, c.AN, c.SEQ, CONCAT(d.DIAG, ' VN ', c2.SEQ)
 
 // ADP op: arm เดียวหลายรหัส (cross join ตารางรหัส) อ่าน ia ครั้งเดียว ; เงื่อนไขต่อรหัสใช้ LEFT JOIN + IS NULL (EXISTS ใน OR ทำให้สแกนทั้งตาราง)
 // รายการรหัสต้องตรงกับ ADP_OP_CODES (ตรวจใน fdh.test.mjs)
-const ADP_OP_CODES = ["171", "514", "301", "234", "357", "634", "756"];
+const ADP_OP_CODES = ["171", "514", "301", "234", "357", "634", "756", "190", "309", "914"];
 const ADP_OP_BLOCK = `SELECT DISTINCT c.c AS c_code, 'ADP' AS fdh_file, x.HN AS hn, x.AN AS an, x.SEQ AS seq,
        CASE c.c WHEN '171' THEN x.VEH
                 WHEN '514' THEN CONCAT(x.VEH, IF(er.vn IS NULL, ' noAER', ' in-province'))
                 WHEN '301' THEN x.NEG WHEN '234' THEN '30014' WHEN '357' THEN x.DEV WHEN '634' THEN '30010'
-                WHEN '756' THEN CONCAT(x.PRM, ' age ', TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate)) END AS found
+                WHEN '756' THEN CONCAT(x.PRM, ' age ', TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate))
+                WHEN '190' THEN x.CAT WHEN '309' THEN x.NOC WHEN '914' THEN x.LAB END AS found
 FROM ia x
 LEFT JOIN ovst o ON o.vn = x.SEQ
 LEFT JOIN pttype t ON t.pttype = o.pttype
@@ -435,7 +442,8 @@ WHERE (c.c = '171' AND x.VEH IS NOT NULL AND ro.vn IS NULL)
    OR (c.c = '234' AND x.PRT = 1 AND dz.vn IS NULL)
    OR (c.c = '357' AND x.DEV IS NOT NULL AND t.hipdata_code IN ('UCS', 'WEL'))
    OR (c.c = '634' AND x.USG = 1 AND dop.vn IS NULL)
-   OR (c.c = '756' AND x.PRM IS NOT NULL AND TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate) NOT BETWEEN 35 AND 59)`;
+   OR (c.c = '756' AND x.PRM IS NOT NULL AND TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate) NOT BETWEEN 35 AND 59)
+   OR (c.c = '190' AND x.CAT IS NOT NULL) OR (c.c = '309' AND x.NOC IS NOT NULL) OR (c.c = '914' AND x.LAB IS NOT NULL)`;
 
 // C312 ค่าห้องนับวัน admit และวันจำหน่าย จึงยอมเกินวันนอนได้ 1 ; C952 > 999 แถวมีได้แค่ IP
 const ADP_IP_BLOCK = `SELECT '301' AS c_code, 'ADP' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT(CODE, ' ', TOTAL) AS found FROM it WHERE IS_ADP AND TOTAL < 0
@@ -444,7 +452,14 @@ UNION ALL SELECT '312', 'ADP', x.HN, x.AN, '', CONCAT(x.CODE, ' ', x.Q, ' > ', l
   JOIN (SELECT a.AN, GREATEST(DATEDIFF(a.DCHDATE, a.REGDATE), 1) - COALESCE(SUM(DATEDIFF(hl.reg_date, hl.dch_date)), 0) AS LOS
         FROM a LEFT JOIN ipt_home_leave hl ON hl.an = a.AN GROUP BY a.AN, a.DCHDATE, a.REGDATE) l ON l.AN = x.AN
   WHERE x.Q > l.LOS + 1
-UNION ALL SELECT '952', 'ADP', HN, AN, SEQ, CONCAT(CHRGITEM, ' ', COUNT(*)) FROM it WHERE IS_ADP GROUP BY HN, AN, SEQ, CHRGITEM HAVING COUNT(*) > 999`;
+UNION ALL SELECT '952', 'ADP', HN, AN, SEQ, CONCAT(CHRGITEM, ' ', COUNT(*)) FROM it WHERE IS_ADP GROUP BY HN, AN, SEQ, CHRGITEM HAVING COUNT(*) > 999
+UNION ALL SELECT c.c, 'ADP', x.HN, x.AN, '', CASE c.c WHEN '914' THEN x.LAB WHEN '190' THEN x.CAT ELSE x.NOC END
+  FROM (SELECT HN, AN,
+         ${LAB_CAT},
+         GROUP_CONCAT(DISTINCT CASE WHEN TRIM(COALESCE(ADPCODE, '')) = '' THEN ICODE END ORDER BY ICODE) AS NOC
+        FROM it WHERE IS_ADP AND CHRGITEM IN ('06', '07') GROUP BY HN, AN) x
+  JOIN (SELECT '914' AS c UNION ALL SELECT '190' UNION ALL SELECT '309') c
+  WHERE (c.c = '914' AND x.LAB IS NOT NULL) OR (c.c = '190' AND x.CAT IS NOT NULL) OR (c.c = '309' AND x.NOC IS NOT NULL)`;
 
 // C303 ไม่นับแถวที่จำนวนและราคาเป็น 0 (บันทึกแล้วไม่จ่ายจริง)
 const DRU_BLOCK = `SELECT '301' AS c_code, 'DRU' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT(ICODE, ' ', TOTAL) AS found FROM it WHERE IS_DRU AND TOTAL < 0
@@ -520,7 +535,7 @@ FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation 
     AER: { codes: ["STP-R111", "STP-R113"], sql: STP_IP_BLOCKS.AER },
     IRF: { codes: ["STP-R113"], sql: STP_IP_BLOCKS.RF },
     IDX: { codes: ["201", "202", "206", "232", "801", ...STP_DX], sql: `${dxBlock("IDX", IDX_206, "")}\nUNION ALL ${STP_IP_BLOCKS.DX}` },
-    ADP: { codes: ["301", "312", "952", ...STP_ADP], sql: `${ADP_IP_BLOCK}\nUNION ALL ${STP_IP_BLOCKS.ADP}`, items: true },
+    ADP: { codes: ["301", "312", "952", "914", "190", "309", ...STP_ADP], sql: `${ADP_IP_BLOCK}\nUNION ALL ${STP_IP_BLOCKS.ADP}`, items: true },
     DRU: { codes: ["301", "303", "952", "STP-R108"], sql: `${DRU_BLOCK}${DRU_IP_952}\nUNION ALL ${STP_IP_BLOCKS.DRU}`, items: true },
     CHA: { codes: ["302", "555"], sql: CHA_BLOCK, items: true },
     CHT: { codes: ["301", "555", "STP-R186"], sql: `${CHT_BLOCK}\nUNION ALL ${STP_IP_BLOCKS.CHT}`, items: true },
@@ -560,13 +575,17 @@ export const casesSql = (type: FdhType, file: string, limit = CASE_LIMIT) =>
 
 /**
  * params ของทุก statement กฎ: [start, end, selJson, closedJson] ; sel = VN (op) / AN (ip) ที่เลือก ว่าง = ทั้งช่วง ;
- * closed = VN ที่ปิดสิทธิแล้ว (closed.ts, ip ส่งว่าง) ; ทุกค่าเป็นตัวเลขล้วนที่ route/DB ตรวจแล้ว
+ * closed = VN ที่ปิดสิทธิแล้ว (closed.ts, ip ส่งว่าง) ; ทุกค่าเป็นตัวเลขล้วนที่ route/DB ตรวจแล้ว ;
+ * labCsv/catCsv = labRuleCsv() ของ fdh/files/lab-tmlt.ts (เฉพาะ statement ADP ของ OP ทุกแฟ้ม items และ IP ADP มี ? ของสองตัวนี้ ที่เหลือ pool.query เมินค่าเกิน)
+ * ค่าว่าง = แล็บหมวด 07 ทุกรายติด C914/C190 จึงทุก route ที่รันแฟ้ม items ต้องส่งค่าจริง
  */
-export const ruleParams = (start: string, end: string, sel: string[] = [], closed: string[] = []) => [
+export const ruleParams = (start: string, end: string, sel: string[] = [], closed: string[] = [], labCsv = "", catCsv = "") => [
   start,
   end,
   JSON.stringify(sel.map(Number)),
   JSON.stringify(closed.map(Number)),
+  labCsv,
+  catCsv,
 ];
 
 /** รหัสที่ found เป็นเลขบัตรประชาชน */

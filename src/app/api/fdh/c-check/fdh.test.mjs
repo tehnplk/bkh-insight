@@ -9,7 +9,8 @@ const H4 = `${H},
 sel AS (SELECT j.k FROM JSON_TABLE(?, '$[*]' COLUMNS (k BIGINT PATH '$')) j),
 cl AS (SELECT j.k FROM JSON_TABLE(?, '$[*]' COLUMNS (k BIGINT PATH '$')) j)`;
 const qCount = (sql) => sql.split("?").length - 1;
-// mysql2 แทน `?` ตามลำดับโดยไม่สนเครื่องหมายคำพูด: นับแถว = [start, end] ; กฎ = [start, end, selJson, closedJson] และห้ามมี `?` อื่น
+// mysql2 แทน `?` ตามลำดับโดยไม่สนเครื่องหมายคำพูด: นับแถว = [start, end] ; กฎ = [start, end, selJson, closedJson, labCsv, catCsv]
+// ? ของ labCsv/catCsv มีเฉพาะใน FIND_IN_SET ของ LAB_CAT (หลัง H4) และห้ามมี `?` อื่น
 const assertCount = (sql) => {
   assert.ok(sql.startsWith(H), sql.slice(0, 80));
   assert.ok(!sql.includes("${"), "template literal ไม่ถูกแทน");
@@ -17,7 +18,10 @@ const assertCount = (sql) => {
 const assertRule = (sql, label) => {
   assert.ok(sql.startsWith(H4), `${label}: ${sql.slice(0, 80)}`);
   assert.ok(!sql.includes("${"), `${label}: template literal ไม่ถูกแทน`);
-  assert.equal(qCount(sql), 4, `${label}: ? ต้องมี 4 ตัวพอดี`);
+  const lab = sql.split("FIND_IN_SET(ICODE, ?)").length - 1;
+  assert.ok(lab === 0 || lab === 2, `${label}: ? ของ lab ต้องมี 0 หรือ 2 ตัว`);
+  assert.equal(qCount(sql) - lab, 4, `${label}: ? นอก lab ต้องมี 4 ตัวพอดี`);
+  if (lab) assert.ok(sql.indexOf(" AS LAB") < sql.indexOf(" AS CAT"), `${label}: labCsv ก่อน catCsv`);
   assert.ok(!/CAST\(\? AS JSON\)/.test(sql), `${label}: MariaDB ไม่รองรับ CAST AS JSON`);
 };
 
@@ -84,7 +88,7 @@ test("ruleCodes match the codes written in each block, C160/C161 and dropped cod
   assert.deepEqual(ruleCodes("op", "INS"), ["127", "305", "349", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("ip", "INS"), ["125", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("op", "CHA"), ["302", "555"]);
-  assert.deepEqual(ruleCodes("op", "ADP"), ["171", "514", "301", "234", "357", "634", "756", "STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"]);
+  assert.deepEqual(ruleCodes("op", "ADP"), ["171", "514", "301", "234", "357", "634", "756", "190", "309", "914", "STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"]);
   assert.deepEqual(ruleCodes("op", "ORF"), ["STP-R113"]);
   assert.deepEqual(ruleCodes("op", "DRU"), ["301", "303", "565", "STP-R108"]);
   assert.ok(!ruleCodes("ip", "DRU").includes("565"), "C565 เป็นกฎ OP เท่านั้น");
@@ -126,13 +130,21 @@ test("rule SQL assembly: 4 params, base without opitemrece, items one statement 
 });
 
 test("ruleParams: JSON arrays of numbers", () => {
-  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-30", "[]", "[]"]);
-  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30", ["690915083012", "690915090144"], ["690915083012"]), [
+  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-30", "[]", "[]", "", ""]);
+  assert.deepEqual(ruleParams("2026-09-01", "2026-09-30", ["690915083012", "690915090144"], ["690915083012"], "3000001,3000002", "3000001"), [
     "2026-09-01",
     "2026-09-30",
     "[690915083012,690915090144]",
     "[690915083012]",
+    "3000001,3000002",
+    "3000001",
   ]);
+  // แล็บ (C190/C309/C914) อยู่ในแฟ้ม ADP ทั้งสองหมวด ; IP มี ? ของ lab เฉพาะแฟ้ม ADP
+  for (const t of FDH_TYPES) for (const c of ["190", "309", "914"]) {
+    assert.ok(ruleCodes(t, "ADP").includes(c), `${t} ${c}`);
+    assert.equal(codeLevel(c), "info");
+  }
+  assert.ok(casesSql("ip", "ADP").includes("FIND_IN_SET") && !casesSql("ip", "DRU").includes("FIND_IN_SET"));
 });
 
 test("CID is masked for C104/C116 only", () => {
