@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState } from "react";
 import { ReceiptText } from "lucide-react";
-import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { MultiSelect } from "@/components/multi-select/multi-select";
 import { FdhPreviewModal } from "@/components/fdh-preview/fdh-preview";
@@ -10,6 +10,7 @@ import { usePersistedFilter } from "@/lib/persisted-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
+import { srmFilterLabel } from "@/app/api/opd/right-check/srm";
 import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
 import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
@@ -107,10 +108,11 @@ const columns = col.columns([
   text("patient_name", "ชื่อ-สกุล", false),
   col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
   col.accessor("hospmain", { header: "HCODE(HIS)", cell: (c) => <HisHcode row={c.row.original} value={c.getValue()} />, meta: timeCell, enableSorting: false }),
-  // ผลตรวจสิทธิกับ สปสช.: ที่บันทึกไว้ไม่เกิน 24 ชม. มากับแถว (row.right อยู่ใน Excel ด้วย) ผลจากปุ่มรอบนี้ทับ ; คนละฐานกับ his จึงไม่มี sort/ตัวกรอง
+  // ผลตรวจสิทธิกับ สปสช.: ที่บันทึกไว้ไม่เกิน 24 ชม. มากับแถว (row.right อยู่ใน Excel ด้วย) ผลจากปุ่มรอบนี้ทับ ; คนละฐานกับ his จึงไม่มี sort
+  // ตัวกรองหัวคอลัมน์ srm_status เป็นสถานะ (route จัดจาก cache) ป้ายสถานะข้างปุ่มตรวจสอบสิทธิตั้งตัวกรองเดียวกัน
   col.display({ id: "srm_right", header: "สิทธิ(SRM)", cell: (c) => <SrmRight row={c.row.original} />, meta: nowrap }),
   col.display({ id: "srm_hcode", header: "HCODE(SRM)", cell: (c) => <SrmHcode row={c.row.original} />, meta: { className: "whitespace-nowrap tabular-nums" } }),
-  col.display({ id: "srm_status", header: "ผลตรวจสิทธิ", cell: (c) => <SrmStatus row={c.row.original} />, meta: nowrap }),
+  col.display({ id: "srm_status", header: "ผลตรวจสิทธิ", cell: (c) => <SrmStatus row={c.row.original} reload={c.table.options.meta?.reload} />, meta: { ...nowrap, filter: { format: srmFilterLabel } } }),
   text("pttype_name", "สิทธิ(HIS)"),
   col.display({ id: "codes", header: "Authen/ปิดสิทธิ", cell: (c) => <Codes row={c.row.original} />, meta: { filter: true } }),
   col.accessor("vstdate", { header: "วันที่มา", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: { ...timeCell, filter: { format: (v) => formatThaiDate(v) || v } } }),
@@ -171,10 +173,10 @@ const detailTitle = (r: VisitRow) => (
   </>
 );
 
-const renderSummary = (d: VisitsPage) => (
+const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
   <div className="flex flex-col gap-1.5">
     <p className="flex flex-wrap items-center gap-2 tabular-nums">
-      <RightCheckButton />
+      <RightCheckButton grid={grid} />
       <span className="inline-flex items-baseline gap-1.5 rounded-md border border-line bg-surface-sunken px-2.5 py-1">
         <span className="text-sm">จำนวน</span>
         <span className="font-semibold">{formatCount(d.total)}</span> visit
@@ -211,8 +213,9 @@ function PreviewButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/** ตรวจสิทธิของ visit ที่ติ๊กกับ สปสช. (ชุดเดียวกับปุ่ม 16 แฟ้ม) วางหน้าจำนวน visit ในแถบสรุป ผลไปอยู่ในคอลัมน์ของตาราง */
-function RightCheckButton() {
+/** ตรวจสิทธิของ visit ที่ติ๊กกับ สปสช. (ชุดเดียวกับปุ่ม 16 แฟ้ม) วางหน้าจำนวน visit ในแถบสรุป ผลไปอยู่ในคอลัมน์ของตาราง
+ *  จบรอบแล้วโหลด grid ใหม่ (ผลใหม่อยู่ใน cache แล้ว ตัวกรอง srm_status จึงรวมรายที่เพิ่งตรวจ) */
+function RightCheckButton({ grid }: { grid: SummaryGrid }) {
   const { picked } = useContext(SelectionContext);
   const { run, start } = useContext(RightCheckContext);
   const n = picked.size;
@@ -223,13 +226,13 @@ function RightCheckButton() {
         type="button"
         disabled={!n || running}
         // ชุด VN ตอนกด (ติ๊กเพิ่มระหว่างตรวจไม่ยิงใหม่)
-        onClick={() => start([...picked.keys()])}
+        onClick={() => start([...picked.keys()], grid.reload)}
         title={!n ? "ติ๊กเลือก visit ในตารางก่อน" : undefined}
         className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}
       >
         ตรวจสอบสิทธิ(SRM)
       </button>
-      <RightCheckStatus />
+      <RightCheckStatus active={grid.columnFilters.srm_status ?? []} onFilter={(v) => grid.setColumnFilter("srm_status", v)} />
     </>
   );
 }

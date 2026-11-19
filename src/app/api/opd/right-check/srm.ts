@@ -60,8 +60,10 @@ export type SrmInfo = {
   start: string | null;
   expire: string | null;
 };
+/** เจ้าหน้าที่ยืนยันใช้สิทธิของ HOSxP (fund/hospmain = สิทธิของ HOSxP ตอนยืนยัน) ; at เป็นเวลาไทยจาก insight */
+export type SrmConfirm = { by: string; at: string; fund: string | null; hospmain: string | null };
 /** ผลที่บันทึกไว้ต่อ HN (srm null = สปสช. ไม่พบสิทธิ) ; checked_at เป็นเวลาไทยจาก insight */
-export type SrmCache = { srm: SrmInfo | null; checked_at: string; checked_by: string };
+export type SrmCache = { srm: SrmInfo | null; checked_at: string; checked_by: string; confirmed: SrmConfirm | null };
 export type RightRow = {
   vn: string;
   hn: string;
@@ -77,6 +79,8 @@ export type RightRow = {
   cached?: boolean;
   checked_at?: string | null;
   checked_by?: string | null;
+  /** เจ้าหน้าที่ยืนยันใช้สิทธิของ HOSxP แล้ว (confirmedFor) */
+  confirmed?: { by: string; at: string } | null;
 };
 /** หยุดทั้งชุด: token ใช้ไม่ได้ หรือถูกจำกัดจำนวนครั้ง */
 export type RightStop = { kind: "token" | "rate_limit"; message: string; retryAfter?: number };
@@ -182,14 +186,43 @@ export function compareSrm(his: HisRight, srm: SrmInfo | null): RightRow {
 export const compareRight = (his: HisRight, data: SrmResult) => compareSrm(his, srmInfo(data));
 
 /** ผลที่บันทึกไว้ของ HN เทียบกับสิทธิของ visit นี้ใน HOSxP (สิทธิ/HCODE ต่างกันได้ทุก visit จึงเทียบใหม่ทุกครั้ง) */
-export const fromCache = (his: HisRight, c: SrmCache): RightRow => ({
-  ...compareSrm(his, c.srm), cached: true, checked_at: c.checked_at, checked_by: c.checked_by,
-});
+export const fromCache = (his: HisRight, c: SrmCache): RightRow => {
+  const r = compareSrm(his, c.srm);
+  return { ...r, cached: true, checked_at: c.checked_at, checked_by: c.checked_by, confirmed: confirmedFor(r, c.confirmed) };
+};
 
+/** สถานะที่ยืนยันใช้สิทธิของ HOSxP ได้ (ไม่ตรง/ไม่พบสิทธิ) */
+export const CONFIRMABLE = new Set<RightStatus>(["mismatch_right", "mismatch_hcode", "not_found"]);
+/** การยืนยันใช้ได้เมื่อสิทธิของ visit นี้ใน HOSxP ยังเท่ากับตอนยืนยัน (HCODE เทียบเมื่อ HCODE ไม่ตรงด้วย) ; HOSxP แก้แล้ว = ไม่แสดง */
+export function confirmedFor(r: Pick<RightRow, "status" | "hcode_ok" | "his">, c: SrmConfirm | null | undefined) {
+  if (!c || !CONFIRMABLE.has(r.status) || str(r.his.fund) !== str(c.fund)) return null;
+  if (r.hcode_ok === false && str(r.his.hospmain) !== str(c.hospmain)) return null;
+  return { by: c.by, at: c.at };
+}
+
+/** ค่าตัวกรองหัวคอลัมน์ srm_status ที่ยังไม่มีผลตรวจใน SRM_CACHE_HOURS (error ไม่บันทึกจึงตกที่ค่านี้) */
+export const SRM_UNCHECKED = "unchecked";
+export const srmFilterLabel = (v: string) => (v === SRM_UNCHECKED ? "ยังไม่ได้ตรวจ" : (RIGHT_STATUS_LABEL[v as RightStatus] ?? v));
+/** ค่าตัวกรอง srm_status ต่อ visit (สูตรเดียวกับ fromCache ที่แสดงในแถว) ; fund = hipdata_code ของ pttype ของ visit */
+export const srmFilterValues = (cands: { vn: string; hn: string; fund: string | null; hospmain: string | null }[], cache: Map<string, SrmCache>) =>
+  cands.map((c) => {
+    const hit = cache.get(c.hn);
+    return { k: c.vn, v: hit ? compareSrm({ ...c, name: "", pttype_name: null, hospsub: null }, hit.srm).status : SRM_UNCHECKED };
+  });
+
+/** คอลัมน์ยืนยันของ srm_right_check (NULL = ยังไม่ยืนยัน) */
+export type ConfirmCols = { confirmed_by?: string | null; confirmed_at?: string | null; confirmed_fund?: string | null; confirmed_hospmain?: string | null };
+export const toConfirm = (c: ConfirmCols): SrmConfirm | null =>
+  c.confirmed_at ? { by: c.confirmed_by ?? "", at: c.confirmed_at, fund: c.confirmed_fund ?? null, hospmain: c.confirmed_hospmain ?? null } : null;
 /** แถวจาก srm_right_check (CACHE_SQL ของ cache.ts) */
-export type SrmCacheRow = SrmInfo & { hn: string; found: boolean; checked_at: string; checked_by: string };
+export type SrmCacheRow = SrmInfo & ConfirmCols & { hn: string; found: boolean; checked_at: string; checked_by: string };
 export const cacheMap = (rows: SrmCacheRow[]) =>
-  new Map(rows.map(({ hn, found, checked_at, checked_by, ...srm }): [string, SrmCache] => [hn, { srm: found ? srm : null, checked_at, checked_by }]));
+  new Map(
+    rows.map(({ hn, found, checked_at, checked_by, confirmed_by, confirmed_at, confirmed_fund, confirmed_hospmain, ...srm }): [string, SrmCache] => [
+      hn,
+      { srm: found ? srm : null, checked_at, checked_by, confirmed: toConfirm({ confirmed_by, confirmed_at, confirmed_fund, confirmed_hospmain }) },
+    ]),
+  );
 
 /** ผลตรวจเป็นข้อความ (Excel) */
 export function srmText(r: RightRow | undefined) {

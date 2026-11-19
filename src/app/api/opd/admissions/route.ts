@@ -13,7 +13,7 @@ import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
 import type { RepCand } from "@/app/api/ipd/admissions/admissions";
 import { loadSrmCache } from "@/app/api/opd/right-check/cache";
-import { fromCache, srmText } from "@/app/api/opd/right-check/srm";
+import { fromCache, srmFilterLabel, srmFilterValues, srmText } from "@/app/api/opd/right-check/srm";
 import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
@@ -99,8 +99,10 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
     rcpt_no: { expr: RCPT_SQL, display: (v) => v.replaceAll(":", "/") },
   };
 }
-// rep (สถานะ REP) อยู่ insight และ subfund (กองทุนย่อย) คำนวณในโค้ด จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
-const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "rep", "subfund"] as const;
+// rep (สถานะ REP) และ srm_status (ผลตรวจสิทธิ srm_right_check) อยู่ insight ส่วน subfund (กองทุนย่อย) คำนวณในโค้ด
+// จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
+const KEY_FILTERS = ["rep", "subfund", "srm_status"] as const;
+const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", ...KEY_FILTERS] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
 // REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
@@ -169,9 +171,10 @@ export async function GET(request: NextRequest) {
     const depCodes = deps && effectiveCodes(rawDeps, deps.filter((d) => d.active).map((d) => d.code));
     const defs = filterDefs(lk, new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""])));
     const toFund = (pttype: string | null) => fundOf(lk, pttype);
-    /** VN ที่สถานะ REP / กองทุนย่อย ตรงตัวกรองหัวคอลัมน์ rep / subfund (null = ไม่กรอง) */
+    /** VN ที่สถานะ REP / กองทุนย่อย / ผลตรวจสิทธิ ตรงตัวกรองหัวคอลัมน์ rep / subfund / srm_status (null = ไม่กรอง) */
     let repVns: string[] | null = null;
     let subVns: string[] | null = null;
+    let srmVns: string[] | null = null;
 
     /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet ของคอลัมน์นั้น) */
     const whereFor = (except: FilterKey | null) => {
@@ -191,19 +194,20 @@ export async function GET(request: NextRequest) {
         args.push(like, like, like);
       }
       if (unclosed) parts.push(`${CLOSE_CODE_SQL} IS NULL`);
-      for (const [key, vns] of [["rep", repVns], ["subfund", subVns]] as const)
+      for (const [key, vns] of [["rep", repVns], ["subfund", subVns], ["srm_status", srmVns]] as const)
         if (vns && except !== key) {
           parts.push(vns.length ? inList("o.vn", vns.length) : "1 = 0");
           args.push(...vns);
         }
-      const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined }, except);
+      const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined, srm_status: undefined }, except);
       return { sql: `WHERE ${[...parts, ...cfw.parts].join("\n  AND ")}`, params: [...args, ...cfw.params] };
     };
 
-    // ตัวกรอง/facet ของ REP และกองทุนย่อย: ไม่ใช้ = ไม่มี query เพิ่ม ; ใช้ = จัดค่าของทุก visit ที่ผ่านตัวกรองอื่น (31 วันราว 18,000 VN)
+    // ตัวกรอง/facet ของ REP กองทุนย่อย และผลตรวจสิทธิ: ไม่ใช้ = ไม่มี query เพิ่ม ; ใช้ = จัดค่าของทุก visit ที่ผ่านตัวกรองอื่น (31 วันราว 18,000 VN)
     // VN ที่ตรงส่งเป็น IN ของ his (MariaDB แปลง IN ยาวเป็นตารางค่าแล้ว eq_ref ด้วย ix_vn_unique ตรวจแล้ว)
     // กองทุนย่อยเกิน 1,000 VN อ่าน opitemrece ตามช่วงวัน (ix_vstdate) ครั้งเดียว ~0.5 วินาที/31 วัน
-    // ตัวที่เป็น facet ทำทีหลัง จึงได้ค่าตามตัวกรองอีกตัวด้วย
+    // ผลตรวจสิทธิ: cache ไม่เกิน 24 ชม. ต่อ HN (PK hn) เทียบกับสิทธิของแต่ละ visit ด้วย compareSrm สูตรเดียวกับคอลัมน์
+    // ตัวที่เป็น facet ทำทีหลังสุด จึงได้ค่าตามตัวกรองตัวอื่นด้วย
     const keyFilters = {
       rep: async () => {
         const w = whereFor("rep");
@@ -220,8 +224,18 @@ export async function GET(request: NextRequest) {
         const sel = new Set(filters.subfund);
         subVns = [...new Set(vals.filter((r) => sel.has(r.v)).map((r) => r.k))];
       },
+      srm_status: async () => {
+        const w = whereFor("srm_status");
+        const cands = await hisQuery<{ vn: string; hn: string; pttype: string | null; hospmain: string | null }>(
+          `SELECT o.vn, o.hn, o.pttype, vp.hospmain ${FROM}\n${w.sql}`, w.params);
+        const cache = await loadSrmCache(cands.map((c) => c.hn));
+        const vals = srmFilterValues(cands.map((c) => ({ ...c, fund: toFund(c.pttype) })), cache);
+        if (facet === "srm_status") return facetRows(vals, (r) => r.v, facetQ, srmFilterLabel);
+        const sel = new Set(filters.srm_status);
+        srmVns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
+      },
     };
-    for (const key of facet === "rep" ? (["subfund", "rep"] as const) : (["rep", "subfund"] as const))
+    for (const key of [...KEY_FILTERS.filter((k) => k !== facet), ...KEY_FILTERS.filter((k) => k === facet)])
       if (filters[key] || facet === key) {
         const page = await keyFilters[key]();
         if (page) return Response.json(page);

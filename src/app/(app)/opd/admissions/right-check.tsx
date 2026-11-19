@@ -1,12 +1,14 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { CircleCheck } from "lucide-react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { focusRing } from "@/app/(app)/fund/_components/ui";
 import {
-  RIGHT_CHECK_CHUNK, RIGHT_STATUS_LABEL, type RightCheckPage, type RightRow, type RightStatus, type RightStop,
+  CONFIRMABLE, RIGHT_CHECK_CHUNK, RIGHT_STATUS_LABEL, confirmedFor,
+  type RightCheckPage, type RightRow, type RightStatus, type RightStop, type SrmConfirm,
 } from "@/app/api/opd/right-check/srm";
 
 // ตรวจสิทธิของ visit ที่เลือกกับ สปสช. ทีละชุด RIGHT_CHECK_CHUNK (route ยิงทีละราย เว้น SRM_DELAY_MS ต่อครั้งต่อเนื่องข้ามชุด) ; 401/429 หยุดทั้งหมด
@@ -21,8 +23,6 @@ const TONE: Record<RightStatus, string> = {
   error: "border-line bg-surface-sunken text-muted",
 };
 const ORDER = Object.keys(TONE) as RightStatus[];
-/** สถานะที่กดดูรายละเอียดเทียบ HOSxP กับ สปสช. ได้ */
-const DETAIL = new Set<RightStatus>(["mismatch_right", "mismatch_hcode", "not_found"]);
 const chip = "rounded border px-1.5 py-0.5 whitespace-nowrap";
 const dash = <span className="text-muted">–</span>;
 const rightBad = "rounded bg-danger-soft px-1 font-semibold text-danger";
@@ -38,8 +38,15 @@ function Badge({ status, title, children }: { status: RightStatus; title?: strin
 }
 
 type Run = { vns: string[]; rows: RightRow[]; stop: RightStop | null; error: string | null; running: boolean };
-type RightCheck = { results: Map<string, RightRow>; run: Run | null; start: (vns: string[]) => void };
-export const RightCheckContext = createContext<RightCheck>({ results: new Map(), run: null, start: () => {} });
+/** onDone: รอบจบ (รวมหยุด/ผิดพลาด แต่ไม่รวมยกเลิก) ผลใหม่บันทึกลง cache แล้ว ให้ grid โหลดใหม่ตามตัวกรอง srm_status */
+/** confirm: ยืนยันใช้สิทธิ HIS สำเร็จ ใส่ผลให้แถวนั้นและแถวอื่นของ HN เดียวกันในรอบนี้ทันที (สูตร confirmedFor เดียวกับ server) */
+type RightCheck = {
+  results: Map<string, RightRow>;
+  run: Run | null;
+  start: (vns: string[], onDone?: () => void) => void;
+  confirm: (row: RightRow, c: SrmConfirm) => void;
+};
+export const RightCheckContext = createContext<RightCheck>({ results: new Map(), run: null, start: () => {}, confirm: () => {} });
 
 export function useRightCheck(): RightCheck {
   const [results, setResults] = useState<Map<string, RightRow>>(() => new Map());
@@ -47,7 +54,7 @@ export function useRightCheck(): RightCheck {
   const ctrlRef = useRef<AbortController | null>(null);
   useEffect(() => () => ctrlRef.current?.abort(), []);
 
-  const start = (ids: string[]) => {
+  const start = (ids: string[], onDone?: () => void) => {
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
@@ -76,14 +83,23 @@ export function useRightCheck(): RightCheck {
         if (!ctrl.signal.aborted) setRun((p) => p && { ...p, error: e.message });
       })
       .finally(() => {
-        if (!ctrl.signal.aborted) setRun((p) => p && { ...p, running: false });
+        if (ctrl.signal.aborted) return;
+        setRun((p) => p && { ...p, running: false });
+        onDone?.();
       });
   };
-  return { results, run, start };
+  const confirm = (row: RightRow, c: SrmConfirm) =>
+    setResults((prev) => {
+      const next = new Map(prev).set(row.vn, row);
+      for (const [vn, r] of next) if (r.hn === row.hn) next.set(vn, { ...r, confirmed: confirmedFor(r, c) });
+      return next;
+    });
+  return { results, run, start, confirm };
 }
 
-/** ความคืบหน้า/ผลสรุป/เหตุที่หยุด ของการตรวจรอบล่าสุด วางข้างปุ่มตรวจสอบสิทธิ */
-export function RightCheckStatus() {
+/** ความคืบหน้า/ผลสรุป/เหตุที่หยุด ของการตรวจรอบล่าสุด วางข้างปุ่มตรวจสอบสิทธิ
+ *  ป้ายสถานะกดกรองตาราง (ตัวกรองหัวคอลัมน์ srm_status ค่า active) กดป้ายที่เลือกอยู่ซ้ำ = ล้าง ; error ไม่บันทึกลง cache จึงกรองไม่ได้ */
+export function RightCheckStatus({ active, onFilter }: { active: string[]; onFilter: (values: string[]) => void }) {
   const { run } = useContext(RightCheckContext);
   if (!run) return null;
   const { vns, rows, stop, error, running } = run;
@@ -102,11 +118,24 @@ export function RightCheckStatus() {
           <span className="block h-full bg-accent transition-[width]" style={{ width: `${(rows.length / Math.max(vns.length, 1)) * 100}%` }} />
         </span>
       )}
-      {counts.map(([s, n]) => (
-        <Badge key={s} status={s}>
-          <span className="ml-1.5 font-semibold tabular-nums">{formatCount(n)}</span>
-        </Badge>
-      ))}
+      {counts.map(([s, n]) => {
+        const count = <span className="ml-1.5 font-semibold tabular-nums">{formatCount(n)}</span>;
+        if (s === "error") return <Badge key={s} status={s}>{count}</Badge>;
+        const on = active.length === 1 && active[0] === s;
+        return (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onFilter(on ? [] : [s])}
+            title={on ? "ล้างตัวกรองผลตรวจสิทธิ" : `กรองตารางเฉพาะ ${RIGHT_STATUS_LABEL[s]}`}
+            className={`${chip} ${TONE[s]} cursor-pointer hover:underline ${on ? "ring-2 ring-current" : ""} ${focusRing}`}
+          >
+            {RIGHT_STATUS_LABEL[s]}
+            {count}
+          </button>
+        );
+      })}
       {cached > 0 && <span className="text-muted tabular-nums">ใช้ผลที่ตรวจไว้ใน 24 ชม. {formatCount(cached)} visit</span>}
       {banner && (
         <span className="text-danger">
@@ -161,14 +190,15 @@ export function SrmHcode({ row }: { row: Row }) {
 /** เวลาจาก insight ("2026-11-19 10:07:48.12+07") เป็น "19 พ.ย. 2569 10:07" */
 const thaiDateTime = (ts: string) => `${formatThaiDate(ts)} ${ts.slice(11, 16)}`.trim();
 
-/** ผลตรวจ ; ไม่ตรง/ไม่พบสิทธิ กดดูเทียบ HOSxP กับ สปสช. */
-export function SrmStatus({ row }: { row: Row }) {
+/** ผลตรวจ ; ไม่ตรง/ไม่พบสิทธิ กดดูเทียบ HOSxP กับ สปสช. และยืนยันใช้สิทธิ HIS ได้ (ยืนยันแล้ว = เครื่องหมายถูกต่อท้าย) ; reload = โหลด grid ใหม่หลังยืนยัน */
+export function SrmStatus({ row, reload }: { row: Row; reload?: () => void }) {
   const r = useResult(row);
   const [open, setOpen] = useState(false);
   if (!r) return dash;
-  if (!DETAIL.has(r.status)) return <Badge status={r.status} title={r.message} />;
+  if (!CONFIRMABLE.has(r.status)) return <Badge status={r.status} title={r.message} />;
+  const done = r.confirmed && `ยืนยันใช้สิทธิ HIS โดย ${r.confirmed.by} ${thaiDateTime(r.confirmed.at)} น.`;
   return (
-    <>
+    <span className="inline-flex items-center gap-1">
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -177,6 +207,12 @@ export function SrmStatus({ row }: { row: Row }) {
       >
         {RIGHT_STATUS_LABEL[r.status]}
       </button>
+      {done && (
+        <span title={done} className="text-success">
+          <CircleCheck className="size-4" aria-hidden />
+          <span className="sr-only">{done}</span>
+        </span>
+      )}
       <DetailModal
         open={open}
         onClose={() => setOpen(false)}
@@ -187,9 +223,61 @@ export function SrmStatus({ row }: { row: Row }) {
           </>
         }
       >
-        {open && <RightCompare r={r} />}
+        {open && (
+          <RightCompare r={r}>
+            <ConfirmHis
+              r={r}
+              onDone={() => {
+                setOpen(false);
+                reload?.();
+              }}
+            />
+          </RightCompare>
+        )}
       </DetailModal>
-    </>
+    </span>
+  );
+}
+
+const btnPrimary = `inline-flex h-9 items-center justify-center rounded-md border border-transparent bg-accent px-3 text-sm font-medium text-accent-fg hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`;
+
+/** ท้าย modal: ยืนยันว่าสิทธิใน HOSxP ถูกต้อง (route อ่านสิทธิจาก HOSxP เอง) ; ยืนยันแล้วแสดงผู้ยืนยัน ไม่มียกเลิก */
+function ConfirmHis({ r, onDone }: { r: RightRow; onDone: () => void }) {
+  const { confirm } = useContext(RightCheckContext);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (r.confirmed)
+    return (
+      <p className="flex items-center justify-end gap-1.5 text-success">
+        <CircleCheck className="size-4" aria-hidden />
+        ยืนยันใช้สิทธิ HIS แล้วโดย {r.confirmed.by} เมื่อ {thaiDateTime(r.confirmed.at)} น.
+      </p>
+    );
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/opd/right-check/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vn: r.vn }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? `บันทึกไม่สำเร็จ (HTTP ${res.status})`);
+      confirm(r, body as SrmConfirm);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
+      {error && <p role="alert" className="text-danger">{error}</p>}
+      <button type="button" onClick={save} disabled={saving} className={btnPrimary}>
+        {saving ? "กำลังบันทึก…" : "ยืนยันใช้สิทธิ์ HIS"}
+      </button>
+    </div>
   );
 }
 
@@ -205,7 +293,7 @@ const withName = (code: string | null | undefined, name: string | null | undefin
   );
 
 /** HOSxP กับ สปสช. ทีละหัวข้อ แถวที่เทียบแล้วไม่ตรงเน้นสีตามสถานะ */
-function RightCompare({ r }: { r: RightRow }) {
+function RightCompare({ r, children }: { r: RightRow; children?: ReactNode }) {
   const s = r.srm;
   const rows: { label: string; his: ReactNode; srm: ReactNode; bad?: string }[] = [
     { label: "สิทธิหลัก", his: or(r.his.fund), srm: withName(s?.fund, s?.fund_name), bad: r.right_ok === false ? TONE.mismatch_right : undefined },
@@ -244,6 +332,7 @@ function RightCompare({ r }: { r: RightRow }) {
           {r.cached && " · ผลที่บันทึกไว้"}
         </p>
       )}
+      {children}
     </div>
   );
 }

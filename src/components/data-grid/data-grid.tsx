@@ -39,6 +39,8 @@ const features = tableFeatures({
 });
 
 /** ใช้สร้าง columns ให้ DataGrid: const col = gridColumnHelper<Row>(); col.columns([col.accessor("hn", { header: "HN" })]) */
+export type SummaryGrid = { columnFilters: Record<string, string[]>; setColumnFilter: (col: string, values: string[]) => void; reload: () => void };
+
 export const gridColumnHelper = <T extends RowData>() => createColumnHelper<typeof features, T>();
 
 /** R = ชนิดของ response ทั้งก้อน ใช้เมื่อ endpoint ส่ง field เพิ่มจาก { rows, total } (เช่น summary) ให้ renderSummary */
@@ -68,8 +70,9 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   /** ค้นหาทันทีระหว่างพิมพ์ (หน่วง SEARCH_DEBOUNCE_MS) แทนการกดปุ่มค้นหา ข้อความสั้นกว่า LIVE_MIN_CHARS ยังไม่ยิง request
    *  (กด Enter เพื่อค้นทันที) Esc หรือลบจนว่างเป็นการล้างการค้นหา */
   liveSearch?: boolean;
-  /** แถบสรุประหว่าง toolbar กับตาราง รับ response ล่าสุดทั้งก้อน (ระหว่างโหลดแสดงค่าเดิมแบบจาง) ไม่ส่ง = ไม่มีแถบ */
-  renderSummary?: (data: R) => ReactNode;
+  /** แถบสรุประหว่าง toolbar กับตาราง รับ response ล่าสุดทั้งก้อน (ระหว่างโหลดแสดงค่าเดิมแบบจาง) ไม่ส่ง = ไม่มีแถบ
+   *  grid: ตัวกรองหัวคอลัมน์ปัจจุบัน, ตั้งตัวกรองของคอลัมน์ (เหมือนติ๊กในหัวคอลัมน์ [] = ล้าง) และโหลดหน้าปัจจุบันใหม่ */
+  renderSummary?: (data: R, grid: SummaryGrid) => ReactNode;
   /** ตำแหน่งปุ่มส่งออก Excel: "toolbar" (ค่าเริ่มต้น ชิดขวาแถวช่องค้นหา) หรือ "summary" (ชิดขวาแถบสรุป ใช้ได้เมื่อมี renderSummary ไม่มีจะกลับไปอยู่ toolbar) */
   exportPlacement?: "toolbar" | "summary";
   /** ปุ่มเพิ่มเติมวางหน้าปุ่มส่งออก Excel ในแถบสรุป (ใช้เมื่อ exportPlacement="summary" และมี renderSummary) */
@@ -233,6 +236,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   }
 
   const [reload, setReload] = useState(0);
+  const reloadPage = () => setReload((n) => n + 1);
   const requestKey = `${endpoint}?${apiQuery}#${reload}`;
   const [result, setResult] = useState<{ key: string; data?: R; error?: string }>({ key: "" });
 
@@ -393,7 +397,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       setParams({ q: String(v ?? "").trim() || null, page: null });
     },
     getRowCanExpand: () => detailMode === "expand" && !!renderDetail,
-    meta: { reload: () => setReload((n) => n + 1) },
+    meta: { reload: reloadPage },
   });
 
   // ---- ตารางกว้าง: สูงพอดีจอ, ตรึงคอลัมน์ซ้าย, แถบเลื่อนด้านบน ----
@@ -598,7 +602,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       {renderSummary && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className={`flex min-h-5 min-w-0 flex-wrap items-center gap-x-4 gap-y-1 transition-opacity ${data && (loading || error) ? "opacity-50" : ""}`}>
-            {data ? renderSummary(data) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
+            {data ? renderSummary(data, { columnFilters, setColumnFilter, reload: reloadPage }) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
           </div>
           {exportInSummary && (
             <div className="ml-auto flex flex-wrap items-center gap-2">
