@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/opd/right-check/srm.test.mjs (mock fetch ไม่ยิง สปสช. จริง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SRM_DELAY_MS, cacheMap, checkVisits, compareRight, fetchRight, freshResults, pickFund, readResponse, srmText, wait } from "./srm.ts";
+import { SRM_DELAY_MS, SRM_UNCHECKED, cacheMap, checkVisits, compareRight, confirmedFor, fetchRight, fromCache, freshResults, pickFund, readResponse, srmFilterLabel, srmFilterValues, srmText, wait } from "./srm.ts";
 
 const his = { vn: "691118000114", hn: "0004253", name: "นาย ก", fund: "UCS", pttype_name: "บัตรทอง 30 บาท", hospmain: "11252", hospsub: "07535" };
 const fund = (extra = {}) => ({
@@ -129,4 +129,45 @@ test("excel text", () => {
   const r = compareRight(his, { funds: [fund()] });
   assert.deepEqual(srmText(r), { srm_right: "UCS ช่วงอายุ 12-59 ปี", srm_hcode: "11252,07535", srm_status: "ตรงกัน" });
   assert.deepEqual(srmText(undefined), { srm_right: "", srm_hcode: "", srm_status: "" });
+});
+
+test("header filter values: same status as the row per visit, no cache = unchecked", () => {
+  const srm = { fund: "UCS", fund_name: null, sub_name: null, hospmain: "11252", hospmain_name: null, hospsub: null, hospsub_name: null, start: null, expire: null };
+  const cache = cacheMap([
+    { hn: "A", found: true, ...srm, checked_at: "2026-11-19 10:00:00+07", checked_by: "x" },
+    { hn: "B", found: false, ...srm, checked_at: "2026-11-19 10:00:00+07", checked_by: "x" },
+  ]);
+  const vals = srmFilterValues([
+    { vn: "1", hn: "A", fund: "UCS", hospmain: "11252" },
+    { vn: "2", hn: "A", fund: "UCS", hospmain: "10676" },
+    { vn: "3", hn: "A", fund: "OFC", hospmain: "11252" },
+    { vn: "4", hn: "B", fund: "UCS", hospmain: "11252" },
+    { vn: "5", hn: "C", fund: "UCS", hospmain: "11252" },
+  ], cache);
+  assert.deepEqual(vals.map((r) => r.v), ["ok", "mismatch_hcode", "mismatch_right", "not_found", SRM_UNCHECKED]);
+  assert.equal(srmFilterLabel("mismatch_right"), "สิทธิไม่ตรง");
+  assert.equal(srmFilterLabel(SRM_UNCHECKED), "ยังไม่ได้ตรวจ");
+});
+
+test("confirm HIS right: shown only while HOSxP still has the confirmed fund (and HCODE when HCODE differs)", () => {
+  const srm = { fund: "OFC", fund_name: null, sub_name: null, hospmain: "10676", hospmain_name: null, hospsub: null, hospsub_name: null, start: null, expire: null };
+  const conf = { confirmed_by: "เจ้าหน้าที่", confirmed_at: "2026-11-19 14:00:00+07", confirmed_fund: "UCS", confirmed_hospmain: "11252" };
+  const cache = cacheMap([{ hn: "A", found: true, ...srm, checked_at: "2026-11-19 10:00:00+07", checked_by: "x", ...conf }]);
+  const c = cache.get("A");
+  assert.deepEqual(c.confirmed, { by: "เจ้าหน้าที่", at: "2026-11-19 14:00:00+07", fund: "UCS", hospmain: "11252" });
+  // ไม่มีคอลัมน์ยืนยัน = ยังไม่ยืนยัน
+  assert.equal(cacheMap([{ hn: "B", found: false, ...srm, checked_at: "t", checked_by: "x" }]).get("B").confirmed, null);
+  const row = fromCache(his, c);
+  assert.equal(row.status, "mismatch_right");
+  assert.deepEqual(row.confirmed, { by: "เจ้าหน้าที่", at: "2026-11-19 14:00:00+07" });
+  // HOSxP แก้สิทธิหรือ HCODE (ที่ไม่ตรงอยู่) = การยืนยันไม่แสดง
+  assert.equal(fromCache({ ...his, fund: "LGO" }, c).confirmed, null);
+  assert.equal(fromCache({ ...his, hospmain: "99999" }, c).confirmed, null);
+  // HCODE ตรงกับ สปสช. แล้ว ไม่ต้องเทียบ HCODE ที่บันทึก
+  const sameHcode = { ...c, srm: { ...srm, hospmain: "99999" } };
+  assert.deepEqual(fromCache({ ...his, hospmain: "99999" }, sameHcode).confirmed?.by, "เจ้าหน้าที่");
+  // สิทธิตรงกันแล้ว = ไม่แสดง ; ไม่พบสิทธิ เทียบแค่สิทธิ
+  assert.equal(fromCache(his, { ...c, srm: { ...srm, fund: "UCS", hospmain: "11252" } }).confirmed, null);
+  assert.equal(confirmedFor({ status: "not_found", hcode_ok: null, his: { fund: "UCS", hospmain: "1" } }, c.confirmed)?.by, "เจ้าหน้าที่");
+  assert.equal(confirmedFor({ status: "mismatch_hcode", hcode_ok: false, his: { fund: "UCS", hospmain: "11252" } }, null), null);
 });

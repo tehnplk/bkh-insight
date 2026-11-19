@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { hisQuery } from "@/lib/db";
 import { FULL_NAME_SQL, badRequest, fundSql, inList, unauthorized } from "@/app/api/fund/_lib/fund";
-import { RIGHT_CHECK_CHUNK, SRM_URL, VN, checkVisits, fetchRight, freshResults, type HisVisit, type RightCheckPage } from "./srm";
+import { RIGHT_CHECK_CHUNK, SRM_URL, VN, checkVisits, confirmedFor, fetchRight, freshResults, type HisVisit, type RightCheckPage } from "./srm";
 import { loadSrmCache, saveSrmResults } from "./cache";
 
 // ตรวจสิทธิกับ สปสช. (SRM right-search) ทีละรายตามลำดับ เว้น SRM_DELAY_MS ต่อครั้ง (โควตาใช้ร่วมทั้งโรงพยาบาล ห้ามยิงขนาน)
@@ -52,10 +52,12 @@ export async function POST(request: Request) {
     const checkedBy = session.user.name ?? "ไม่ทราบชื่อ";
     const saved = await saveSrmResults(freshResults(body.rows), checkedBy).catch((e) => {
       console.error("opd/right-check save", e instanceof Error ? e.message : e);
-      return new Map<string, string>();
+      return new Map<string, { checked_at: string; confirmed: null }>();
     });
-    for (const r of body.rows)
-      if (!r.cached && saved.has(r.hn)) Object.assign(r, { checked_at: saved.get(r.hn), checked_by: checkedBy });
+    for (const r of body.rows) {
+      const s = r.cached ? undefined : saved.get(r.hn);
+      if (s) Object.assign(r, { checked_at: s.checked_at, checked_by: checkedBy, confirmed: confirmedFor(r, s.confirmed) });
+    }
     return Response.json(body);
   } catch (e) {
     console.error("opd/right-check", e instanceof Error ? e.message : e);
