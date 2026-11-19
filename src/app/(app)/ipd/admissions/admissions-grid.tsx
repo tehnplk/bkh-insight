@@ -181,6 +181,14 @@ function Pdx({ row }: { row: AdmissionRow }) {
   );
 }
 
+/** เหตุผลการจำหน่าย: ส่งต่อ (dchtype 04, ชื่อเป็น fallback) เป็นป้ายเหลือง ค่าอื่นเป็นข้อความ */
+function DchReason({ row }: { row: AdmissionRow }) {
+  const v = row.dch_reason;
+  if (row.dchtype === "04" || v?.toLowerCase() === "by transfer")
+    return <span className={`${chip} border-warning-line bg-warning-soft text-warning`}>{v || "By Transfer"}</span>;
+  return v || dash;
+}
+
 const col = gridColumnHelper<AdmissionRow>();
 const text = (
   key:
@@ -189,8 +197,7 @@ const text = (
     | "patient_name"
     | "drg"
     | "pttype_name"
-    | "dchstts_name"
-    | "dch_reason",
+    | "dchstts_name",
   header: string,
   sortable = true,
 ) =>
@@ -294,7 +301,11 @@ const columns = col.columns([
   date("regdate", "วันที่ admit"),
   date("dchdate", "วันที่จำหน่าย"),
   text("dchstts_name", "สถานะการจำหน่าย"),
-  text("dch_reason", "เหตุผลการจำหน่าย"),
+  col.accessor("dch_reason", {
+    header: "เหตุผลการจำหน่าย",
+    cell: (c) => <DchReason row={c.row.original} />,
+    meta: filterable,
+  }),
   count("los_days", "วันนอน"),
   col.accessor("days_since_dch", {
     header: "หลังจำหน่าย (วัน)",

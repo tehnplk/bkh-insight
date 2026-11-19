@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/opd/admissions/admissions.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows, formatCid } from "./admissions.ts";
+import { admitStatus, buildRows, formatCid } from "./admissions.ts";
 
 const fundOf = (p) => ({ "89": "UCS", O1: "OFC" })[p] ?? "UNKNOWN";
 const raw = (vn, extra = {}) => ({
@@ -61,4 +61,15 @@ test("formatCid: 13 digits grouped 1-4-5-2-1, others raw, empty blank", () => {
   assert.equal(formatCid("A123456789012"), "A123456789012");
   assert.equal(formatCid(null), "");
   assert.equal(formatCid("  "), "");
+});
+
+test("admit: AN + OPD leftover from SQL ; status none/clear/left", () => {
+  const [none, clear, left, zero] = buildRows(
+    [raw("7", { an: null, opd_left: null }), raw("8", { an: " 690001234 ", opd_left: null }), raw("9", { an: "690001235", opd_left: "1230.50" }), raw("10", { an: "690001236", opd_left: "0" })],
+    [], fundOf);
+  assert.equal(none.an, null);
+  assert.equal(clear.an, "690001234");
+  assert.equal(left.opd_left, 1230.5);
+  assert.deepEqual([none, clear, left, zero].map(admitStatus), ["none", "clear", "left", "left"]);
+  assert.equal(admitStatus({ an: "", opd_left: null }), "none");
 });

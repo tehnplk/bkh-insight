@@ -11,6 +11,7 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
 import { srmFilterLabel } from "@/app/api/opd/right-check/srm";
+import { AdmitBadge, AdmitFilter } from "./admit-badge";
 import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, formatCid, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
 import { Money, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
@@ -92,7 +93,7 @@ const col = gridColumnHelper<VisitRow>();
 // ทุกคอลัมน์ (ยกเว้นเงิน) กรองจากหัวคอลัมน์ได้ ค่าและรายการมาจาก /api/opd/admissions?facet=<id>
 const filterable = { ...nowrap, filter: true } as const;
 const timeCell = { className: "whitespace-nowrap tabular-nums", filter: true } as const;
-const text = (key: "vn" | "hn" | "patient_name" | "pttype_name" | "dep_name", header: string, sortable = true) =>
+const text = (key: "hn" | "patient_name" | "pttype_name" | "dep_name", header: string, sortable = true) =>
   col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: filterable, enableSorting: sortable });
 const money = (key: "income" | "uc_money", header: string) =>
   col.accessor(key, { header, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
@@ -103,7 +104,17 @@ const columns = col.columns([
     header: (h) => <SelectPage rows={h.table.getRowModel().rows.map((r) => r.original)} />,
     cell: (c) => <SelectRow row={c.row.original} />,
   }),
-  text("vn", "VN"),
+  // visit ที่ admit: ป้ายใต้ VN (ค้างฝั่งผู้ป่วยนอก = แดงพร้อมยอด) ตัวกรอง cf "admit" อยู่ที่แถบสรุป (AdmitFilter)
+  col.accessor("vn", {
+    header: "VN",
+    cell: (c) => (
+      <span className="flex flex-col items-start gap-0.5">
+        {c.getValue()}
+        <AdmitBadge row={c.row.original} title={detailTitle(c.row.original)} />
+      </span>
+    ),
+    meta: filterable,
+  }),
   text("hn", "HN"),
   text("patient_name", "ชื่อ-สกุล", false),
   col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
@@ -193,6 +204,7 @@ const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
         <span className="text-sm">จำนวน</span>
         <span className="font-semibold">{formatCount(d.total)}</span> visit
       </span>
+      <AdmitFilter active={grid.columnFilters.admit ?? []} onFilter={(v) => grid.setColumnFilter("admit", v)} />
     </p>
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">

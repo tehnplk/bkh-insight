@@ -41,7 +41,7 @@ const AUTH_SQL = "(SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WH
 const CLAIM_SQL = "(SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)";
 const SELECT = `SELECT i.an, i.hn,
        ${FULL_NAME_SQL} AS patient_name,
-       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, COALESCE(dt.name, i.dchtype) AS dch_reason, i.ward, w.name AS ward_name,
+       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, i.dchtype, COALESCE(dt.name, i.dchtype) AS dch_reason, i.ward, w.name AS ward_name,
        DATEDIFF(i.dchdate, i.regdate) AS los_days,
        s.income, s.uc_money,
        i.pttype, t.name AS pttype_name,
