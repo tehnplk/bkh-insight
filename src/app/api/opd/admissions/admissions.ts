@@ -1,8 +1,9 @@
-// OPD แยกรายสิทธิ: ชนิดข้อมูลและการแปลงแถว his แบบ pure
+// OP แยกรายสิทธิ: ชนิดข้อมูลและการแปลงแถว his แบบ pure
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
 import type { RepInfo } from "@/app/api/ipd/admissions/admissions";
 import type { SubFund } from "@/app/api/admin/ar-funds/rules";
+import type { RightRow } from "@/app/api/opd/right-check/srm";
 
 /** = REP_FUND ของ ipd/admissions (ไฟล์นี้ import ค่าข้ามไฟล์ไม่ได้ เพราะ test รัน .ts ตรง) */
 const REP_FUND = "UCS";
@@ -30,6 +31,8 @@ export type RawVisit = {
   dep_name: string | null;
   pttype: string | null;
   pttype_name: string | null;
+  hospmain: string | null;
+  hospsub: string | null;
   pdx: string | null;
   pdx_name: string | null;
   /** ovstost.name สถานะใน HOSxP */
@@ -56,6 +59,10 @@ export type VisitRow = {
   pttype_name: string | null;
   /** กองทุน (pttype.hipdata_code) */
   fund: string;
+  /** หน่วยบริการหลักของสิทธิใน HOSxP (visit_pttype.hospmain) */
+  hospmain: string | null;
+  /** หน่วยบริการรอง (visit_pttype.hospsub) */
+  hospsub: string | null;
   pdx: string | null;
   pdx_name: string | null;
   /** สถานะผู้ป่วย (การจำหน่าย) เช่น กลับบ้าน, ส่งต่อ, Admit, ยังไม่จำหน่าย */
@@ -75,6 +82,8 @@ export type VisitRow = {
   rep?: RepInfo | null;
   /** กองทุนย่อยที่เข้าเกณฑ์ (ว่าง = ไม่เข้ากองทุนใด, undefined = โหลดไม่ได้) */
   subfunds?: SubFund[];
+  /** ผลตรวจสิทธิกับ สปสช. ที่บันทึกไว้ไม่เกิน 24 ชั่วโมงของ HN นี้ เทียบกับสิทธิของ visit (ไม่มี = ยังไม่ได้ตรวจหรือโหลดไม่ได้) */
+  right?: RightRow;
 };
 
 export type VisitsPage = GridPage<VisitRow> & {
@@ -113,6 +122,8 @@ export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf
       pttype: r.pttype,
       pttype_name: r.pttype_name,
       fund,
+      hospmain: r.hospmain?.trim() || null,
+      hospsub: r.hospsub?.trim() || null,
       pdx: r.pdx?.trim() || null,
       pdx_name: r.pdx_name || null,
       ovst_status: dischargeLabel(r.ovst_export, r.ovst_status),

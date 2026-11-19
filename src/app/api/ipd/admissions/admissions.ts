@@ -1,4 +1,4 @@
-// IPD แยกรายสิทธิ: ชนิดข้อมูลและการรวมผล his (admission) กับ insight (REP) แบบ pure
+// IP แยกรายสิทธิ: ชนิดข้อมูลและการรวมผล his (admission) กับ insight (REP) แบบ pure
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
 import type { SubFund } from "@/app/api/admin/ar-funds/rules";

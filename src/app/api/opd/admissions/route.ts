@@ -12,6 +12,8 @@ import { REP_FILTER_LABEL, latestRepSql, loadRepFilterValues, repLabel } from "@
 import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
 import type { RepCand } from "@/app/api/ipd/admissions/admissions";
+import { loadSrmCache } from "@/app/api/opd/right-check/cache";
+import { fromCache, srmText } from "@/app/api/opd/right-check/srm";
 import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
@@ -53,7 +55,7 @@ LEFT JOIN ovst_seq sq ON sq.vn = o.vn
 ${CLAIM_JOINS}`;
 const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.vsttime,
        ${depSql("o")} AS dep_code, k.department AS dep_name,
-       o.pttype, t.name AS pttype_name, vs.pdx, cd.name AS pdx_name, os.name AS ovst_status, os.export_code AS ovst_export, vs.income, vs.uc_money,
+       o.pttype, t.name AS pttype_name, vp.hospmain, vp.hospsub, vs.pdx, cd.name AS pdx_name, os.name AS ovst_status, os.export_code AS ovst_export, vs.income, vs.uc_money,
        ${AUTH_CODE_SQL} AS auth_code,
        ${CLOSE_CODE_SQL} AS close_code,
        ${CLAIM_STATUS_SQL} AS claim_status,
@@ -76,6 +78,7 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
     patient_name: { expr: FULL_NAME_SQL },
     fund: fundFilterDef(lk, "o.pttype"),
     pttype_name: { expr: "o.pttype", label: "t.name" },
+    hospmain: { expr: "vp.hospmain" },
     codes: { expr: `CONCAT(IF(${AUTH_CODE_SQL} IS NULL, 'N', 'Y'), IF(${CLOSE_CODE_SQL} IS NULL, 'N', 'Y'))`, labels: CODES_LABEL },
     vstdate: { expr: "DATE_FORMAT(o.vstdate, '%Y-%m-%d')" },
     vsttime: { expr: "TIME_FORMAT(o.vsttime, '%H:%i')" },
@@ -97,19 +100,23 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
   };
 }
 // rep (สถานะ REP) อยู่ insight และ subfund (กองทุนย่อย) คำนวณในโค้ด จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
-const FILTERABLE = ["vn", "hn", "patient_name", "fund", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "rep", "subfund"] as const;
+const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "rep", "subfund"] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
 // REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
 const REP_SQL = latestRepSql("seq_no", "vn", "OP");
 
-type XlsxRow = VisitRow & Record<"rep_no" | "rep_label" | "subfund_label", string>;
+type XlsxRow = VisitRow & Record<"rep_no" | "rep_label" | "subfund_label" | "srm_right" | "srm_hcode" | "srm_status", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "vn", header: "VN", width: 14 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
   { key: "fund", header: "กองทุน", width: 8 },
-  { key: "pttype_name", header: "สิทธิ", width: 28 },
+  { key: "hospmain", header: "HCODE(HIS)", width: 10 },
+  { key: "srm_right", header: "สิทธิ(SRM)", width: 28 },
+  { key: "srm_hcode", header: "HCODE(SRM)", width: 12 },
+  { key: "srm_status", header: "ผลตรวจสิทธิ", width: 14 },
+  { key: "pttype_name", header: "สิทธิ(HIS)", width: 28 },
   { key: "auth_code", header: "Authen", width: 16 },
   { key: "close_code", header: "ปิดสิทธิ/Approval Code", width: 16 },
   { key: "vstdate", header: "วันที่มา", width: 12 },
@@ -246,13 +253,23 @@ export async function GET(request: NextRequest) {
       console.error("opd/admissions subfund", e);
       return undefined;
     });
-    const rows = buildRows(raws, reps, toFund).map((r) => ({ ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []) }));
+    // ผลตรวจสิทธิ สปสช. ที่บันทึกไว้ไม่เกิน 24 ชั่วโมง: อ่านไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
+    const rights = await loadSrmCache(raws.map((r) => r.hn)).catch((e) => {
+      console.error("opd/admissions srm", e instanceof Error ? e.message : e);
+      return undefined;
+    });
+    const rows = buildRows(raws, reps, toFund).map((r) => {
+      const c = rights?.get(r.hn);
+      const his = { vn: r.vn, hn: r.hn, name: r.patient_name, fund: r.fund, pttype_name: r.pttype_name, hospmain: r.hospmain, hospsub: r.hospsub };
+      return { ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []), ...(c && { right: fromCache(his, c) }) };
+    });
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
         ...r,
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
         subfund_label: subfundText(r.subfunds),
+        ...srmText(r.right),
       }));
       return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }

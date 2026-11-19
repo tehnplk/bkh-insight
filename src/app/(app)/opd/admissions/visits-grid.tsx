@@ -15,6 +15,7 @@ import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_comp
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
+import { HisHcode, RightCheckContext, RightCheckStatus, SrmHcode, SrmRight, SrmStatus, useRightCheck } from "./right-check";
 
 const FILTERS = ["pttypes", "deps", "unclosed"] as const;
 const dash = <span className="text-muted">–</span>;
@@ -105,7 +106,12 @@ const columns = col.columns([
   text("hn", "HN"),
   text("patient_name", "ชื่อ-สกุล", false),
   col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
-  text("pttype_name", "สิทธิ"),
+  col.accessor("hospmain", { header: "HCODE(HIS)", cell: (c) => <HisHcode row={c.row.original} value={c.getValue()} />, meta: timeCell, enableSorting: false }),
+  // ผลตรวจสิทธิกับ สปสช.: ที่บันทึกไว้ไม่เกิน 24 ชม. มากับแถว (row.right อยู่ใน Excel ด้วย) ผลจากปุ่มรอบนี้ทับ ; คนละฐานกับ his จึงไม่มี sort/ตัวกรอง
+  col.display({ id: "srm_right", header: "สิทธิ(SRM)", cell: (c) => <SrmRight row={c.row.original} />, meta: nowrap }),
+  col.display({ id: "srm_hcode", header: "HCODE(SRM)", cell: (c) => <SrmHcode row={c.row.original} />, meta: { className: "whitespace-nowrap tabular-nums" } }),
+  col.display({ id: "srm_status", header: "ผลตรวจสิทธิ", cell: (c) => <SrmStatus row={c.row.original} />, meta: nowrap }),
+  text("pttype_name", "สิทธิ(HIS)"),
   col.display({ id: "codes", header: "Authen/ปิดสิทธิ", cell: (c) => <Codes row={c.row.original} />, meta: { filter: true } }),
   col.accessor("vstdate", { header: "วันที่มา", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: { ...timeCell, filter: { format: (v) => formatThaiDate(v) || v } } }),
   col.accessor("vsttime", { header: "เวลา", cell: (c) => c.getValue() || dash, meta: timeCell }),
@@ -168,6 +174,7 @@ const detailTitle = (r: VisitRow) => (
 const renderSummary = (d: VisitsPage) => (
   <div className="flex flex-col gap-1.5">
     <p className="flex flex-wrap items-center gap-2 tabular-nums">
+      <RightCheckButton />
       <span className="inline-flex items-baseline gap-1.5 rounded-md border border-line bg-surface-sunken px-2.5 py-1">
         <span className="text-sm">จำนวน</span>
         <span className="font-semibold">{formatCount(d.total)}</span> visit
@@ -201,6 +208,29 @@ function PreviewButton({ onOpen }: { onOpen: () => void }) {
     >
       {`ดู 16 แฟ้ม${n ? ` ${formatCount(n)} visit` : ""}`}
     </button>
+  );
+}
+
+/** ตรวจสิทธิของ visit ที่ติ๊กกับ สปสช. (ชุดเดียวกับปุ่ม 16 แฟ้ม) วางหน้าจำนวน visit ในแถบสรุป ผลไปอยู่ในคอลัมน์ของตาราง */
+function RightCheckButton() {
+  const { picked } = useContext(SelectionContext);
+  const { run, start } = useContext(RightCheckContext);
+  const n = picked.size;
+  const running = !!run?.running;
+  return (
+    <>
+      <button
+        type="button"
+        disabled={!n || running}
+        // ชุด VN ตอนกด (ติ๊กเพิ่มระหว่างตรวจไม่ยิงใหม่)
+        onClick={() => start([...picked.keys()])}
+        title={!n ? "ติ๊กเลือก visit ในตารางก่อน" : undefined}
+        className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}
+      >
+        ตรวจสอบสิทธิ(SRM)
+      </button>
+      <RightCheckStatus />
+    </>
   );
 }
 
@@ -242,63 +272,66 @@ export function VisitsGrid({ pttypeOptions, depOptions }: { pttypeOptions: CodeO
       return next;
     });
   const [previewOpen, setPreviewOpen] = useState(false);
+  const rights = useRightCheck();
   return (
     <SelectionContext.Provider value={{ picked, toggle }}>
-      <SelectionBar onClear={() => setPicked(new Map())} />
-      <FdhPreviewModal
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        ids={[...picked.keys()]}
-        idField="vns"
-        previewUrl="/api/opd/fdh-export"
-        checkUrl="/api/opd/fdh-check"
-        zipPrefix="op"
-        chunkSize={MAX_EXPORT_VNS}
-        unit="visit"
-      />
-      <DataGrid<VisitRow, VisitsPage>
-        endpoint="/api/opd/admissions"
-        params={{ start, end, pttypes, deps, unclosed }}
-        liveSearch
-        // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง)
-        toolbar={
-          <>
-            <FundSelect groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
-            <MultiSelect label="กรองตามสิทธิการรักษา" hideLabel groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
-            <MultiSelect label="กรองตามแผนก" hideLabel groups={depOptions} value={split(deps)} onChange={(v) => set({ deps: v.join(",") })} />
-            <div role="group" aria-label="วันที่รับบริการ" className="flex items-center gap-2">
-              <DateRangeFilter
-                maxDays={OPD_MAX_DAYS}
-                hideLabels
-                labels={{ preset: "ช่วงวันที่รับบริการ", start: "วันที่รับบริการ ตั้งแต่", end: "วันที่รับบริการ ถึง" }}
-              />
-            </div>
-            <label className="flex h-9 cursor-pointer items-center gap-2 text-sm whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={unclosed === "1"}
-                onChange={(e) => set({ unclosed: e.target.checked ? "1" : null })}
-                className={checkbox}
-              />
-              เฉพาะยังไม่ปิดสิทธิ
-            </label>
-          </>
-        }
-        columns={columns}
-        getRowId={(r) => r.vn}
-        renderDetail={renderDetail}
-        detailTitle={detailTitle}
-        detailSize="medium"
-        renderSummary={renderSummary}
-        exportPlacement="summary"
-        summaryActions={<PreviewButton onOpen={() => setPreviewOpen(true)} />}
-        searchSize="compact"
-        detailIcon={<ReceiptText aria-hidden className="size-4" />}
-        reorderable
-        hideable
-        fitScreen
-        pinColumns={6}
-      />
+      <RightCheckContext.Provider value={rights}>
+        <SelectionBar onClear={() => setPicked(new Map())} />
+        <FdhPreviewModal
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          ids={[...picked.keys()]}
+          idField="vns"
+          previewUrl="/api/opd/fdh-export"
+          checkUrl="/api/opd/fdh-check"
+          zipPrefix="op"
+          chunkSize={MAX_EXPORT_VNS}
+          unit="visit"
+        />
+        <DataGrid<VisitRow, VisitsPage>
+          endpoint="/api/opd/admissions"
+          params={{ start, end, pttypes, deps, unclosed }}
+          liveSearch
+          // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง)
+          toolbar={
+            <>
+              <FundSelect groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
+              <MultiSelect label="กรองตามสิทธิการรักษา" hideLabel groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
+              <MultiSelect label="กรองตามแผนก" hideLabel groups={depOptions} value={split(deps)} onChange={(v) => set({ deps: v.join(",") })} />
+              <div role="group" aria-label="วันที่รับบริการ" className="flex items-center gap-2">
+                <DateRangeFilter
+                  maxDays={OPD_MAX_DAYS}
+                  hideLabels
+                  labels={{ preset: "ช่วงวันที่รับบริการ", start: "วันที่รับบริการ ตั้งแต่", end: "วันที่รับบริการ ถึง" }}
+                />
+              </div>
+              <label className="flex h-9 cursor-pointer items-center gap-2 text-sm whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  checked={unclosed === "1"}
+                  onChange={(e) => set({ unclosed: e.target.checked ? "1" : null })}
+                  className={checkbox}
+                />
+                เฉพาะยังไม่ปิดสิทธิ
+              </label>
+            </>
+          }
+          columns={columns}
+          getRowId={(r) => r.vn}
+          renderDetail={renderDetail}
+          detailTitle={detailTitle}
+          detailSize="medium"
+          renderSummary={renderSummary}
+          exportPlacement="summary"
+          summaryActions={<PreviewButton onOpen={() => setPreviewOpen(true)} />}
+          searchSize="compact"
+          detailIcon={<ReceiptText aria-hidden className="size-4" />}
+          reorderable
+          hideable
+          fitScreen
+          pinColumns={5}
+        />
+      </RightCheckContext.Provider>
     </SelectionContext.Provider>
   );
 }

@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { loadDepartments, loadLookups, pttypeOptionGroups } from "@/app/api/fund/_lib/fund";
 import { VisitsGrid } from "./visits-grid";
 
-export const metadata = { title: "OPD แยกรายสิทธิ" };
+export const metadata = { title: "OP แยกรายสิทธิ" };
 
 // ตัวเลือกสิทธิ/แผนกอ่านจาก HIS ตอน request (ไม่ใช่ตอน build) แล้วส่งให้ grid ฝั่ง client
 async function Grid() {
@@ -19,7 +19,7 @@ export default function Page() {
   return (
     // เหมือน /ipd/admissions: ชื่อหน้าอยู่ใน breadcrumb แล้ว h1 แบบ sr-only ไว้ให้ screen reader
     <div>
-      <h1 className="sr-only">OPD แยกรายสิทธิ</h1>
+      <h1 className="sr-only">OP แยกรายสิทธิ</h1>
       {/* DataGrid, DateRangeFilter และ MultiSelect ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}
       <Suspense fallback={<p className="text-sm text-muted">กำลังโหลด…</p>}>
         <Grid />

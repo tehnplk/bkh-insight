@@ -5,7 +5,7 @@ import { loadLookups, pttypeOptionGroups } from "@/app/api/fund/_lib/fund";
 import { loadWardOptions } from "@/app/api/visit/ipd-visit/ward-options";
 import { AdmissionsGrid } from "./admissions-grid";
 
-export const metadata = { title: "IPD แยกรายสิทธิ" };
+export const metadata = { title: "IP แยกรายสิทธิ" };
 
 // ตัวเลือกสิทธิอ่านจาก HIS ตอน request (ไม่ใช่ตอน build) แล้วส่งให้ grid ฝั่ง client
 async function Grid() {
@@ -19,7 +19,7 @@ export default function Page() {
   return (
     // ไม่มี h1 ซ้ำ: ชื่อหน้าแสดงใน breadcrumb ของ topbar แล้ว (ผู้ใช้ขอเอาออก) h1 แบบ sr-only คงไว้ให้ screen reader
     <div>
-      <h1 className="sr-only">IPD แยกรายสิทธิ</h1>
+      <h1 className="sr-only">IP แยกรายสิทธิ</h1>
       {/* DataGrid, DateRangeFilter และ MultiSelect ใช้ useSearchParams ต้องอยู่ใต้ Suspense */}
       <Suspense fallback={<p className="text-sm text-muted">กำลังโหลด…</p>}>
         <Grid />
