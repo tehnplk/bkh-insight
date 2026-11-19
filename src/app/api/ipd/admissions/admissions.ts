@@ -33,6 +33,7 @@ export type RawAdmission = {
   dchdate: string | null;
   dchstts: string | null;
   dchstts_name: string | null;
+  dchtype: string | null;
   dch_reason: string | null;
   ward: string | null;
   ward_name: string | null;
@@ -68,6 +69,8 @@ export type AdmissionRow = {
   dchdate: string | null;
   /** สถานะการจำหน่าย (dchstts.name) */
   dchstts_name: string | null;
+  /** รหัสประเภทการจำหน่าย (ipt.dchtype) 04 = By Transfer */
+  dchtype: string | null;
   /** เหตุผลการจำหน่าย = ประเภทการจำหน่าย (ipt.dchtype + ชื่อจากตาราง dchtype ตรงกับ DISCHT ของแฟ้ม IPD) */
   dch_reason: string | null;
   /** ward ที่จำหน่าย (ipt.ward) ชื่อจากตาราง ward */
@@ -139,6 +142,7 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
       regdate: r.regdate,
       dchdate: r.dchdate,
       dchstts_name: r.dchstts_name || (r.dchstts ? r.dchstts : null),
+      dchtype: r.dchtype?.trim() || null,
       dch_reason: r.dch_reason?.trim() || null,
       ward: r.ward,
       ward_name: r.ward_name,

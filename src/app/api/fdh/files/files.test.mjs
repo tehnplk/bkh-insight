@@ -95,6 +95,15 @@ test("toTxt: header, | separator, CRLF, null empty, cleans | CR LF and quotes", 
   assert.equal(toTxt(["B", "A"], [{ A: 1, B: 2 }]), "B|A\r\n2|1\r\n");
 });
 
+test("toTxt: dates YYYY-MM-DD → YYYYMMDD (FDH rejects dashes), time HHmm and other text untouched", () => {
+  assert.equal(
+    toTxt(["HN", "DOB", "DATEOPD", "TIMEOPD", "DETAIL", "SEQ"], [
+      { HN: "0001", DOB: "1994-03-16", DATEOPD: "2026-11-19", TIMEOPD: "0905", DETAIL: "ไข้ 2026-11-19 มา 2 วัน", SEQ: "691119090500" },
+    ]),
+    "HN|DOB|DATEOPD|TIMEOPD|DETAIL|SEQ\r\n0001|19940316|20261119|0905|ไข้ 2026-11-19 มา 2 วัน|691119090500\r\n",
+  );
+});
+
 test("ipAnExportSql: every IP file filters admissions by AN once, no date range left, placeholders = 2 + n", async () => {
   const { ipAnExportSql } = await import("./sql.ts");
   const { FILE_ORDER } = await import("../c-check/files.ts");

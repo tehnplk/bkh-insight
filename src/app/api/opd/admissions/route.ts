@@ -3,6 +3,7 @@ import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
+import { formatBaht } from "@/lib/number-format";
 import {
   FULL_NAME_SQL, activePttypes, fundSql, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
@@ -14,7 +15,7 @@ import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-fund
 import type { RepCand } from "@/app/api/ipd/admissions/admissions";
 import { loadSrmCache } from "@/app/api/opd/right-check/cache";
 import { fromCache, srmFilterLabel, srmFilterValues, srmText } from "@/app/api/opd/right-check/srm";
-import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
+import { ADMIT_LABEL, OPD_MAX_DAYS, admitStatus, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -27,7 +28,7 @@ const SORTABLE = Object.keys(SORT_SQL) as SortKey[];
 const XLSX_MAX = 30_000;
 
 // เลขที่ใบเสร็จ: rcpt_print (index vn) เฉพาะ status OK (ABORT = ยกเลิก) visit จ่ายหลายใบคั่นด้วย ", "
-// visit ผู้ป่วยนอก (ไม่ใช่ visit ที่ถูกรับไว้นอน ซึ่งไปอยู่หน้า IPD) PDx/มูลค่าจาก vn_stat ชื่อโรคจาก icd101 (PK)
+// visit ผู้ป่วยนอก (visit ที่ admit แสดงเฉพาะรายที่ยังมีรายการค้างฝั่ง OPD ดู whereFor) PDx/มูลค่าจาก vn_stat ชื่อโรคจาก icd101 (PK)
 // authen/เลขปิดสิทธิ/สถานะปิดสิทธิ ใช้หลักเดียวกับ /fund/claim-status (CLAIM_JOINS: c = nhso_confirm_privilege, vp = visit_pttype)
 // เลขปิดสิทธิ: OFC = Approval Code จาก EDC ตัวล่าสุด (ตัวท้ายของ ovst_seq.edc_approve_list_text) ไม่ fallback
 // สูตรเดียวกับ PERMITNO ของ fdh/files/sql.ts ; สิทธิอื่น = ยืนยันกับ สปสช. แล้ว (ไม่ถูกยกเลิก) หรือ EP
@@ -44,6 +45,13 @@ const CLAIM_STATUS_SQL = `IF(${IS_OFC_SQL},
          ${STATUS_SQL})`;
 const RCPT_SQL = `(SELECT GROUP_CONCAT(r.rcpno ORDER BY r.finance_number SEPARATOR ', ') FROM rcpt_print r
          WHERE r.vn = o.vn AND r.status = 'OK')`;
+// visit ที่ admit (ovst.an = ipt.an) HOSxP ย้ายรายการไป AN (vn เป็น NULL) ; รายการที่ยังมี vn = visit คือค้างฝั่งผู้ป่วยนอก
+// ix_vn เป็น covering index (Using index) ไม่อ่านแถว MyISAM ; ตรวจเฉพาะ visit ที่มี an (31 วันราว 700 visit) วัดแล้วไม่เพิ่มเวลา
+const LEFT_EXISTS = "EXISTS (SELECT 1 FROM opitemrece r FORCE INDEX (ix_vn) WHERE r.vn = o.vn)";
+const NOT_ADMIT = "(o.an IS NULL OR o.an = '')";
+const ADMIT_SQL = `CASE WHEN ${NOT_ADMIT} THEN 'none' WHEN ${LEFT_EXISTS} THEN 'left' ELSE 'clear' END`;
+// null = ไม่มีรายการค้าง (SUM ของ 0 แถวเป็น NULL อยู่แล้ว แต่กัน sum_price เป็น NULL ทุกแถว)
+const OPD_LEFT_SQL = `IF(o.an <> '', (SELECT IF(COUNT(*) = 0, NULL, IFNULL(SUM(r.sum_price), 0)) FROM opitemrece r FORCE INDEX (ix_vn) WHERE r.vn = o.vn), NULL)`;
 const FROM = `FROM ovst o
 LEFT JOIN patient p ON p.hn = o.hn
 LEFT JOIN vn_stat vs ON vs.vn = o.vn
@@ -59,7 +67,8 @@ const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, 
        ${AUTH_CODE_SQL} AS auth_code,
        ${CLOSE_CODE_SQL} AS close_code,
        ${CLAIM_STATUS_SQL} AS claim_status,
-       ${RCPT_SQL} AS rcpt_no
+       ${RCPT_SQL} AS rcpt_no,
+       NULLIF(o.an, '') AS an, ${OPD_LEFT_SQL} AS opd_left
 ${FROM}`;
 
 // ตัวกรองหัวคอลัมน์: key = id คอลัมน์ของหน้า -> SQL ของค่า (allowlist) และชื่อที่แสดง
@@ -97,20 +106,22 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
       },
     },
     rcpt_no: { expr: RCPT_SQL, display: (v) => v.replaceAll(":", "/") },
+    admit: { expr: ADMIT_SQL, labels: ADMIT_LABEL },
   };
 }
 // rep (สถานะ REP) และ srm_status (ผลตรวจสิทธิ srm_right_check) อยู่ insight ส่วน subfund (กองทุนย่อย) คำนวณในโค้ด
 // จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
 const KEY_FILTERS = ["rep", "subfund", "srm_status"] as const;
-const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", ...KEY_FILTERS] as const;
+const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "admit", ...KEY_FILTERS] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
 // REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
 const REP_SQL = latestRepSql("seq_no", "vn", "OP");
 
-type XlsxRow = VisitRow & Record<"rep_no" | "rep_label" | "subfund_label" | "srm_right" | "srm_hcode" | "srm_status", string>;
+type XlsxRow = VisitRow & Record<"admit_label" | "rep_no" | "rep_label" | "subfund_label" | "srm_right" | "srm_hcode" | "srm_status", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "vn", header: "VN", width: 14 },
+  { key: "admit_label", header: "สถานะ Admit", width: 30 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
   { key: "fund", header: "กองทุน", width: 8 },
@@ -134,6 +145,13 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "income", header: "มูลค่า (บาท)", width: 14, type: "money" },
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
+
+/** Excel: คอลัมน์ "สถานะ Admit" (ในหน้าเป็นป้ายใต้ VN) ไม่ admit = ว่าง */
+function admitText(r: VisitRow): string {
+  const s = admitStatus(r);
+  if (s === "none") return "";
+  return s === "left" ? `Admit AN ${r.an} · ค้าง OPD ${formatBaht(r.opd_left ?? 0)}` : `Admit AN ${r.an}`;
+}
 
 /**
  * GET ?start&end[&pttypes=89,77][&deps=053][&unclosed=1][&cf={...}] + พารามิเตอร์ DataGrid: visit ผู้ป่วยนอกในช่วงวันรับบริการ
@@ -178,7 +196,10 @@ export async function GET(request: NextRequest) {
 
     /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet ของคอลัมน์นั้น) */
     const whereFor = (except: FilterKey | null) => {
-      const parts = ["o.vstdate BETWEEN ? AND ?", "(o.an IS NULL OR o.an = '')"];
+      // visit ที่ admit: แสดงเฉพาะรายที่ยังมีรายการค้างฝั่งผู้ป่วยนอก (ไม่มีค้าง = ไม่มีอะไรเบิกฝั่ง OP เดือนละราว 630 visit)
+      // เว้นแต่กรอง cf admit = clear (ปุ่ม "Admit ไม่มีค้าง" ในแถบสรุป) หรือกำลังหาค่า facet ของ admit (ให้เห็นจำนวนครบทุกค่า)
+      const showClear = except === "admit" || !!filters.admit?.includes("clear");
+      const parts = ["o.vstdate BETWEEN ? AND ?", ...(showClear ? [] : [`(${NOT_ADMIT} OR ${LEFT_EXISTS})`])];
       const args: SqlValue[] = [start, end];
       if (pttypes) {
         parts.push(inList("o.pttype", pttypes.length));
@@ -280,6 +301,7 @@ export async function GET(request: NextRequest) {
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
         ...r,
+        admit_label: admitText(r),
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
         subfund_label: subfundText(r.subfunds),

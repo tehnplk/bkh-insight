@@ -45,6 +45,35 @@ export type RawVisit = {
   close_code: string | null;
   claim_status: ClaimStatus;
   rcpt_no: string | null;
+  /** ovst.an (ว่าง = ไม่ได้ admit) */
+  an: string | null;
+  /** ยอดรายการที่ยังค้างฝั่งผู้ป่วยนอกของ visit ที่ admit (opitemrece ที่ vn = visit) ไม่มีรายการ/ไม่ admit = null */
+  opd_left: number | string | null;
+};
+
+/** สถานะ admit ของ visit (ตัวกรอง cf "admit" จากปุ่มในแถบสรุป): none ไม่ admit, clear admit แล้วไม่มีรายการค้าง, left admit แล้วยังมีรายการค้างฝั่งผู้ป่วยนอก */
+export type AdmitStatus = "none" | "clear" | "left";
+export const ADMIT_LABEL: Record<AdmitStatus, string> = { none: "ไม่ admit", clear: "admit ไม่มีค้าง", left: "admit มีค้าง OPD" };
+export const admitStatus = (r: { an: string | null; opd_left: number | null }): AdmitStatus =>
+  !r.an ? "none" : r.opd_left == null ? "clear" : "left";
+
+/** ข้อมูล AN ของ visit ที่ admit (GET /api/opd/admissions/admit) */
+export type AdmitInfo = {
+  an: string;
+  regdate: string | null;
+  regtime: string | null;
+  dchdate: string | null;
+  dchtime: string | null;
+  ward_name: string | null;
+  pttype: string | null;
+  pttype_name: string | null;
+  doctor_name: string | null;
+  pdx: string | null;
+  pdx_name: string | null;
+  /** วันนอน: จำหน่ายแล้ว = dchdate - regdate, ยังไม่จำหน่าย = นับถึงวันนี้ */
+  los_days: number | null;
+  dchstts_name: string | null;
+  finance_lock: string | null;
 };
 
 export type VisitRow = {
@@ -78,6 +107,10 @@ export type VisitRow = {
   claim_status: ClaimStatus;
   /** เลขที่ใบเสร็จ (rcpt_print ที่ไม่ถูกยกเลิก) หลายใบคั่นด้วย ", " ไม่มีการจ่ายเงิน = null */
   rcpt_no: string | null;
+  /** AN ของ visit ที่ admit (null = ไม่ admit) */
+  an: string | null;
+  /** ยอดค้างฝั่งผู้ป่วยนอกหลัง admit (null = ไม่มีรายการค้างหรือไม่ admit) */
+  opd_left: number | null;
   /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
   rep?: RepInfo | null;
   /** กองทุนย่อยที่เข้าเกณฑ์ (ว่าง = ไม่เข้ากองทุนใด, undefined = โหลดไม่ได้) */
@@ -135,6 +168,8 @@ export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf
       claim_status: r.claim_status,
       // เลขที่ใบเสร็จแสดงแบบ เล่ม/เลขที่ (HOSxP เก็บ "421:123")
       rcpt_no: r.rcpt_no?.replaceAll(":", "/") || null,
+      an: r.an?.trim() || null,
+      opd_left: num(r.opd_left),
       ...(rep !== undefined && { rep }),
     };
   });
