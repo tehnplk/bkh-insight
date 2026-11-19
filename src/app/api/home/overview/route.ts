@@ -66,6 +66,12 @@ const DISCHARGED_SQL = "SELECT COUNT(*) AS discharged FROM ipt WHERE dchdate BET
 //   ถ้าพบคอลัมน์ประเภทใน ward ของ HOSxP ให้เปลี่ยนมาใช้คอลัมน์นั้นแทน
 const isHomeCare = (name: string) => /home\s*ward/i.test(name);
 
+// ward.bedcount ของ HOSxP รวมเตียงเสริม/เตียงแทรกและ ward ที่ไม่มีเตียงของตัวเอง (แพทย์แผนไทย) จึงสูงกว่ากรอบจริง
+const licensedBeds = () => {
+  const n = Number(process.env.HOSPITAL_BEDS);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
 type Num = number | string | null;
 
 export async function GET(request: NextRequest) {
@@ -143,6 +149,7 @@ export async function GET(request: NextRequest) {
       const name = w.name ?? w.ward;
       return { code: w.ward, name, beds: int(w.beds), admitted: int(w.admitted), homeCare: isHomeCare(name) };
     }),
+    licensedBeds: licensedBeds(),
     malnutrition: summarizeMalnutrition(malRows, int(dchRows[0]?.discharged ?? 0)),
   };
   return Response.json(body);

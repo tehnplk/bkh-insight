@@ -45,6 +45,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
       { label: "ปิดสิทธิ", href: "/fund/close-privilege" },
+      { label: "แยกประเภทการเรียกเก็บ", href: "/fund/claim-type" },
       { label: "ตรวจรายการเบิก STP", href: "/fund/stp-check" },
       { label: "ติดตามเคลม STP", href: "/fund/stp-claim" },
       { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
@@ -101,6 +102,7 @@ export const adminSection: NavSection = {
     { label: "บัญชีลูกหนี้ตามสิทธิ", href: "/admin/ar-accounts" },
     { label: "กองทุนย่อยลูกหนี้", href: "/admin/ar-funds" },
     { label: "ปิดงวดลูกหนี้", href: "/admin/ar-periods" },
+    { label: "หน่วยบริการใน CUP", href: "/admin/cup" },
     { label: "บันทึกการเข้าถึง", href: "/admin/access-log" },
   ],
 };

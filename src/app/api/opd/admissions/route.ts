@@ -5,10 +5,10 @@ import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } fr
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { formatBaht } from "@/lib/number-format";
 import {
-  FULL_NAME_SQL, activePttypes, fundSql, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
+  FULL_NAME_SQL, activePttypes, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
-import { CLAIM_JOINS, STATUS_SQL } from "@/app/api/fund/_lib/claim";
+import { APPROVE_CODE_SQL, CLAIM_JOINS, FDH_COLS, FDH_JOIN, IS_OFC_SQL, STATUS_SQL } from "@/app/api/fund/_lib/claim";
 import { REP_FILTER_LABEL, latestRepSql, loadRepFilterValues, repLabel } from "@/app/api/fund/_lib/rep";
 import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
@@ -35,8 +35,6 @@ const XLSX_MAX = 30_000;
 // เลขปิดสิทธิ: OFC = Approval Code จาก EDC ตัวล่าสุด (ตัวท้ายของ ovst_seq.edc_approve_list_text) ไม่ fallback
 // สูตรเดียวกับ PERMITNO ของ fdh/files/sql.ts ; สิทธิอื่น = ยืนยันกับ สปสช. แล้ว (ไม่ถูกยกเลิก) หรือ EP
 // ใช้ทั้งแสดงผล สถานะ ตัวกรอง unclosed และ facet codes (prove-query ผ่านแล้ว)
-const IS_OFC_SQL = `${fundSql("t")} = 'OFC'`;
-const APPROVE_CODE_SQL = `NULLIF(SUBSTRING_INDEX(sq.edc_approve_list_text, ',', -1), '')`;
 const CLOSE_CODE_SQL = `IF(${IS_OFC_SQL}, ${APPROVE_CODE_SQL},
          COALESCE(IF(c.nhso_status = 'Y' AND c.nhso_cancel_datetime IS NULL, NULLIF(c.nhso_authen_code, ''), NULL),
                   IF(vp.auth_code LIKE 'EP%', vp.auth_code, NULL)))`;
@@ -63,9 +61,6 @@ LEFT JOIN pttype t ON t.pttype = o.pttype
 LEFT JOIN kskdepartment k ON k.depcode = o.main_dep
 LEFT JOIN ovst_seq sq ON sq.vn = o.vn
 ${CLAIM_JOINS}`;
-// ผลส่ง FDH ของ HOSxP สำหรับสถานะเคลม (vn UNIQUE = eq_ref) ; ใส่เฉพาะ query รายการและผู้สมัครของตัวกรอง claim ไม่ใส่ใน FROM
-const FDH_JOIN = "LEFT JOIN fdh_claim_status fcs ON fcs.vn = o.vn";
-const FDH_COLS = "fcs.fdh_reservation_status AS fdh_resv, fcs.fdh_reservation_datetime AS fdh_resv_at, fcs.fdh_claim_status_message AS fdh_msg, fcs.fdh_claim_status_datetime AS fdh_msg_at";
 const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.vsttime,
        ${depSql("o")} AS dep_code, k.department AS dep_name,
        o.pttype, t.name AS pttype_name, vp.hospmain, vp.hospsub, vs.pdx, cd.name AS pdx_name, os.name AS ovst_status, os.export_code AS ovst_export, vs.income, vs.uc_money,
