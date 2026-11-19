@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "node --env-file=.env scripts/migrate.mjs",
-    "ar:sync": "node --env-file=.env scripts/ar-sync-daily.mjs"
+    "ar:sync": "node --env-file=.env scripts/ar-sync-daily.mjs",
+    "eclaim:sync": "node --env-file-if-exists=.env scripts/eclaim-sync.mjs"
   },
   "dependencies": {
     "@tanstack/react-table": "^9.3.1",

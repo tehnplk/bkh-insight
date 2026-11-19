@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "BKH Insight – e-Claim sync",
+  "version": "1.0.0",
+  "description": "ปุ่มนำเข้าอัตโนมัติของ BKH Insight ดึง REP และ STM จากแท็บ e-Claim ที่ login ไว้",
+  "minimum_chrome_version": "116",
+  "permissions": ["scripting"],
+  "host_permissions": ["https://eclaim.nhso.go.th/*"],
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:3000/*", "https://10.10.10.159/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
