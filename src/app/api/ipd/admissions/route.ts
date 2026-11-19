@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
-import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { facetRows, parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { dxGroupSql, parseDx } from "@/lib/dx-groups";
@@ -9,8 +9,10 @@ import {
   FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundFilterDef, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
-import { latestRepSql, repLabel } from "@/app/api/fund/_lib/rep";
-import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep } from "./admissions";
+import { REP_FILTER_LABEL, latestRepSql, loadRepFilterValues, repLabel } from "@/app/api/fund/_lib/rep";
+import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
+import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
+import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -62,7 +64,8 @@ type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: num
 
 const REP_SQL = latestRepSql("an", "an", "IP");
 
-// ตัวกรองหัวคอลัมน์ (allowlist) ; สถานะ REP อยู่อีกฐาน (insight) และค่า RW/AdjRW/เงินเป็นตัวเลขต่อเนื่อง จึงไม่มีตัวกรอง
+// ตัวกรองหัวคอลัมน์ (allowlist) ; RW/AdjRW/เงินเป็นตัวเลขต่อเนื่อง จึงไม่มีตัวกรอง
+// rep (สถานะ REP) อยู่ insight และ subfund (กองทุนย่อย) คำนวณในโค้ด จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย AN ที่ตรง
 const CODES_LABEL: Record<string, string> = {
   YY: "มี Authen และ Claim Code",
   YN: "มี Authen ไม่มี Claim Code",
@@ -93,11 +96,11 @@ function filterDefs(lk: Lookups): ColumnFilterDefs {
 }
 const FILTERABLE = [
   "an", "hn", "patient_name", "fund", "pttype_name", "codes", "regdate", "dchdate", "dchstts_name", "dch_reason", "ward_name",
-  "los_days", "days_since_dch", "ipt_summary_status_id", "pdx", "drg", "finance_lock",
+  "los_days", "days_since_dch", "ipt_summary_status_id", "pdx", "drg", "finance_lock", "rep", "subfund",
 ] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
-type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_no" | "rep_label", string>;
+type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_no" | "rep_label" | "subfund_label", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "an", header: "AN", width: 12 },
   { key: "hn", header: "HN", width: 10 },
@@ -123,6 +126,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "finance_lock_label", header: "ปิดสิทธิการเงิน", width: 12 },
   { key: "rep_no", header: "เลขที่ REP", width: 14 },
   { key: "rep_label", header: "สถานะ REP", width: 24 },
+  { key: "subfund_label", header: "กองทุนย่อย", width: 36 },
   { key: "income", header: "มูลค่า (บาท)", width: 14, type: "money" },
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
@@ -154,14 +158,49 @@ export async function GET(request: NextRequest) {
   // เลือกครบทุกสิทธิที่เปิดใช้ = ไม่กรอง (ชุดเดียวกับตัวเลือกของหน้า)
   const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
   const defs = filterDefs(lk);
+  const toFund = (pttype: string | null) => fundOf(lk, pttype);
+  /** AN ที่สถานะ REP / กองทุนย่อย ตรงตัวกรองหัวคอลัมน์ rep / subfund (null = ไม่กรอง) */
+  let repAns: string[] | null = null;
+  let subAns: string[] | null = null;
   /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet) */
   const whereFor = (except: FilterKey | null) => {
     const like = `%${escapeLike(q)}%`;
     const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${dx ? ` AND EXISTS (SELECT 1 FROM iptdiag dg WHERE dg.an = i.an AND ${dx.sql})` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
-    const cfw = columnFilterWhere(defs, filters, except);
-    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...cfw.params];
-    return { sql: cfw.parts.length ? `${base}\n  AND ${cfw.parts.join("\n  AND ")}` : base, params };
+    const lists = ([["rep", repAns], ["subfund", subAns]] as const).filter(([k, v]) => v && except !== k).map(([, v]) => v as string[]);
+    const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined }, except);
+    const parts = [...lists.map((l) => (l.length ? inList("i.an", l.length) : "1 = 0")), ...cfw.parts];
+    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...lists.flat(), ...cfw.params];
+    return { sql: parts.length ? `${base}\n  AND ${parts.join("\n  AND ")}` : base, params };
   };
+  // ตัวกรอง/facet ของ REP และกองทุนย่อย: ไม่ใช้ = ไม่มี query เพิ่ม ; ใช้ = จัดค่าของทุก AN ที่ผ่านตัวกรองอื่น (90 วันราว 2,400 AN)
+  // กองทุนย่อยอ่าน opitemrece ตาม AN (ix_an) ชุดละ 1,000 ; ตัวที่เป็น facet ทำทีหลัง จึงได้ค่าตามตัวกรองอีกตัวด้วย
+  const keyFilters = {
+    rep: async () => {
+      const w = whereFor("rep");
+      const vals = await loadRepFilterValues(await hisQuery<RepCand>(`SELECT i.an AS k, i.pttype ${FROM}\n${w.sql}`, w.params), REP_SQL, "an", toFund);
+      if (facet === "rep") return facetRows(vals, (r) => r.v, facetQ, (v) => REP_FILTER_LABEL[v] ?? v);
+      const sel = new Set(filters.rep);
+      repAns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
+    },
+    subfund: async () => {
+      const w = whereFor("subfund");
+      const keys = (await hisQuery<{ k: string }>(`SELECT i.an AS k ${FROM}\n${w.sql}`, w.params)).map((r) => r.k);
+      const vals = subfundFilterValues(keys, await loadSubfunds("IP", keys, lk));
+      if (facet === "subfund") return facetRows(vals, (r) => r.v, facetQ, subfundFilterLabel);
+      const sel = new Set(filters.subfund);
+      subAns = [...new Set(vals.filter((r) => sel.has(r.v)).map((r) => r.k))];
+    },
+  };
+  for (const key of facet === "rep" ? (["subfund", "rep"] as const) : (["rep", "subfund"] as const))
+    if (filters[key] || facet === key) {
+      try {
+        const page = await keyFilters[key]();
+        if (page) return Response.json(page);
+      } catch (e) {
+        console.error(`ipd/admissions ${key} filter`, e);
+        return Response.json({ error: `อ่าน${key === "rep" ? "สถานะ REP" : "กองทุนย่อย"}ไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
+      }
+    }
   if (facet) {
     try {
       return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FROM, whereFor(facet)));
@@ -180,7 +219,6 @@ export async function GET(request: NextRequest) {
       xlsx ? null : hisQuery<CountRow>(`${COUNT_SELECT} ${where}`, [...RATE_PARAMS, ...RATE_PARAMS, ...whereParams]),
     ]);
 
-    const toFund = (pttype: string | null) => fundOf(lk, pttype);
     // ดู REP ทุก AN ไม่กรองกองทุน (กองทุนอื่นนำเข้า REP ภายหลังได้)
     const ans = raws.map((r) => r.an).filter(Boolean);
     let reps: RawRep[] | undefined = [];
@@ -194,7 +232,12 @@ export async function GET(request: NextRequest) {
         repError = true;
       }
     }
-    const rows = buildRows(raws, reps, toFund);
+    // กองทุนย่อย: อ่านไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
+    const subfunds = await loadSubfunds("IP", ans, lk, { names: !xlsx }).catch((e) => {
+      console.error("ipd/admissions subfund", e);
+      return undefined;
+    });
+    const rows = buildRows(raws, reps, toFund).map((r) => ({ ...r, subfunds: subfunds && (subfunds.get(r.an) ?? []) }));
 
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
@@ -203,6 +246,7 @@ export async function GET(request: NextRequest) {
         finance_lock_label: r.finance_lock ? "ปิดแล้ว" : "ยังไม่ปิด",
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
+        subfund_label: subfundText(r.subfunds),
       }));
       return xlsxResponse(`ipd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }
@@ -217,6 +261,7 @@ export async function GET(request: NextRequest) {
       adjrw_amount: Math.round(Number(c?.adjrw_amount ?? 0) * 100) / 100,
       adjrw_amount_n: Number(c?.adjrw_amount_n ?? 0),
       rep_error: repError,
+      subfund_error: !subfunds,
     };
     return Response.json(body);
   } catch (e) {

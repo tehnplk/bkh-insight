@@ -1,6 +1,9 @@
-import type { RepInfo } from "@/app/api/ipd/admissions/admissions";
+import { insightQuery } from "@/lib/db";
+import { repFilterValues, type RepCand, type RepInfo, type RepStatus } from "@/app/api/ipd/admissions/admissions";
 
 const REP_LABEL = { pass: "ผ่าน", c: "ติด C", deny: "Deny" } as const;
+/** ชื่อค่าของตัวกรองหัวคอลัมน์ REP ("" แสดงเป็น "(ว่าง)" ที่ DataGrid) */
+export const REP_FILTER_LABEL: Record<string, string> = { ...REP_LABEL, none: "ยังไม่มี REP" };
 /** สถานะ REP ในไฟล์ Excel: undefined (ไม่มีสถานะ) = ว่าง, null = ยังไม่มี REP */
 export const repLabel = (rep: RepInfo | null | undefined) =>
   rep ? [REP_LABEL[rep.status], ...rep.codes].join(" ") : rep === null ? "ยังไม่มี REP" : "";
@@ -22,3 +25,12 @@ FROM rep_row r
 JOIN rep_file f ON f.id = r.rep_file_id
 WHERE r.patient_type = '${pt}' AND r.${col} = ANY($1::text[])
 ORDER BY r.${col}, r.tran_id::bigint DESC`;
+
+/**
+ * ตัวกรองหัวคอลัมน์ "rep" ของ opd/ipd admissions: สถานะ REP อยู่ insight (JOIN กับ his ไม่ได้)
+ * จึงดูสถานะของทุกแถวที่ผ่านตัวกรองอื่น (cands จาก his) แล้วจัดค่าในโค้ด ; sql = latestRepSql ของหน้า (คอลัมน์ key = keyCol)
+ */
+export async function loadRepFilterValues(cands: RepCand[], sql: string, keyCol: "vn" | "an", fundOf: (pttype: string | null) => string) {
+  const reps = cands.length ? await insightQuery<Record<"vn" | "an", string> & { status: RepStatus }>(sql, [cands.map((c) => c.k)]) : [];
+  return repFilterValues(cands, new Map(reps.map((r) => [r[keyCol], r.status])), fundOf);
+}

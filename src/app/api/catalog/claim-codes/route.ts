@@ -28,11 +28,12 @@ const SOURCE: Record<ClaimKind, string> = {
 const MASTER = `(SELECT nhso_adp_code, MIN(nhso_adp_type_id) AS t, MIN(nhso_adp_code_name) AS nm, MAX(UCS) AS ucs FROM nhso_adp_code GROUP BY nhso_adp_code)`;
 // PP fee schedule ที่ HOSxP จัดไว้ประเภท 3 (ค่าบริการอื่นๆ): วางแผนครอบครัว FP* และคัดกรองมะเร็งปากมดลูก 1B0*
 const PP_EXTRA = "OR (nhso_adp_type_id = 3 AND (nhso_adp_code LIKE 'FP%' OR nhso_adp_code LIKE '1B0%'))";
-const ITEMS_SQL = (refs: number) => `SELECT s.icode, CONCAT_WS(' ', s.name, NULLIF(TRIM(s.strength), '')) AS name, s.income, NULLIF(TRIM(s.nhso_adp_code), '') AS adp,
-  s.unitprice, a.t AS adp_type, a.nm AS adp_name
-FROM s_drugitems s LEFT JOIN ${MASTER} a ON a.nhso_adp_code = s.nhso_adp_code
-WHERE s.istatus = 'Y' AND (s.income = ? OR a.t = ?${refs ? ` OR ${inList("s.nhso_adp_code", refs)}` : ""})
-ORDER BY s.icode`;
+// INST/PP เป็นรายการไม่ใช่ยา อ่านรหัสจาก nondrugitems (nhso_adp_code ของ s_drugitems ค้างได้ เหมือน /fund/stp-check)
+const ITEMS_SQL = (refs: number) => `SELECT n.icode, n.name, n.income, NULLIF(TRIM(n.nhso_adp_code), '') AS adp,
+  n.price AS unitprice, a.t AS adp_type, a.nm AS adp_name
+FROM nondrugitems n LEFT JOIN ${MASTER} a ON a.nhso_adp_code = n.nhso_adp_code
+WHERE n.istatus = 'Y' AND (n.income = ? OR a.t = ?${refs ? ` OR ${inList("n.nhso_adp_code", refs)}` : ""})
+ORDER BY n.icode`;
 // การใช้ 30 วันล่าสุด (OPD+IPD: แถว IPD ก็มี vstdate = rxdate) ช่วง ≤ 31 วัน FORCE INDEX ตามกฎ opitemrece ; ~1.5 วินาที
 const USAGE_SQL = (n: number) => `SELECT o.icode, COUNT(*) AS n, SUM(o.qty) AS qty, SUM(o.sum_price) AS amount
 FROM ${OPI_BY_DATE} WHERE o.vstdate BETWEEN ? AND ? AND ${inList("o.icode", n)} GROUP BY o.icode`;

@@ -2,36 +2,15 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
-import { OPI_BY_DATE, fundOf, inList, loadLookups } from "@/app/api/fund/_lib/fund";
-import { REP_SQL, loadFundRules } from "../sql";
+import { fundOf, inList, loadLookups } from "@/app/api/fund/_lib/fund";
+import { ITEMS_SQL, REP_SQL, TOTALS_SQL, byChunks, loadFundRules } from "../sql";
 import { checkRules, monthBounds, ruleReady, type Diag, type ItemRow, type RepRow, type RuleCheck, type VisitInfo, type VisitTotal } from "../rules";
 
 /** response ของ GET /api/admin/ar-funds/check?month=YYYY-MM */
 export type FundCheckData = { month: string; start: string; end: string; checks: RuleCheck[] };
 
 // SQL ผ่านการพิสูจน์กับฐานจริงแล้ว (ส.ค. 2569): รายการ ~1 วินาที/เดือน (ix_vstdate), ยอดทั้ง visit ~1 วินาที (UCS 10,459 VN),
-// วินิจฉัยใช้ ix_vn_icd_unique, ovst ใช้ ix_vn_unique, REP ~60 ms
-// opitemrece เป็น MyISAM: ช่วงวันที่ ≤ 1 เดือน, FORCE INDEX และแปลงกองทุนเป็น pttype IN (...) ในโค้ด (ห้าม JOIN pttype)
-const ITEMS_SQL = (pt: number, inc: number, ic: number) => `SELECT o.vn, o.icode, o.income, o.pttype, SUM(o.sum_price) AS amount
-FROM ${OPI_BY_DATE}
-WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL AND o.paidst = '02' AND ${inList("o.pttype", pt)}
-  AND (${[inc && inList("o.income", inc), ic && inList("o.icode", ic)].filter(Boolean).join(" OR ")})
-GROUP BY o.vn, o.icode, o.income, o.pttype`;
-const TOTALS_SQL = (pt: number) => `SELECT o.vn, o.pttype, SUM(o.sum_price) AS amount
-FROM ${OPI_BY_DATE}
-WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL AND o.paidst = '02' AND ${inList("o.pttype", pt)}
-GROUP BY o.vn, o.pttype`;
-const CHUNK = 1000;
-
-/** query ทีละชุด (IN ไม่เกิน CHUNK ค่า) */
-async function byChunks<T>(values: string[], sql: (n: number) => string): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < values.length; i += CHUNK) {
-    const batch = values.slice(i, i + CHUNK);
-    out.push(...(await hisQuery<T>(sql(batch.length), batch)));
-  }
-  return out;
-}
+// วินิจฉัยใช้ ix_vn_icd_unique, ovst ใช้ ix_vn_unique, REP ~60 ms ; ITEMS_SQL/TOTALS_SQL อยู่ที่ ../sql.ts
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -59,9 +38,9 @@ export async function GET(request: NextRequest) {
 
   const [rawItems, rawTotals, rep] = await Promise.all([
     itemPts.length && (incomes.length || icodes.length)
-      ? hisQuery<Omit<ItemRow, "fund">>(ITEMS_SQL(itemPts.length, incomes.length, icodes.length), [start, end, ...itemPts, ...incomes, ...icodes])
+      ? hisQuery<Omit<ItemRow, "fund">>(ITEMS_SQL("range", itemPts.length, incomes.length, icodes.length), [start, end, ...itemPts, ...incomes, ...icodes])
       : Promise.resolve([]),
-    totalPts.length ? hisQuery<Omit<VisitTotal, "fund">>(TOTALS_SQL(totalPts.length), [start, end, ...totalPts]) : Promise.resolve([]),
+    totalPts.length ? hisQuery<Omit<VisitTotal, "fund">>(TOTALS_SQL("range", totalPts.length), [start, end, ...totalPts]) : Promise.resolve([]),
     repKeys.length ? insightQuery<RepRow>(REP_SQL, [start, next, repKeys]) : Promise.resolve([]),
   ]);
   const items: ItemRow[] = rawItems.map((r) => ({ ...r, fund: fundOf(lk, r.pttype) }));

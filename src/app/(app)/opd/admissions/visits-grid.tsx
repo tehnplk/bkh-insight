@@ -14,6 +14,7 @@ import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, type ClaimStatus, type Vi
 import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
+import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
 
 const FILTERS = ["pttypes", "deps", "unclosed"] as const;
 const dash = <span className="text-muted">–</span>;
@@ -117,11 +118,19 @@ const columns = col.columns([
     meta: filterable,
   }),
   col.accessor("rcpt_no", { header: "เลขที่ใบเสร็จ", cell: (c) => c.getValue() || dash, meta: timeCell, enableSorting: false }),
-  // REP อยู่ insight (คนละฐาน) จึงไม่มีตัวกรอง/sort ; พบ REP แสดงทุกกองทุน "ยังไม่มี REP" เฉพาะ UCS
+  // REP อยู่ insight (คนละฐาน) จึงไม่มี sort ตัวกรองเป็นสถานะ (route จัดในโค้ด) ; พบ REP แสดงทุกกองทุน "ยังไม่มี REP" เฉพาะ UCS
   col.display({
     id: "rep",
     header: "REP",
     cell: (c) => <RepBadge rep={c.row.original.rep} type="opd" repKey={c.row.original.vn} title={detailTitle(c.row.original)} />,
+    meta: { filter: true },
+  }),
+  // กองทุนย่อยตามกติกาของ /admin/ar-funds สีตามผลเทียบ REP ; คำนวณใน route จึงไม่มี sort ตัวกรองเป็น "<รหัส>:<ผล REP>"
+  col.display({
+    id: "subfund",
+    header: "กองทุนย่อย",
+    cell: (c) => <SubfundBadges funds={c.row.original.subfunds} title={detailTitle(c.row.original)} />,
+    meta: { filter: true },
   }),
   money("income", "มูลค่า (บาท)"),
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
@@ -167,6 +176,11 @@ const renderSummary = (d: VisitsPage) => (
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
         โหลดสถานะ REP ไม่ได้ คอลัมน์ REP จึงว่าง
+      </p>
+    )}
+    {d.subfund_error && (
+      <p role="status" className="text-xs text-warning">
+        โหลดกองทุนย่อยไม่ได้ คอลัมน์กองทุนย่อยจึงว่าง
       </p>
     )}
   </div>

@@ -10,6 +10,9 @@ export function periodLabel(iso: string) {
   return `${THAI_MONTHS_SHORT[m - 1]} ${y + 543}`;
 }
 
+/** badge งวดที่ของเดือน = เลขท้ายเลขที่เอกสาร (run_no) ตรงกับคอลัมน์ "งวด" ในไฟล์ เช่น 6910_OP_02 */
+export const runBadge = "ml-1.5 rounded bg-accent-soft px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-accent-text";
+
 export const SECTIONS: Record<string, string> = {
   normal: "ปกติ",
   appeal: "อุทธรณ์",

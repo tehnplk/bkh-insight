@@ -15,6 +15,8 @@ export type ArFundsData = {
   pttypes: (Option & { fund: string })[];
   /** คอลัมน์กองทุนที่มีใน REP ผู้ป่วยนอก (rep_row.fund_amounts) */
   repKeys: string[];
+  /** คอลัมน์กองทุนของ REP ผู้ป่วยใน ที่ไม่ซ้ำกับผู้ป่วยนอก (คอลัมน์กองทุนย่อยของ /ipd/admissions เทียบด้วย rep_keys ชุดเดียวกัน) */
+  repKeysIp: string[];
   /** เดือนล่าสุดที่มี REP ผู้ป่วยนอก (YYYY-MM) */
   repLatest: string | null;
 };
@@ -31,7 +33,10 @@ async function adminSession() {
 }
 const bad = (error: string) => Response.json({ error }, { status: 400 });
 
-const repKeysSql = `SELECT DISTINCT k AS key FROM rep_row r, jsonb_object_keys(r.fund_amounts) k WHERE r.scheme = 'UCS' AND r.patient_type = 'OP' ORDER BY 1`;
+// ~120 ms (rep_row UCS ทั้งหมด)
+const repKeysSql = `SELECT DISTINCT r.patient_type AS pt, k AS key FROM rep_row r, jsonb_object_keys(r.fund_amounts) k
+WHERE r.scheme = 'UCS' AND r.patient_type IN ('OP', 'IP') ORDER BY 1, 2`;
+type RepKey = { pt: "OP" | "IP"; key: string };
 
 export async function GET() {
   const { error } = await adminSession();
@@ -39,7 +44,7 @@ export async function GET() {
   const [rules, accounts, keys, latest, lk] = await Promise.all([
     loadFundRules(),
     insightQuery<Option>("SELECT code, name FROM ar_account ORDER BY code"),
-    insightQuery<{ key: string }>(repKeysSql),
+    insightQuery<RepKey>(repKeysSql),
     insightQuery<{ month: string | null }>("SELECT to_char(max(admit_at), 'YYYY-MM') AS month FROM rep_row WHERE scheme = 'UCS' AND patient_type = 'OP'"),
     loadLookups(),
   ]);
@@ -49,7 +54,8 @@ export async function GET() {
     incomes: [...lk.income].map(([code, name]) => ({ code, name })).sort((a, b) => a.code.localeCompare(b.code)),
     funds: [...new Set([...lk.pttype.values()].map((p) => p.fund))].filter((f) => f !== UNKNOWN_FUND).sort().map((code) => ({ code, name: lk.fundName(code) })),
     pttypes: [...lk.pttype].filter(([, p]) => p.active).map(([code, p]) => ({ code, name: p.name, fund: p.fund })).sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true })),
-    repKeys: keys.map((k) => k.key),
+    repKeys: keys.filter((k) => k.pt === "OP").map((k) => k.key),
+    repKeysIp: keys.filter((k) => k.pt === "IP" && !keys.some((o) => o.pt === "OP" && o.key === k.key)).map((k) => k.key),
     repLatest: latest[0]?.month ?? null,
   };
   return Response.json(body);
@@ -92,7 +98,7 @@ export async function POST(request: Request) {
   const [lk, known, keys, accounts] = await Promise.all([
     loadLookups(),
     itemNames([...new Set([...icodes, ...required_icodes])]),
-    insightQuery<{ key: string }>(repKeysSql),
+    insightQuery<RepKey>(repKeysSql),
     insightQuery<{ code: string }>("SELECT code FROM ar_account WHERE code = ANY($1)", [[account_op, account_ip].filter(Boolean)]),
   ]);
   const fundSet = new Set([...lk.pttype.values()].map((p) => p.fund));

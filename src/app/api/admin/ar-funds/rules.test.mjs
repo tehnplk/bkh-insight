@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/admin/ar-funds/rules.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { REASON, checkRules, icdMatch, parseCodeList } from "./rules.ts";
+import { REASON, checkRules, classifyVisits, icdMatch, parseCodeList, repPay, ruleSide, subfundFilterLabel, subfundFilterValues } from "./rules.ts";
 
 const rule = (o) => ({
   code: "X", name: "x", match_mode: "items", hipdata_codes: ["UCS"], pttypes: [], incomes: [], icodes: [], icd10: [], icd_scope: "any", required_icodes: [],
@@ -77,4 +77,37 @@ test("parseCodeList", () => {
   assert.deepEqual(parseCodeList("e11, i10\nE11", /^[A-Z]\d{0,4}$/), ["E11", "I10"]);
   assert.deepEqual(parseCodeList("", /x/), []);
   assert.deepEqual(parseCodeList("E11;", /^[A-Z]\d{0,4}$/), { invalid: "E11;" });
+});
+
+test("classifyVisits: per-visit funds with items, activities, icd, missing", () => {
+  const acts = [{ id: "1", rule_code: "Y", name: "ANC", items_mode: "any", incomes: [], icodes: ["B"], icd10: ["Z34"], icd_scope: "pdx", active: true }];
+  const diags = new Map([["1", [{ icd10: "Z340", pdx: true }, { icd10: "I10", pdx: false }]]]);
+  const map = classifyVisits(
+    [rule({ code: "X", incomes: ["02"], required_icodes: ["Z"] }), rule({ code: "Y", name: "y", activities: acts })],
+    items, diags,
+  );
+  assert.deepEqual([...map.keys()].sort(), ["1", "2"]); // vn 3 สิทธิ OFC, vn 4 ไม่มี Z34
+  const [x, y] = map.get("1");
+  assert.equal(x.code, "X");
+  assert.equal(x.amount, 100.1);
+  assert.deepEqual(x.items, [{ icode: "A", name: null, amount: 100.1 }]);
+  assert.deepEqual(x.missing, [{ icode: "Z", name: null }]);
+  assert.deepEqual(y, { code: "Y", name: "y", amount: 50, rep: "none", rep_amount: null, items: [{ icode: "B", name: null, amount: 50 }], icds: ["Z340"], activities: ["ANC"], missing: [] });
+  // ผลรวมตรงกับ checkRules
+  const [cx] = checkRules([rule({ code: "X", incomes: ["02"] })], items, diags, []);
+  assert.equal(cx.his.amount, [...map.values()].flat().filter((f) => f.code === "X").reduce((s, f) => s + f.amount, 0));
+});
+
+test("repPay, ruleSide, filter values", () => {
+  assert.deepEqual(repPay(["K"], undefined), { rep: "none", rep_amount: null });
+  assert.deepEqual(repPay(["K", "L"], { K: 10.1, L: "0.2", M: 9 }), { rep: "paid", rep_amount: 10.3 });
+  assert.deepEqual(repPay(["K"], { M: 9 }), { rep: "unpaid", rep_amount: 0 });
+  assert.deepEqual(repPay(["K"], null), { rep: "unpaid", rep_amount: 0 });
+  assert.equal(ruleSide({ account_op: "1", account_ip: null }, "OP"), true);
+  assert.equal(ruleSide({ account_op: "1", account_ip: null }, "IP"), false);
+  assert.equal(ruleSide({ account_op: null, account_ip: null }, "IP"), true);
+  assert.equal(ruleSide({ account_op: "1", account_ip: "2" }, "IP"), true);
+  const funds = new Map([["1", [{ code: "INST", rep: "paid" }, { code: "PP", rep: "none" }]]]);
+  assert.deepEqual(subfundFilterValues(["1", "2"], funds), [{ k: "1", v: "INST:paid" }, { k: "1", v: "PP:none" }, { k: "2", v: "" }]);
+  assert.equal(subfundFilterLabel("INST:unpaid"), "INST · REP ไม่จ่าย");
 });

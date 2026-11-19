@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
-import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { facetRows, parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import {
@@ -8,7 +8,10 @@ import {
   type Lookups,
 } from "@/app/api/fund/_lib/fund";
 import { CLAIM_JOINS, STATUS_SQL } from "@/app/api/fund/_lib/claim";
-import { latestRepSql, repLabel } from "@/app/api/fund/_lib/rep";
+import { REP_FILTER_LABEL, latestRepSql, loadRepFilterValues, repLabel } from "@/app/api/fund/_lib/rep";
+import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
+import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
+import type { RepCand } from "@/app/api/ipd/admissions/admissions";
 import { OPD_MAX_DAYS, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
@@ -93,13 +96,14 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
     rcpt_no: { expr: RCPT_SQL, display: (v) => v.replaceAll(":", "/") },
   };
 }
-const FILTERABLE = ["vn", "hn", "patient_name", "fund", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no"] as const;
+// rep (สถานะ REP) อยู่ insight และ subfund (กองทุนย่อย) คำนวณในโค้ด จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
+const FILTERABLE = ["vn", "hn", "patient_name", "fund", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "rep", "subfund"] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
 // REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
 const REP_SQL = latestRepSql("seq_no", "vn", "OP");
 
-type XlsxRow = VisitRow & Record<"rep_no" | "rep_label", string>;
+type XlsxRow = VisitRow & Record<"rep_no" | "rep_label" | "subfund_label", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "vn", header: "VN", width: 14 },
   { key: "hn", header: "HN", width: 10 },
@@ -117,6 +121,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "rcpt_no", header: "เลขที่ใบเสร็จ", width: 16 },
   { key: "rep_no", header: "เลขที่ REP", width: 14 },
   { key: "rep_label", header: "สถานะ REP", width: 24 },
+  { key: "subfund_label", header: "กองทุนย่อย", width: 36 },
   { key: "income", header: "มูลค่า (บาท)", width: 14, type: "money" },
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
@@ -156,6 +161,10 @@ export async function GET(request: NextRequest) {
     const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
     const depCodes = deps && effectiveCodes(rawDeps, deps.filter((d) => d.active).map((d) => d.code));
     const defs = filterDefs(lk, new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""])));
+    const toFund = (pttype: string | null) => fundOf(lk, pttype);
+    /** VN ที่สถานะ REP / กองทุนย่อย ตรงตัวกรองหัวคอลัมน์ rep / subfund (null = ไม่กรอง) */
+    let repVns: string[] | null = null;
+    let subVns: string[] | null = null;
 
     /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet ของคอลัมน์นั้น) */
     const whereFor = (except: FilterKey | null) => {
@@ -175,10 +184,41 @@ export async function GET(request: NextRequest) {
         args.push(like, like, like);
       }
       if (unclosed) parts.push(`${CLOSE_CODE_SQL} IS NULL`);
-      const cfw = columnFilterWhere(defs, filters, except);
+      for (const [key, vns] of [["rep", repVns], ["subfund", subVns]] as const)
+        if (vns && except !== key) {
+          parts.push(vns.length ? inList("o.vn", vns.length) : "1 = 0");
+          args.push(...vns);
+        }
+      const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined }, except);
       return { sql: `WHERE ${[...parts, ...cfw.parts].join("\n  AND ")}`, params: [...args, ...cfw.params] };
     };
 
+    // ตัวกรอง/facet ของ REP และกองทุนย่อย: ไม่ใช้ = ไม่มี query เพิ่ม ; ใช้ = จัดค่าของทุก visit ที่ผ่านตัวกรองอื่น (31 วันราว 18,000 VN)
+    // VN ที่ตรงส่งเป็น IN ของ his (MariaDB แปลง IN ยาวเป็นตารางค่าแล้ว eq_ref ด้วย ix_vn_unique ตรวจแล้ว)
+    // กองทุนย่อยเกิน 1,000 VN อ่าน opitemrece ตามช่วงวัน (ix_vstdate) ครั้งเดียว ~0.5 วินาที/31 วัน
+    // ตัวที่เป็น facet ทำทีหลัง จึงได้ค่าตามตัวกรองอีกตัวด้วย
+    const keyFilters = {
+      rep: async () => {
+        const w = whereFor("rep");
+        const vals = await loadRepFilterValues(await hisQuery<RepCand>(`SELECT o.vn AS k, o.pttype ${FROM}\n${w.sql}`, w.params), REP_SQL, "vn", toFund);
+        if (facet === "rep") return facetRows(vals, (r) => r.v, facetQ, (v) => REP_FILTER_LABEL[v] ?? v);
+        const sel = new Set(filters.rep);
+        repVns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
+      },
+      subfund: async () => {
+        const w = whereFor("subfund");
+        const keys = (await hisQuery<{ k: string }>(`SELECT o.vn AS k ${FROM}\n${w.sql}`, w.params)).map((r) => r.k);
+        const vals = subfundFilterValues(keys, await loadSubfunds("OP", keys, lk, { range: { start, end } }));
+        if (facet === "subfund") return facetRows(vals, (r) => r.v, facetQ, subfundFilterLabel);
+        const sel = new Set(filters.subfund);
+        subVns = [...new Set(vals.filter((r) => sel.has(r.v)).map((r) => r.k))];
+      },
+    };
+    for (const key of facet === "rep" ? (["subfund", "rep"] as const) : (["rep", "subfund"] as const))
+      if (filters[key] || facet === key) {
+        const page = await keyFilters[key]();
+        if (page) return Response.json(page);
+      }
     if (facet) return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FROM, whereFor(facet)));
 
     const { sql: where, params: args } = whereFor(null);
@@ -201,16 +241,22 @@ export async function GET(request: NextRequest) {
         repError = true;
       }
     }
-    const rows = buildRows(raws, reps, (pttype) => fundOf(lk, pttype));
+    // กองทุนย่อย: อ่านไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
+    const subfunds = await loadSubfunds("OP", vns, lk, { range: { start, end }, names: !xlsx }).catch((e) => {
+      console.error("opd/admissions subfund", e);
+      return undefined;
+    });
+    const rows = buildRows(raws, reps, toFund).map((r) => ({ ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []) }));
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
         ...r,
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
+        subfund_label: subfundText(r.subfunds),
       }));
       return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }
-    const body: VisitsPage = { rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError };
+    const body: VisitsPage = { rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError, subfund_error: !subfunds };
     return Response.json(body);
   } catch (e) {
     console.error("opd/admissions", e);

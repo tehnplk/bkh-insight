@@ -5,7 +5,7 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { StmFileDetail } from "@/app/api/fund/stm-import/detail/route";
 import { Money, Skeleton, btn, num, useJson } from "../_components/ui";
-import { FUNDS, SCHEMES, SECTIONS, isCalc, periodLabel } from "./labels";
+import { FUNDS, SCHEMES, SECTIONS, isCalc, periodLabel, runBadge } from "./labels";
 
 const dash = <span className="text-muted">–</span>;
 const th = "px-3 py-1.5 font-medium whitespace-nowrap";
@@ -55,7 +55,10 @@ export function StmFileDetailView({ id }: { id: string }) {
   return (
     <div className="text-sm">
       <dl className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-x-6 gap-y-3">
-        <Fact label="งวด">{`${periodLabel(f.period_month)} ครั้งที่ ${f.run_no}`}</Fact>
+        <Fact label="งวด">
+          {periodLabel(f.period_month)}
+          <span className={runBadge}>งวด {f.run_no}</span>
+        </Fact>
         <Fact label="สิทธิ">{`${SCHEMES[f.scheme] ?? f.scheme} ${f.patient_type}`}</Fact>
         <Fact label="HCODE">{f.hcode}</Fact>
         <Fact label="วันที่ออก STM">{formatThaiDate(f.transfer_date)}</Fact>
