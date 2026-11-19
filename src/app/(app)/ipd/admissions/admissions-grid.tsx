@@ -43,6 +43,7 @@ import {
   RepDetail,
   Section,
 } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
+import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
 
 const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
 const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
@@ -333,6 +334,14 @@ const columns = col.columns([
         title={detailTitle(c.row.original)}
       />
     ),
+    meta: { filter: true },
+  }),
+  // กองทุนย่อยตามกติกาของ /admin/ar-funds สีตามผลเทียบ REP ; คำนวณใน route จึงไม่มี sort
+  col.display({
+    id: "subfund",
+    header: "กองทุนย่อย",
+    cell: (c) => <SubfundBadges funds={c.row.original.subfunds} title={detailTitle(c.row.original)} />,
+    meta: { filter: true },
   }),
   money("income", "มูลค่า (บาท)"),
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
@@ -568,6 +577,11 @@ const renderSummary = (d: AdmissionsPage) => (
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
         โหลดสถานะ REP ไม่ได้ คอลัมน์ REP จึงว่าง
+      </p>
+    )}
+    {d.subfund_error && (
+      <p role="status" className="text-xs text-warning">
+        โหลดกองทุนย่อยไม่ได้ คอลัมน์กองทุนย่อยจึงว่าง
       </p>
     )}
   </div>

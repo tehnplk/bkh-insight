@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   const counts: Record<string, number> = {};
   for (const f of files) {
     counts[f.file] = f.rows.length;
-    if (f.rows.length) zip.file(`${f.file}.txt`, toTxt(f.columns, f.rows));
+    zip.file(`${f.file}.txt`, toTxt(f.columns, f.rows));
   }
 
   const data = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });

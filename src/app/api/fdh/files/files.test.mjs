@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FDH_TYPES, FILE_ORDER } from "../c-check/files.ts";
-import { exportSql, fileColumns, pageSql } from "./sql.ts";
+import { ecHealthMedSql, exportSql, fileColumns, pageSql } from "./sql.ts";
 import { toTxt } from "./txt.ts";
 
 const H = "WITH p AS (SELECT CAST(? AS DATE) AS s, CAST(? AS DATE) AS e)";
@@ -72,6 +72,14 @@ test("ADP.TMLTCODE: filled in code from icode helper column (not a file column)"
   );
   assert.deepEqual(ok.sort(), ["3000408", "3003344"], "catalog หลายค่าไม่ยืนยัน และ lab_items ขัดกัน ไม่นับ");
   assert.deepEqual(resolvedLabIcodes([], []), []);
+});
+
+test("OPD SQL (FDH) has no health_med scan; e-Claim Thai medicine rows by VN: placeholders = n, DROPID cut to 6", () => {
+  assert.doesNotMatch(exportSql("op", "OPD"), /health_med_service_operation/);
+  const s = ecHealthMedSql(3);
+  assert.equal(s.match(/\?/g).length, 3);
+  assert.match(s, /hs\.vn IN \(\?, \?, \?\)/);
+  assert.match(s, /LEFT\(COALESCE\(.*hp\.cid, ''\), 6\) AS DROPID/);
 });
 
 test("toTxt: header, | separator, CRLF, null empty, cleans | CR LF and quotes", () => {

@@ -1,6 +1,7 @@
 // IPD แยกรายสิทธิ: ชนิดข้อมูลและการรวมผล his (admission) กับ insight (REP) แบบ pure
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
+import type { SubFund } from "@/app/api/admin/ar-funds/rules";
 
 /** กองทุนที่เบิกผ่าน REP e-Claim: ไม่พบ REP = "ยังไม่มี REP" ; กองทุนอื่นแสดงเฉพาะเมื่อพบ REP */
 export const REP_FUND = "UCS";
@@ -88,6 +89,8 @@ export type AdmissionRow = {
   /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
   rep?: RepInfo | null;
   overdue: boolean;
+  /** กองทุนย่อยที่เข้าเกณฑ์ (ว่าง = ไม่เข้ากองทุนใด, undefined = โหลดไม่ได้) */
+  subfunds?: SubFund[];
 };
 
 export type AdmissionsPage = GridPage<AdmissionRow> & {
@@ -101,6 +104,8 @@ export type AdmissionsPage = GridPage<AdmissionRow> & {
   adjrw_amount_n: number;
   /** โหลดสถานะ REP จาก insight ไม่ได้ */
   rep_error: boolean;
+  /** โหลดกองทุนย่อยไม่ได้ */
+  subfund_error: boolean;
 };
 
 const num = (v: number | string | null) => (v == null || v === "" ? null : Number(v));
@@ -146,6 +151,16 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
       overdue: days != null && days > OVERDUE_DAYS && !rep,
     };
   });
+}
+
+/** แถวผู้สมัครของตัวกรองหัวคอลัมน์ REP: key (VN/AN) + สิทธิ จาก his */
+export type RepCand = { k: string; pttype: string | null };
+/**
+ * ค่าตัวกรองหัวคอลัมน์ REP ต่อแถว (สูตรเดียวกับ rep ของ buildRows): สถานะ REP ล่าสุด (pass/c/deny),
+ * none = ยังไม่มี REP (เฉพาะ REP_FUND), "" = ไม่มีสถานะ (กองทุนอื่นที่ไม่พบ REP แสดงขีด)
+ */
+export function repFilterValues(cands: RepCand[], statusOf: Map<string, RepStatus>, fundOf: (pttype: string | null) => string) {
+  return cands.map((c) => ({ k: c.k, v: statusOf.get(c.k) ?? (fundOf(c.pttype) === REP_FUND ? "none" : "") }));
 }
 
 /** รายละเอียด admission (modal) */

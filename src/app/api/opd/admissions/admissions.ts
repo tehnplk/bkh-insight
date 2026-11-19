@@ -2,6 +2,7 @@
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
 import type { RepInfo } from "@/app/api/ipd/admissions/admissions";
+import type { SubFund } from "@/app/api/admin/ar-funds/rules";
 
 /** = REP_FUND ของ ipd/admissions (ไฟล์นี้ import ค่าข้ามไฟล์ไม่ได้ เพราะ test รัน .ts ตรง) */
 const REP_FUND = "UCS";
@@ -72,11 +73,15 @@ export type VisitRow = {
   rcpt_no: string | null;
   /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
   rep?: RepInfo | null;
+  /** กองทุนย่อยที่เข้าเกณฑ์ (ว่าง = ไม่เข้ากองทุนใด, undefined = โหลดไม่ได้) */
+  subfunds?: SubFund[];
 };
 
 export type VisitsPage = GridPage<VisitRow> & {
   /** โหลดสถานะ REP จาก insight ไม่ได้ */
   rep_error: boolean;
+  /** โหลดกองทุนย่อยไม่ได้ */
+  subfund_error: boolean;
 };
 
 /** ovstost.export_code -> สถานะการจำหน่าย (รหัส TYPEOUT 43 แฟ้ม) */

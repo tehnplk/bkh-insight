@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/ipd/admissions/admissions.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows } from "./admissions.ts";
+import { buildRows, repFilterValues } from "./admissions.ts";
 
 const FUND = { "89": "UCS", O1: "OFC", S1: "SSS" };
 const fundOf = (p) => FUND[p] ?? "UNKNOWN";
@@ -67,4 +67,13 @@ test("AdjRW amount: rate by discharge date, none before the oldest rate", async 
   assert.equal(amount("2026-09-15", "1.0000"), 3505.14);
   assert.equal(amount("2025-09-15", "1.0000"), null);
   assert.equal(amount("2026-10-15", null), null);
+});
+
+test("REP header filter value: latest status on any fund, none only on UCS, blank for other funds without REP", () => {
+  const vals = repFilterValues(
+    [{ k: "1", pttype: "89" }, { k: "2", pttype: "O1" }, { k: "3", pttype: "89" }, { k: "4", pttype: "O1" }, { k: "5", pttype: null }],
+    new Map([["1", "c"], ["2", "pass"]]),
+    fundOf,
+  );
+  assert.deepEqual(vals.map((r) => r.v), ["c", "pass", "none", "", ""]);
 });

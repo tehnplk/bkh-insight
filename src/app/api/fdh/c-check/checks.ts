@@ -21,6 +21,10 @@ const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 1
 const LAB_CAT = `GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN_SET(ICODE, ?) THEN ICODE END ORDER BY ICODE) AS LAB,
          GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN_SET(ICODE, ?) THEN ICODE END ORDER BY ICODE) AS CAT`;
 
+// ODX = เฉพาะ ICD-10 ของ ovstdiag ; OOP = doctor_operation + หัตถการ ICD-9-CM ใน ovstdiag ที่ไม่ซ้ำ (สูตรเดียวกับ fdh/files/sql.ts ; fdh.test.mjs ตรวจ)
+const OD_ICD10 = "od.icd10 REGEXP '^[A-Za-z]'";
+const OD_ICD9_NOT_IN_DOP = "od.icd10 REGEXP '^[0-9]' AND NOT EXISTS (SELECT 1 FROM doctor_operation d WHERE d.vn = od.vn AND (d.icd9 = od.icd10 OR d.ovst_diag_id = od.ovst_diag_id))";
+
 /** sql = statement นับแถว, col = คอลัมน์ของจำนวน (ADP/PHDB/DRU ใช้ statement เดียวกัน) */
 type CountDef = { sql: string; col: string };
 const n = (body: string): CountDef => ({ sql: `${H} SELECT COUNT(*) AS n FROM ${body}`, col: "n" });
@@ -36,8 +40,9 @@ const OP_COUNT = {
     col: "n",
   },
   ORF: n("p JOIN referout ro ON ro.refer_date BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = ro.vn WHERE v.an IS NULL OR v.an = ''"),
-  ODX: n("p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn"),
-  OOP: n("p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn"),
+  ODX: n(`p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn WHERE ${OD_ICD10}`),
+  OOP: n(`(SELECT 1 FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn
+    UNION ALL SELECT 1 FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = v.hn WHERE ${OD_ICD9_NOT_IN_DOP}) u`),
   CHT: n("p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn WHERE v.an IS NULL OR v.an = ''"),
   CHA: n("(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(op.sum_price), 2) > 0) g"),
   AER: n("p JOIN er_regist er ON er.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn WHERE v.an IS NULL OR v.an = ''"),
@@ -85,7 +90,7 @@ const STP_OP_BASE = `stp AS (
 ),
 dx_s AS (
   SELECT s.HN, s.AN, s.SEQ, od.icd10 AS DIAG, COALESCE(od.diagtype, '1') AS DXTYPE
-  FROM stp s JOIN ovstdiag od ON od.vn = s.SEQ
+  FROM stp s JOIN ovstdiag od ON od.vn = s.SEQ WHERE ${OD_ICD10}
 ),
 aer_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS REFMAINI, COALESCE(rout.refer_hospcode, '') AS REFMAINO,
@@ -202,6 +207,7 @@ dx AS (
          COALESCE(od.diagtype, '1') AS DXTYPE, od.diagtype AS DXTYPE_RAW
   FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e
   INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn
+  WHERE ${OD_ICD10}
 ),
 ${STP_OP_BASE}`,
   ip: `${H4},

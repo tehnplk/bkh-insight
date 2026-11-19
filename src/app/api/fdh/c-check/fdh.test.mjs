@@ -179,3 +179,25 @@ test("ADP.TYPE and drug split in rules match the exported ADP/DRU", async () => 
     assert.ok(exportSql(t, "ADP").includes(`${adpType} AS \`TYPE\``));
   }
 });
+
+test("ODX keeps only ICD-10 rows of ovstdiag; OOP adds ICD-9-CM rows not in doctor_operation (export, count, rules agree)", async () => {
+  const { exportSql, fileColumns } = await import("../files/sql.ts");
+  const icd10 = "od.icd10 REGEXP '^[A-Za-z]'";
+  const icd9 = "od.icd10 REGEXP '^[0-9]' AND NOT EXISTS (SELECT 1 FROM doctor_operation d WHERE d.vn = od.vn AND (d.icd9 = od.icd10 OR d.ovst_diag_id = od.ovst_diag_id))";
+  assert.ok(exportSql("op", "ODX").includes(`WHERE ${icd10}`) && countDef("op", "ODX").sql.includes(`WHERE ${icd10}`));
+  assert.ok(ruleSummarySql("op", "ODX").includes(`WHERE ${icd10}`));
+  assert.ok(exportSql("op", "OOP").includes(`WHERE ${icd9}`) && countDef("op", "OOP").sql.includes(`WHERE ${icd9}`));
+  assert.deepEqual(fileColumns("op", "OOP"), ["HN", "DATEOPD", "CLINIC", "OPER", "DROPID", "PERSON_ID", "SEQ", "SERVPRICE"]);
+});
+
+test("ODX/IDX: FDH DIAG unchanged; e-Claim ec_diag mapped via icd10_nhso with LEFT JOIN on PK", async () => {
+  const { exportSql, fileColumns } = await import("../files/sql.ts");
+  for (const [t, f, a] of [["op", "ODX", "od"], ["ip", "IDX", "id"]]) {
+    const sql = exportSql(t, f);
+    const c = `REPLACE(${a}.icd10, '.', '')`;
+    assert.ok(sql.includes(`${c} AS \`DIAG\``), f);
+    assert.ok(sql.includes(`CASE WHEN n5.code IS NULL AND n4.code IS NOT NULL THEN n4.code ELSE ${c} END AS ec_diag`), f);
+    assert.ok(sql.includes(`LEFT JOIN icd10_nhso n5 ON n5.code = ${c} LEFT JOIN icd10_nhso n4 ON n4.code = LEFT(${c}, 4)`), f);
+    assert.ok(!fileColumns(t, f).includes("ec_diag"), f);
+  }
+});

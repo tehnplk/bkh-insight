@@ -1,6 +1,6 @@
 "use client";
 
-// modal 16 แฟ้ม (ดูข้อมูลรายแฟ้ม, ตรวจ C ทีละแฟ้มพร้อมแถบความคืบหน้า, กรองเฉพาะแถวที่ติด C, ส่งออก txt ใน zip และ Excel) ใช้ร่วม /ipd/admissions และ /opd/admissions
+// modal 16 แฟ้ม (ดูข้อมูลรายแฟ้ม, ตรวจ C ทีละแฟ้มพร้อมแถบความคืบหน้า, กรองเฉพาะแถวที่ติด C, ส่งออก zip รูปแบบ FDH, e-Claim TEXT หรือ DBF (eclaim.ts, dbf.ts) และ Excel) ใช้ร่วม /ipd/admissions และ /opd/admissions
 // ข้อมูลมาจาก endpoint ของหน้า (POST { [idField]: ids, format: "json" }) ตรวจ C ผ่าน checkUrl (POST { [idField]: ids, file })
 // ยิงทีละชุดไม่เกิน chunkSize ราย เรียงกันไม่ขนาน (pool ของ his มี 3 connection ใช้ร่วมทุกผู้ใช้) แล้วรวมผลด้วย batch.ts
 import { useEffect, useRef, useState } from "react";
@@ -48,37 +48,59 @@ async function loadPreview(source: Source, onPart: (i: number, n: number) => voi
 
 /**
  * สร้าง zip ของ 16 แฟ้มใน browser จากข้อมูลที่แสดงอยู่ใน modal (ไม่อ่าน HOSxP ซ้ำ ไฟล์จึงตรงกับที่เห็น)
- * ใส่เฉพาะแฟ้มที่มีแถว แบบโปรแกรมที่ส่ง FDH จริง ; jszip โหลดตอนกดเท่านั้น
+ * ใส่ทุกแฟ้มของชุด แฟ้มที่ไม่มีแถวเป็นหัวคอลัมน์บรรทัดเดียว ; jszip โหลดตอนกดเท่านั้น
  */
-async function downloadZip(files: FdhPreview["files"], n: number, prefix: string) {
-  const [{ default: JSZip }, { toTxt }] = await Promise.all([import("jszip"), import("@/app/api/fdh/files/txt")]);
+async function downloadZip(entries: [path: string, data: string | Uint8Array][], filename: string) {
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
-  for (const f of files) if (f.rows.length) zip.file(`${f.file}.txt`, toTxt(f.columns, f.rows));
+  for (const [path, text] of entries) zip.file(path, text);
   const url = URL.createObjectURL(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }));
-  Object.assign(document.createElement("a"), { href: url, download: `fdh-${prefix}-${todayIso()}-${n}.zip` }).click();
+  Object.assign(document.createElement("a"), { href: url, download: filename }).click();
   URL.revokeObjectURL(url);
 }
 
-/** ปุ่มส่งออก 16 แฟ้มเป็น txt ใน zip พร้อมป้ายเตือนว่ายังไม่ได้ทดสอบกับ FDH */
-function ZipButton({ files, n, prefix }: { files: FdhPreview["files"]; n: number; prefix: string }) {
-  const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false });
-  const nonEmpty = files.filter((f) => f.rows.length).length;
+/** zip รูปแบบ FDH: ทุกแฟ้มของชุด มีหัวคอลัมน์ */
+async function downloadFdh(files: FdhPreview["files"], n: number, prefix: string) {
+  const { toTxt } = await import("@/app/api/fdh/files/txt");
+  await downloadZip(files.map((f) => [`${f.file}.txt`, toTxt(f.columns, f.rows)]), `fdh-${prefix}-${todayIso()}-${n}.zip`);
+}
+
+/**
+ * zip สำหรับนำเข้า NEW e-Claim (TEXT หรือ dbf = DBF): โฟลเดอร์ละสิทธิ (นำเข้าทีละสิทธิ แนบไฟล์ในโฟลเดอร์) คืนคำเตือนเมื่อโฟลเดอร์ใดเกิน 10 MB
+ * ผู้ป่วยนอก (มีแฟ้ม OPD) ขอแถวแพทย์แผนไทยตอนกด (format "eclaim-hm" ทีละชุด) เพราะ SQL สแกนทั้งตาราง ไม่ให้ FDH ต้องรอด้วย
+ */
+async function downloadEclaim(files: FdhPreview["files"], source: Source, dbf = false) {
+  const { toEclaim, ECLAIM_MAX_BYTES } = await import("./eclaim");
+  const hm: FdhPreview["files"][number]["rows"] = [];
+  if (files.some((f) => f.file === "OPD"))
+    for (const ids of chunkIds(source.ids, source.chunkSize))
+      hm.push(...(await postJson<{ rows: typeof hm }>(source.previewUrl, { [source.idField]: ids, format: "eclaim-hm" })).rows);
+  const folders = toEclaim(files, dbf ? (await import("./dbf")).writeDbf : undefined, hm);
+  const name = `eclaim-${dbf ? "dbf-" : ""}${source.zipPrefix}-${todayIso()}-${source.ids.length}.zip`;
+  await downloadZip(folders.flatMap((d) => d.files.map((f): [string, string | Uint8Array] => [`${d.name}/${f.name}`, f.data])), name);
+  const big = folders.filter((d) => d.bytes > ECLAIM_MAX_BYTES).map((d) => `${d.name} ${(d.bytes / 1024 / 1024).toFixed(1)} MB`);
+  return big.length ? `เกิน 10 MB ต่อการนำเข้า: ${big.join(", ")} เลือกรายน้อยลงแล้วส่งออกหลายครั้ง` : undefined;
+}
+
+/** ปุ่มส่งออก zip พร้อมป้ายเตือนว่ายังไม่ได้ทดสอบกับระบบปลายทาง (ไม่ส่ง target = ไม่มีป้าย) ; make คืนคำเตือนหลังสร้างไฟล์ (ถ้ามี) */
+function ZipButton({ target, label, make }: { target?: string; label: string; make: () => Promise<string | undefined | void> }) {
+  const [state, setState] = useState<{ busy: boolean; error?: string; warn?: string }>({ busy: false });
   async function run() {
     setState({ busy: true });
     try {
-      await downloadZip(files, n, prefix);
-      setState({ busy: false });
+      setState({ busy: false, warn: (await make()) ?? undefined });
     } catch (e) {
       setState({ busy: false, error: `สร้างไฟล์ไม่สำเร็จ: ${(e as Error).message}` });
     }
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="rounded border border-warning-line bg-warning-soft px-1.5 py-0.5 text-xs text-warning">ยังไม่ได้ทดสอบกับ FDH</span>
-      <button type="button" disabled={!nonEmpty || state.busy} onClick={run} className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}>
-        {state.busy ? "กำลังสร้างไฟล์…" : `ส่งออก 16 แฟ้ม (.zip) ${formatCount(nonEmpty)} แฟ้ม`}
+      {target && <span className="rounded border border-warning-line bg-warning-soft px-1.5 py-0.5 text-xs text-warning">ยังไม่ได้ทดสอบกับ {target}</span>}
+      <button type="button" disabled={state.busy} onClick={run} className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}>
+        {state.busy ? "กำลังสร้างไฟล์…" : label}
       </button>
       {state.error && <p role="alert" className="w-full text-xs text-danger">{state.error}</p>}
+      {state.warn && <p role="status" className="w-full text-xs text-warning">{state.warn}</p>}
     </div>
   );
 }
@@ -196,8 +218,8 @@ function checkLabel(check?: FileCheck) {
   return errors ? `ไม่ผ่าน ${formatCount(errors)} แถว` : warns ? `เตือน ${formatCount(warns)} แถว` : "ผ่าน";
 }
 
-/** เนื้อหา modal หลังโหลด 16 แฟ้มแล้ว: ปุ่มตรวจ C (ซ้ายบน) ส่งออก zip (ขวาบน) รายการแฟ้ม (ซ้าย) และข้อมูลแฟ้ม (ขวา) ; counts = แถวต่อชุดของแต่ละแฟ้ม */
-function PreviewContent({ files, counts, file, onFile, source }: { files: PreviewFile[]; counts: MergedPreview["counts"]; file: string; onFile: (f: string) => void; source: Source }) {
+/** เนื้อหา modal หลังโหลด 16 แฟ้มแล้ว: ปุ่มตรวจ C (ซ้ายบน) ส่งออก zip (ขวาบน) รายการแฟ้ม (ซ้าย) และข้อมูลแฟ้ม (ขวา) ; counts = แถวต่อชุดของแต่ละแฟ้ม ; allFiles = ทุกแฟ้มรวมแฟ้มว่าง (ใส่ใน zip) */
+function PreviewContent({ files, allFiles, counts, file, onFile, source }: { files: PreviewFile[]; allFiles: PreviewFile[]; counts: MergedPreview["counts"]; file: string; onFile: (f: string) => void; source: Source }) {
   const [checks, setChecks] = useState<Record<string, FileCheck>>({});
   const [info, setInfo] = useState<Record<string, string>>({});
   const [onlyC, setOnlyC] = useState(false);
@@ -291,7 +313,14 @@ function PreviewContent({ files, counts, file, onFile, source }: { files: Previe
             filename={`fdh-${source.zipPrefix}-${todayIso()}-${source.ids.length}${filtering ? "-c" : ""}.xlsx`}
             label={filtering ? "ส่งออก Excel (เฉพาะที่ติด C/เตือน)" : "ส่งออก Excel"}
           />
-          <ZipButton files={files} n={source.ids.length} prefix={source.zipPrefix} />
+          <ZipButton
+            target="FDH"
+            label={`ส่งออก 16 แฟ้ม (.zip) ${formatCount(allFiles.length)} แฟ้ม`}
+            make={() => downloadFdh(allFiles, source.ids.length, source.zipPrefix)}
+          />
+          <ZipButton target="e-Claim" label="ส่งออก e-Claim (.zip)" make={() => downloadEclaim(allFiles, source)} />
+          {/* ใช้ป้าย "ยังไม่ได้ทดสอบกับ e-Claim" ร่วมกับปุ่ม TEXT ข้างหน้า */}
+          <ZipButton label="ส่งออก e-Claim (.dbf)" make={() => downloadEclaim(allFiles, source, true)} />
         </div>
       </div>
       {notes.length > 0 && (
@@ -396,7 +425,7 @@ function PreviewContent({ files, counts, file, onFile, source }: { files: Previe
   );
 }
 
-/** เนื้อหา modal 16 แฟ้ม: โหลด / error / ข้อมูล (แฟ้มที่ไม่มีแถวไม่แสดง เหมือน zip ที่ไม่ใส่แฟ้มว่าง) */
+/** เนื้อหา modal 16 แฟ้ม: โหลด / error / ข้อมูล (แฟ้มที่ไม่มีแถวไม่แสดง แต่ zip ใส่ครบทุกแฟ้ม) */
 function PreviewBody({ state, onFile, onRetry, source }: { state: PreviewState; onFile: (f: string) => void; onRetry: () => void; source: Source }) {
   if (state.busy)
     return (
@@ -413,7 +442,7 @@ function PreviewBody({ state, onFile, onRetry, source }: { state: PreviewState; 
   const files = state.data.files.filter((f) => f.rows.length);
   if (!files.length) return <p className="text-sm text-muted">ไม่มีข้อมูลใน 16 แฟ้มสำหรับรายที่เลือก</p>;
   // โหลดข้อมูลชุดใหม่ = ผลตรวจเดิมใช้ไม่ได้ (key เปลี่ยนตามรอบที่โหลด)
-  return <PreviewContent key={state.version} files={files} counts={state.data.counts} file={state.file} onFile={onFile} source={source} />;
+  return <PreviewContent key={state.version} files={files} allFiles={state.data.files} counts={state.data.counts} file={state.file} onFile={onFile} source={source} />;
 }
 
 /**

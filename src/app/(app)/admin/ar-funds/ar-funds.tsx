@@ -157,7 +157,10 @@ function RuleForm({ data, draft, setDraft, onSaved }: { data: ArFundsData; draft
         </div>
       </fieldset>
       <div className="flex flex-wrap items-end gap-3">
-        <MultiSelect label="เทียบกับคอลัมน์ REP" groups={[{ value: "rep", label: "คอลัมน์กองทุนใน REP ผู้ป่วยนอก", options: data.repKeys.map((k) => ({ value: k, label: k })) }]} value={draft.rep_keys} onChange={(v) => set({ rep_keys: v })} allLabel="ไม่เทียบ" />
+        <MultiSelect label="เทียบกับคอลัมน์ REP" groups={[
+          { value: "rep", label: "คอลัมน์กองทุนใน REP ผู้ป่วยนอก", options: data.repKeys.map((k) => ({ value: k, label: k })) },
+          { value: "rep-ip", label: "คอลัมน์กองทุนใน REP ผู้ป่วยใน", options: data.repKeysIp.map((k) => ({ value: k, label: k })) },
+        ]} value={draft.rep_keys} onChange={(v) => set({ rep_keys: v })} allLabel="ไม่เทียบ" />
         {(["account_op", "account_ip"] as const).map((k) => (
           <label key={k} className="flex min-w-0 flex-col gap-1">
             <span className="text-muted">บัญชี {k === "account_op" ? "OP" : "IP"}</span>

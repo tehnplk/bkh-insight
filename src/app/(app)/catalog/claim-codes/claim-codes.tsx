@@ -138,7 +138,7 @@ export function ClaimCodes() {
             ))}
           </dl>
           <p className="text-xs text-muted">
-            รายการอ้างอิง: {d.source} · การใช้งาน {formatThaiDate(d.usageFrom)} ถึง {formatThaiDate(d.usageTo)} · แก้รหัสในรายการค่าบริการ/ยาของ HOSxP แล้วหน้านี้จะอัปเดตเอง
+            รายการอ้างอิง: {d.source} · การใช้งาน {formatThaiDate(d.usageFrom)} ถึง {formatThaiDate(d.usageTo)} · แก้รหัสในรายการค่าบริการของ HOSxP แล้วหน้านี้จะอัปเดตเอง
           </p>
 
           <Section title="รายการใน HOSxP ที่ต้องแก้" count={d.fix.length} tone="danger" kind={kind} part="fix">

@@ -9,7 +9,7 @@ import { THAI_MONTHS_SHORT, formatThaiDate, todayIso } from "@/lib/thai-date";
 import type { StmFileRow, StmImportResult } from "@/app/api/fund/stm-import/route";
 import type { StmPeriod } from "@/app/api/fund/stm-import/periods/route";
 import { Skeleton, num, useJson } from "../_components/ui";
-import { SCHEMES, periodLabel } from "./labels";
+import { SCHEMES, periodLabel, runBadge } from "./labels";
 import { StmFileDetailView } from "./stm-file-detail";
 
 type Status = StmImportResult["status"] | "pending";
@@ -38,7 +38,7 @@ const baseColumns = [
     cell: (c) => (
       <>
         {periodLabel(c.getValue())}
-        <span className="text-muted"> ครั้งที่ {c.row.original.run_no}</span>
+        <span className={runBadge}>งวด {c.row.original.run_no}</span>
       </>
     ),
     meta: { className: "whitespace-nowrap tabular-nums", filter: { format: periodLabel } },
