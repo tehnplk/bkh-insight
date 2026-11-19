@@ -142,8 +142,10 @@ export async function POST(request: Request) {
   const file = form.get("file");
   if (!(file instanceof File)) return result({ file: "", docNo: null, status: "error", rows: 0, netTotal: null, error: "ไม่พบไฟล์" }, 400);
   const base = { file: file.name, docNo: null, rows: 0, netTotal: null };
-  const transferDate = form.get("transfer_date");
-  if (!validTransferDate(transferDate)) return result({ ...base, status: "error", error: "วันที่ออก STM ไม่ถูกต้อง" }, 400);
+  // ไม่ส่ง transfer_date = ใช้ "ออกรายงานวันที่" ในไฟล์ (นำเข้าอัตโนมัติจาก e-Claim ส่ง STM OFC แบบนี้ extension/eclaim-sync/lib/sync.js เพราะรายการ OFC บน e-Claim ไม่มีวันที่ออก)
+  const sentDate = form.get("transfer_date");
+  const badDate = "วันที่ออก STM ไม่ถูกต้อง";
+  if (sentDate !== null && !validTransferDate(sentDate)) return result({ ...base, status: "error", error: badDate }, 400);
   if (!/\.xls$/i.test(file.name)) return result({ ...base, status: "unsupported", error: "ไม่ใช่ไฟล์ .xls" });
   if (file.size > MAX_FILE_BYTES) return result({ ...base, status: "error", error: "ไฟล์ใหญ่เกิน 30 MB" }, 400);
 
@@ -156,6 +158,8 @@ export async function POST(request: Request) {
     return result({ ...base, status: "error", error: (e as Error).message }, 400);
   }
   const done = { ...base, docNo: p.docNo, netTotal: p.netTotal };
+  const transferDate = sentDate ?? p.printedAt?.slice(0, 10) ?? null;
+  if (!validTransferDate(transferDate)) return result({ ...done, status: "error", error: sentDate === null ? "ไม่พบวันที่ออก STM ในไฟล์ ต้องระบุวันที่ออก STM" : badDate }, 400);
   const sha = createHash("sha256").update(buf).digest("hex");
 
   try {

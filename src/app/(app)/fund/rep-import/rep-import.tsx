@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { Upload } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { RepFileRow, RepImportResult } from "@/app/api/fund/rep-import/route";
 import { num } from "../_components/ui";
+import { REP_IMPORTED_EVENT } from "./auto-import";
 import { RepFileDetailView } from "./rep-file-detail";
 
 type Status = RepImportResult["status"] | "pending";
@@ -62,6 +63,13 @@ export function RepImport() {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [gridKey, setGridKey] = useState(0);
+
+  // นำเข้าอัตโนมัติ (ปุ่มที่หัวหน้า) เสร็จแล้วโหลดตารางใหม่
+  useEffect(() => {
+    const reload = () => setGridKey((k) => k + 1);
+    window.addEventListener(REP_IMPORTED_EVENT, reload);
+    return () => window.removeEventListener(REP_IMPORTED_EVENT, reload);
+  }, []);
 
   // ส่งทีละไฟล์ตามลำดับ ให้เห็นผลรายไฟล์และ request ไม่ใหญ่
   async function importFiles(list: FileList | null) {
