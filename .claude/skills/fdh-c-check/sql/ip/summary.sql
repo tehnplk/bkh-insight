@@ -109,6 +109,9 @@ UNION ALL SELECT 'STP-R175' AS c_code, 'INS' AS fdh_file, HN AS hn, AN AS an, SE
 UNION ALL SELECT 'STP-AUTH', 'INS', HN, AN, SEQ, PERMITNO FROM stp WHERE PERMITNO = '' OR BINARY PERMITNO NOT REGEXP '^[A-Z]{2}[0-9]{10}$'
 UNION ALL SELECT 'STP-R111' AS c_code, 'AER' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, CONCAT(REFMAINI, '/', REFMAINO) AS found FROM aer_s WHERE (HAS_IN AND TRIM(REFMAINI) = '') OR (HAS_OUT AND TRIM(REFMAINO) = '')
 UNION ALL SELECT 'STP-R113', 'AER', HN, AN, SEQ, CONCAT(REFMAINI, '/', REFMAINO) FROM aer_s WHERE (REFMAINI <> '' AND TRIM(REFMAINI) NOT REGEXP '^[0-9]{5}$') OR (REFMAINO <> '' AND TRIM(REFMAINO) NOT REGEXP '^[0-9]{5}$')
+UNION ALL SELECT '515' AS c_code, 'IRF' AS fdh_file, o.HN AS hn, o.AN AS an, o.SEQ AS seq, COALESCE(o.REFER, '') AS found
+FROM (SELECT a.HN, a.AN, '' AS SEQ, COALESCE(ro.refer_hospcode, ro.hospcode) AS REFER FROM a INNER JOIN referout ro ON ro.vn = a.AN WHERE TRIM(COALESCE(ro.refer_hospcode, ro.hospcode, '')) NOT IN ('', (SELECT hospitalcode FROM opdconfig LIMIT 1))) o LEFT JOIN referout rout ON rout.referout_id = (SELECT MAX(r.referout_id) FROM referout r WHERE r.vn = o.AN AND TRIM(COALESCE(r.refer_hospcode, r.hospcode, '')) NOT IN ('', (SELECT hospitalcode FROM opdconfig LIMIT 1)))
+WHERE TRIM(COALESCE(o.REFER, '')) IN ('', (SELECT hospitalcode FROM opdconfig LIMIT 1)) OR rout.referout_id IS NULL OR COALESCE(rout.refer_hospcode, rout.hospcode, '') <> o.REFER
 UNION ALL SELECT 'STP-R113' AS c_code, 'IRF' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, REFER AS found FROM orf_s WHERE TRIM(COALESCE(REFER, '')) <> '' AND TRIM(REFER) NOT REGEXP '^[0-9]{5}$'
 UNION ALL SELECT '201' AS c_code, 'IDX' AS fdh_file, c.HN AS hn, c.AN AS an, c.SEQ AS seq, '' AS found FROM cs c
   WHERE NOT EXISTS (SELECT 1 FROM dx d WHERE d.K = c.K AND d.DXTYPE = '1' AND TRIM(d.DIAG) <> '')

@@ -133,7 +133,7 @@ cht_s AS (
 SELECT c_code, hn, an, seq, found FROM (
 SELECT DISTINCT c.c AS c_code, 'ADP' AS fdh_file, x.HN AS hn, x.AN AS an, x.SEQ AS seq,
        CASE c.c WHEN '171' THEN x.VEH
-                WHEN '514' THEN CONCAT(x.VEH, IF(er.vn IS NULL, ' noAER', ' in-province'))
+                WHEN '514' THEN CONCAT(x.VEH, ' in-province')
                 WHEN '301' THEN x.NEG WHEN '234' THEN '30014' WHEN '357' THEN x.DEV WHEN '634' THEN '30010'
                 WHEN '756' THEN CONCAT(x.PRM, ' age ', TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate))
                 WHEN '190' THEN x.CAT WHEN '309' THEN x.NOC WHEN '914' THEN x.LAB END AS found
@@ -141,14 +141,13 @@ FROM ia x
 LEFT JOIN ovst o ON o.vn = x.SEQ
 LEFT JOIN pttype t ON t.pttype = o.pttype
 LEFT JOIN patient pt ON pt.hn = o.hn
-LEFT JOIN er_regist er ON er.vn = x.SEQ
-LEFT JOIN referout ro ON ro.vn = x.SEQ AND TRIM(COALESCE(ro.refer_hospcode, '')) <> ''
+LEFT JOIN referout ro ON ro.vn = x.SEQ AND TRIM(COALESCE(ro.refer_hospcode, ro.hospcode, '')) NOT IN ('', (SELECT hospitalcode FROM opdconfig LIMIT 1))
 LEFT JOIN hospcode h ON h.hospcode = ro.refer_hospcode
 LEFT JOIN doctor_operation dop ON dop.vn = x.SEQ AND dop.icd9 LIKE '8878%'
 LEFT JOIN ovstdiag dz ON dz.vn = x.SEQ AND dz.icd10 LIKE 'Z32%'
 JOIN (SELECT '171' AS c UNION ALL SELECT '514' UNION ALL SELECT '301' UNION ALL SELECT '234' UNION ALL SELECT '357' UNION ALL SELECT '634' UNION ALL SELECT '756' UNION ALL SELECT '190' UNION ALL SELECT '309' UNION ALL SELECT '914') c
 WHERE (c.c = '171' AND x.VEH IS NOT NULL AND ro.vn IS NULL)
-   OR (c.c = '514' AND x.VEH IS NOT NULL AND ro.vn IS NOT NULL AND (er.vn IS NULL OR (t.hipdata_code IN ('UCS', 'WEL') AND h.chwpart = (SELECT CHW FROM hc))))
+   OR (c.c = '514' AND x.VEH IS NOT NULL AND ro.vn IS NOT NULL AND t.hipdata_code IN ('UCS', 'WEL') AND h.chwpart = (SELECT CHW FROM hc))
    OR (c.c = '301' AND x.NEG IS NOT NULL)
    OR (c.c = '234' AND x.PRT = 1 AND dz.vn IS NULL)
    OR (c.c = '357' AND x.DEV IS NOT NULL AND t.hipdata_code IN ('UCS', 'WEL'))

@@ -25,6 +25,15 @@ const LAB_CAT = `GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN
 const OD_ICD10 = "od.icd10 REGEXP '^[A-Za-z]'";
 const OD_ICD9_NOT_IN_DOP = "od.icd10 REGEXP '^[0-9]' AND NOT EXISTS (SELECT 1 FROM doctor_operation d WHERE d.vn = od.vn AND (d.icd9 = od.icd10 OR d.ovst_diag_id = od.ovst_diag_id))";
 
+// ส่งต่อของแฟ้ม ORF/IRF/AER: สูตรเดียวกับ fdh/files/sql.ts (fdh.test.mjs ตรวจ) ; REFOK = มีปลายทางและไม่ใช่ รพ. ตัวเอง ; AER.REFMAINO = referout ล่าสุดที่ REFOK
+const HCODE = "(SELECT hospitalcode FROM opdconfig LIMIT 1)";
+const REFOK = (x: string) => `TRIM(COALESCE(${x}.refer_hospcode, ${x}.hospcode, '')) NOT IN ('', ${HCODE})`;
+const refOut = (key: string) => `(SELECT MAX(r.referout_id) FROM referout r WHERE r.vn = ${key} AND ${REFOK("r")})`;
+// AER = มาทาง ER หรือมีรับ/ส่งต่อ ; outKey = VN (op) / AN (ip)
+const AER_REF = `LEFT JOIN er_regist er ON er.vn = v.vn LEFT JOIN referin rin ON rin.vn = v.vn AND ${REFOK("rin")}`;
+const aerHas = (outKey: string) => `(er.vn IS NOT NULL OR rin.vn IS NOT NULL OR EXISTS (SELECT 1 FROM referout r WHERE r.vn = ${outKey} AND ${REFOK("r")}))`;
+const ORF_FROM = `p JOIN ovst v FORCE INDEX (ix_vstdate) ON v.vstdate BETWEEN p.s AND p.e INNER JOIN referout ro ON ro.vn = v.vn WHERE (v.an IS NULL OR v.an = '') AND ${REFOK("ro")}`;
+
 /** sql = statement นับแถว, col = คอลัมน์ของจำนวน (ADP/PHDB/DRU ใช้ statement เดียวกัน) */
 type CountDef = { sql: string; col: string };
 const n = (body: string): CountDef => ({ sql: `${H} SELECT COUNT(*) AS n FROM ${body}`, col: "n" });
@@ -39,13 +48,13 @@ const OP_COUNT = {
     sql: `${H} SELECT SUM(COALESCE(oa.c, 1)) AS n FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e LEFT JOIN ipt i ON i.vn = v.vn LEFT JOIN referin rf_in ON rf_in.vn = v.vn LEFT JOIN referout rf_out ON rf_out.vn = v.vn LEFT JOIN (SELECT o.hn, o.nextdate, COUNT(*) AS c FROM p JOIN oapp o ON o.nextdate BETWEEN p.s AND p.e GROUP BY o.hn, o.nextdate) oa ON oa.hn = v.hn AND oa.nextdate = v.vstdate`,
     col: "n",
   },
-  ORF: n("p JOIN referout ro ON ro.refer_date BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = ro.vn WHERE v.an IS NULL OR v.an = ''"),
+  ORF: n(ORF_FROM),
   ODX: n(`p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = od.hn WHERE ${OD_ICD10}`),
   OOP: n(`(SELECT 1 FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn
     UNION ALL SELECT 1 FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = v.hn WHERE ${OD_ICD9_NOT_IN_DOP}) u`),
   CHT: n("p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn WHERE v.an IS NULL OR v.an = ''"),
   CHA: n("(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(op.sum_price), 2) > 0) g"),
-  AER: n("p JOIN er_regist er ON er.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn WHERE v.an IS NULL OR v.an = ''"),
+  AER: n(`p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${AER_REF} WHERE (v.an IS NULL OR v.an = '') AND ${aerHas("v.vn")}`),
   ADP: { sql: OP_ITEMS, col: "adp_phdb" },
   DRU: { sql: OP_ITEMS, col: "dru" },
   LABFU: n("p JOIN lab_head lh ON lh.order_date BETWEEN p.s AND p.e INNER JOIN lab_order lo ON lo.lab_order_number = lh.lab_order_number INNER JOIN lab_items li ON li.lab_items_code = lo.lab_items_code INNER JOIN patient pt ON pt.hn = lh.hn LEFT JOIN ipt i ON i.vn = lh.vn WHERE li.labtest <> '' AND lo.lab_order_result REGEXP '^[0-9]+([.][0-9]+){0,1}$' AND lo.lab_order_result + 0 > 0 AND i.an IS NULL AND EXISTS (SELECT 1 FROM clinic c JOIN clinic_visit cv ON cv.clinic = c.clinic AND cv.vn = lh.vn)"),
@@ -57,12 +66,12 @@ const IP_COUNT = {
   INS: n(`${AI} INNER JOIN ovst v ON v.an = a.an INNER JOIN patient pt ON pt.hn = v.hn LEFT JOIN patient_pttype pp ON pp.hn = v.hn AND pp.pttype = v.pttype`),
   PAT: n(`patient pt WHERE pt.hn IN (SELECT a.hn FROM ${AI})`),
   IPD: n(AI),
-  IRF: n(`${AI} INNER JOIN referout ro ON ro.vn = a.an`),
+  IRF: n(`${AI} INNER JOIN referout ro ON ro.vn = a.an WHERE ${REFOK("ro")}`),
   IDX: n(`${AI} INNER JOIN iptdiag id ON id.an = a.an`),
   IOP: n(`${AI} INNER JOIN iptoprt io ON io.an = a.an`),
   CHT: n(`${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn`),
   CHA: n(`(SELECT 1 FROM ${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(op.sum_price), 2) > 0) g`),
-  AER: n(`${AI} INNER JOIN ovst v ON v.an = a.an INNER JOIN er_regist er ON er.vn = v.vn LEFT JOIN referout rout ON rout.vn = er.vn`),
+  AER: n(`${AI} INNER JOIN ovst v ON v.an = a.an ${AER_REF} WHERE ${aerHas("a.an")}`),
   ADP: { sql: IP_ITEMS, col: "adp_phdb" },
   LVD: n(`${AI} INNER JOIN ipt_home_leave hl ON hl.an = a.an`),
   DRU: { sql: IP_ITEMS, col: "dru" },
@@ -423,12 +432,13 @@ UNION ALL SELECT '152', 'ODX', c.HN, c.AN, c.SEQ, CONCAT(d.DIAG, ' VN ', c2.SEQ)
   JOIN cs c2 ON c2.HN = c.HN AND c2.VSTDATE = c.VSTDATE AND c2.SEQ <> c.SEQ
   JOIN dx d2 ON d2.K = c2.K AND d2.DXTYPE = '1' AND d2.DIAG = d.DIAG`;
 
+// C171/C514: ro = ส่งต่อที่แฟ้มส่งออก (REFOK) ซึ่งมี AER เสมอ C514 จึงเหลือแค่ UCS/WEL ส่งต่อในจังหวัดเดียวกัน
 // ADP op: arm เดียวหลายรหัส (cross join ตารางรหัส) อ่าน ia ครั้งเดียว ; เงื่อนไขต่อรหัสใช้ LEFT JOIN + IS NULL (EXISTS ใน OR ทำให้สแกนทั้งตาราง)
 // รายการรหัสต้องตรงกับ ADP_OP_CODES (ตรวจใน fdh.test.mjs)
 const ADP_OP_CODES = ["171", "514", "301", "234", "357", "634", "756", "190", "309", "914"];
 const ADP_OP_BLOCK = `SELECT DISTINCT c.c AS c_code, 'ADP' AS fdh_file, x.HN AS hn, x.AN AS an, x.SEQ AS seq,
        CASE c.c WHEN '171' THEN x.VEH
-                WHEN '514' THEN CONCAT(x.VEH, IF(er.vn IS NULL, ' noAER', ' in-province'))
+                WHEN '514' THEN CONCAT(x.VEH, ' in-province')
                 WHEN '301' THEN x.NEG WHEN '234' THEN '30014' WHEN '357' THEN x.DEV WHEN '634' THEN '30010'
                 WHEN '756' THEN CONCAT(x.PRM, ' age ', TIMESTAMPDIFF(YEAR, pt.birthday, o.vstdate))
                 WHEN '190' THEN x.CAT WHEN '309' THEN x.NOC WHEN '914' THEN x.LAB END AS found
@@ -436,14 +446,13 @@ FROM ia x
 LEFT JOIN ovst o ON o.vn = x.SEQ
 LEFT JOIN pttype t ON t.pttype = o.pttype
 LEFT JOIN patient pt ON pt.hn = o.hn
-LEFT JOIN er_regist er ON er.vn = x.SEQ
-LEFT JOIN referout ro ON ro.vn = x.SEQ AND TRIM(COALESCE(ro.refer_hospcode, '')) <> ''
+LEFT JOIN referout ro ON ro.vn = x.SEQ AND ${REFOK("ro")}
 LEFT JOIN hospcode h ON h.hospcode = ro.refer_hospcode
 LEFT JOIN doctor_operation dop ON dop.vn = x.SEQ AND dop.icd9 LIKE '8878%'
 LEFT JOIN ovstdiag dz ON dz.vn = x.SEQ AND dz.icd10 LIKE 'Z32%'
 JOIN (${ADP_OP_CODES.map((c, i) => `SELECT '${c}'${i ? "" : " AS c"}`).join(" UNION ALL ")}) c
 WHERE (c.c = '171' AND x.VEH IS NOT NULL AND ro.vn IS NULL)
-   OR (c.c = '514' AND x.VEH IS NOT NULL AND ro.vn IS NOT NULL AND (er.vn IS NULL OR (t.hipdata_code IN ('UCS', 'WEL') AND h.chwpart = (SELECT CHW FROM hc))))
+   OR (c.c = '514' AND x.VEH IS NOT NULL AND ro.vn IS NOT NULL AND t.hipdata_code IN ('UCS', 'WEL') AND h.chwpart = (SELECT CHW FROM hc))
    OR (c.c = '301' AND x.NEG IS NOT NULL)
    OR (c.c = '234' AND x.PRT = 1 AND dz.vn IS NULL)
    OR (c.c = '357' AND x.DEV IS NOT NULL AND t.hipdata_code IN ('UCS', 'WEL'))
@@ -511,6 +520,14 @@ const STP_INS = ["STP-R175", "STP-AUTH"];
 const STP_ADP = ["STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"];
 const STP_DX = ["STP-R191", "STP-R136", "STP-R116"];
 
+// C515: แถว ORF/IRF ที่ส่งออกต้องมี AER ของ SEQ/AN เดียวกันที่ REFMAINO = REFER (OREFTYPE มีค่าเสมอเมื่อมี REFMAINO) และ REFER ไม่ว่าง/ไม่ใช่ รพ. ตัวเอง
+// rows = แถวของแฟ้มส่งออก ; ที่ติดจริงคือ visit ที่ส่งต่อหลาย รพ. (AER มี REFMAINO ได้ค่าเดียว)
+const c515 = (file: string, rows: string, key: string) => `SELECT '515' AS c_code, '${file}' AS fdh_file, o.HN AS hn, o.AN AS an, o.SEQ AS seq, COALESCE(o.REFER, '') AS found
+FROM (${rows}) o LEFT JOIN referout rout ON rout.referout_id = ${refOut(`o.${key}`)}
+WHERE TRIM(COALESCE(o.REFER, '')) IN ('', ${HCODE}) OR rout.referout_id IS NULL OR COALESCE(rout.refer_hospcode, rout.hospcode, '') <> o.REFER`;
+const C515_OP = c515("ORF", `SELECT v.hn AS HN, '' AS AN, v.vn AS SEQ, COALESCE(ro.refer_hospcode, ro.hospcode) AS REFER FROM ${ORF_FROM}`, "SEQ");
+const C515_IP = c515("IRF", `SELECT a.HN, a.AN, '' AS SEQ, COALESCE(ro.refer_hospcode, ro.hospcode) AS REFER FROM a INNER JOIN referout ro ON ro.vn = a.AN WHERE ${REFOK("ro")}`, "AN");
+
 /** items = block อ่าน CTE ที่ scan opitemrece (ใช้ PREFIX_ITEMS และรันแยก statement ต่อแฟ้ม) */
 type Rule = { codes: string[]; sql: string; items?: true };
 const PAT_RULE: Rule = { codes: ["101", "102", "103", "104", "116"], sql: PAT_BLOCK };
@@ -522,7 +539,7 @@ export const RULES: Record<FdhType, Record<string, Rule>> = {
     OPD: { codes: ["105", "151", "179", "902", "998", "STP-R112"], sql: `${OPD_BLOCK}\nUNION ALL ${STP_OP_BLOCKS.OPD}` },
     INS: { codes: ["127", "305", "349", ...STP_INS], sql: `${insBlock("127")}\n${INS_OP_RULES}\nUNION ALL ${STP_OP_BLOCKS.INS}` },
     AER: { codes: ["STP-R111", "STP-R113"], sql: STP_OP_BLOCKS.AER },
-    ORF: { codes: ["STP-R113"], sql: STP_OP_BLOCKS.RF },
+    ORF: { codes: ["515", "STP-R113"], sql: `${C515_OP}\nUNION ALL ${STP_OP_BLOCKS.RF}` },
     OOP: {
       codes: ["952"],
       sql: `SELECT '952' AS c_code, 'OOP' AS fdh_file, v.hn AS hn, '' AS an, v.vn AS seq, ROUND(dop.price, 2) AS found
@@ -539,7 +556,7 @@ FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation 
     IPD: { codes: ["107", "109", "110", "111", "112", "114", "153", "120", "121", "151", "902", "998"], sql: IPD_BLOCK },
     INS: { codes: ["125", ...STP_INS], sql: `${insBlock("125")}\nUNION ALL ${STP_IP_BLOCKS.INS}` },
     AER: { codes: ["STP-R111", "STP-R113"], sql: STP_IP_BLOCKS.AER },
-    IRF: { codes: ["STP-R113"], sql: STP_IP_BLOCKS.RF },
+    IRF: { codes: ["515", "STP-R113"], sql: `${C515_IP}\nUNION ALL ${STP_IP_BLOCKS.RF}` },
     IDX: { codes: ["201", "202", "206", "232", "801", ...STP_DX], sql: `${dxBlock("IDX", IDX_206, "")}\nUNION ALL ${STP_IP_BLOCKS.DX}` },
     ADP: { codes: ["301", "312", "952", "914", "190", "309", ...STP_ADP], sql: `${ADP_IP_BLOCK}\nUNION ALL ${STP_IP_BLOCKS.ADP}`, items: true },
     DRU: { codes: ["301", "303", "952", "STP-R108"], sql: `${DRU_BLOCK}${DRU_IP_952}\nUNION ALL ${STP_IP_BLOCKS.DRU}`, items: true },

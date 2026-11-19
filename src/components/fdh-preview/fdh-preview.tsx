@@ -10,6 +10,7 @@ import { todayIso } from "@/lib/thai-date";
 import { cLabel, codeLevel, type Level } from "@/app/api/fdh/c-check/files";
 import { XLSX_MAX_BODY, XLSX_MAX_ROWS } from "@/app/api/fdh/files/txt";
 import type { CheckFinding, CheckResult } from "@/app/api/ipd/fdh-check/check";
+import { batchItems, type Channel } from "@/app/api/fdh/claim-batch/claim";
 import { chunkIds, mergeChecks, mergePreviews, type MergedPreview } from "./batch";
 // shortcut: btn/focusRing/Skeleton/LoadError ยังอยู่ในโมดูล fund ย้ายไป src/components พร้อมกันเมื่อจัดระเบียบ fund/_components/ui
 import { Skeleton, btn, focusRing } from "@/app/(app)/fund/_components/ui";
@@ -50,19 +51,38 @@ async function loadPreview(source: Source, onPart: (i: number, n: number) => voi
  * สร้าง zip ของ 16 แฟ้มใน browser จากข้อมูลที่แสดงอยู่ใน modal (ไม่อ่าน HOSxP ซ้ำ ไฟล์จึงตรงกับที่เห็น)
  * ใส่ทุกแฟ้มของชุด แฟ้มที่ไม่มีแถวเป็นหัวคอลัมน์บรรทัดเดียว ; jszip โหลดตอนกดเท่านั้น
  */
-async function downloadZip(entries: [path: string, data: string | Uint8Array][], filename: string) {
+async function downloadZip(entries: [path: string, data: string | Uint8Array][], filename: string): Promise<string | null> {
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const [path, text] of entries) zip.file(path, text);
-  const url = URL.createObjectURL(await zip.generateAsync({ type: "blob", compression: "DEFLATE" }));
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+  const url = URL.createObjectURL(blob);
   Object.assign(document.createElement("a"), { href: url, download: filename }).click();
   URL.revokeObjectURL(url);
+  // SHA-256 ของไฟล์ที่ดาวน์โหลด (เก็บในบันทึกชุดส่งออก) ; crypto.subtle มีเฉพาะ https/localhost
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  return [...new Uint8Array(await subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** บันทึกรายที่อยู่ในไฟล์เป็นหลักฐาน "ส่งออกแล้ว" ของคอลัมน์สถานะเคลม ; บันทึกไม่สำเร็จไม่กันการดาวน์โหลด คืนคำเตือนแทน */
+async function logBatch(channel: Channel, files: FdhPreview["files"], source: Source, sha: string | null): Promise<string | undefined> {
+  const type = source.idField === "ans" ? "IP" : "OP";
+  const items = batchItems(files, type);
+  if (!items.length) return;
+  try {
+    await postJson("/api/fdh/claim-batch", { channel, patient_type: type, file_sha256: sha, items });
+  } catch (e) {
+    return `ดาวน์โหลดแล้ว แต่บันทึกประวัติการส่งออกไม่สำเร็จ (${(e as Error).message}) สถานะเคลมจึงยังไม่ขึ้น "ส่งออกแล้ว"`;
+  }
 }
 
 /** zip รูปแบบ FDH: ทุกแฟ้มของชุด มีหัวคอลัมน์ */
-async function downloadFdh(files: FdhPreview["files"], n: number, prefix: string) {
+async function downloadFdh(files: FdhPreview["files"], source: Source) {
   const { toTxt } = await import("@/app/api/fdh/files/txt");
-  await downloadZip(files.map((f) => [`${f.file}.txt`, toTxt(f.columns, f.rows)]), `fdh-${prefix}-${todayIso()}-${n}.zip`);
+  const name = `fdh-${source.zipPrefix}-${todayIso()}-${source.ids.length}.zip`;
+  const sha = await downloadZip(files.map((f) => [`${f.file}.txt`, toTxt(f.columns, f.rows)]), name);
+  return logBatch("fdh", files, source, sha);
 }
 
 /**
@@ -77,9 +97,10 @@ async function downloadEclaim(files: FdhPreview["files"], source: Source, dbf = 
       hm.push(...(await postJson<{ rows: typeof hm }>(source.previewUrl, { [source.idField]: ids, format: "eclaim-hm" })).rows);
   const folders = toEclaim(files, dbf ? (await import("./dbf")).writeDbf : undefined, hm);
   const name = `eclaim-${dbf ? "dbf-" : ""}${source.zipPrefix}-${todayIso()}-${source.ids.length}.zip`;
-  await downloadZip(folders.flatMap((d) => d.files.map((f): [string, string | Uint8Array] => [`${d.name}/${f.name}`, f.data])), name);
+  const sha = await downloadZip(folders.flatMap((d) => d.files.map((f): [string, string | Uint8Array] => [`${d.name}/${f.name}`, f.data])), name);
   const big = folders.filter((d) => d.bytes > ECLAIM_MAX_BYTES).map((d) => `${d.name} ${(d.bytes / 1024 / 1024).toFixed(1)} MB`);
-  return big.length ? `เกิน 10 MB ต่อการนำเข้า: ${big.join(", ")} เลือกรายน้อยลงแล้วส่งออกหลายครั้ง` : undefined;
+  const logWarn = await logBatch(dbf ? "eclaim_dbf" : "eclaim_txt", files, source, sha);
+  return [big.length ? `เกิน 10 MB ต่อการนำเข้า: ${big.join(", ")} เลือกรายน้อยลงแล้วส่งออกหลายครั้ง` : "", logWarn].filter(Boolean).join(" ; ") || undefined;
 }
 
 /** ปุ่มส่งออก zip พร้อมป้ายเตือนว่ายังไม่ได้ทดสอบกับระบบปลายทาง (ไม่ส่ง target = ไม่มีป้าย) ; make คืนคำเตือนหลังสร้างไฟล์ (ถ้ามี) */
@@ -316,7 +337,7 @@ function PreviewContent({ files, allFiles, counts, file, onFile, source }: { fil
           <ZipButton
             target="FDH"
             label={`ส่งออก 16 แฟ้ม (.zip) ${formatCount(allFiles.length)} แฟ้ม`}
-            make={() => downloadFdh(allFiles, source.ids.length, source.zipPrefix)}
+            make={() => downloadFdh(allFiles, source)}
           />
           <ZipButton target="e-Claim" label="ส่งออก e-Claim (.zip)" make={() => downloadEclaim(allFiles, source)} />
           {/* ใช้ป้าย "ยังไม่ได้ทดสอบกับ e-Claim" ร่วมกับปุ่ม TEXT ข้างหน้า */}

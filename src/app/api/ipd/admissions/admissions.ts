@@ -2,6 +2,7 @@
 // ไม่มี import ค่า จึงใช้ได้ทั้ง route, หน้า (client) และ admissions.test.mjs
 import type { GridPage } from "@/lib/grid-query";
 import type { SubFund } from "@/app/api/admin/ar-funds/rules";
+import type { ClaimCounts, ClaimInfo } from "@/app/api/fdh/claim-batch/claim";
 
 /** กองทุนที่เบิกผ่าน REP e-Claim: ไม่พบ REP = "ยังไม่มี REP" ; กองทุนอื่นแสดงเฉพาะเมื่อพบ REP */
 export const REP_FUND = "UCS";
@@ -102,6 +103,8 @@ export type AdmissionRow = {
   overdue: boolean;
   /** กองทุนย่อยที่เข้าเกณฑ์ (ว่าง = ไม่เข้ากองทุนใด, undefined = โหลดไม่ได้) */
   subfunds?: SubFund[];
+  /** สถานะส่งเคลม (ไม่มี = กองทุนที่ไม่ต้องส่ง/ไม่มีลูกหนี้สิทธิและไม่มีหลักฐาน หรือโหลดไม่ได้) */
+  claim?: ClaimInfo;
 };
 
 export type AdmissionsPage = GridPage<AdmissionRow> & {
@@ -121,6 +124,10 @@ export type AdmissionsPage = GridPage<AdmissionRow> & {
   rep_error: boolean;
   /** โหลดกองทุนย่อยไม่ได้ */
   subfund_error: boolean;
+  /** โหลดสถานะเคลมไม่ได้ */
+  claim_error: boolean;
+  /** จำนวนรายของปุ่ม "ยังไม่ส่ง"/"เกินกำหนด" ของทั้งชุดที่ตรงตัวกรองอื่น null = โหลดไม่ได้ */
+  claim_counts: ClaimCounts | null;
 };
 
 const num = (v: number | string | null) => (v == null || v === "" ? null : Number(v));

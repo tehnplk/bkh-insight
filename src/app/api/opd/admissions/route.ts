@@ -15,6 +15,8 @@ import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-fund
 import type { RepCand } from "@/app/api/ipd/admissions/admissions";
 import { loadSrmCache } from "@/app/api/opd/right-check/cache";
 import { fromCache, srmFilterLabel, srmFilterValues, srmText } from "@/app/api/opd/right-check/srm";
+import { CLAIM_LABEL, claimCounts, claimText } from "@/app/api/fdh/claim-batch/claim";
+import { loadClaims, type ClaimCand } from "@/app/api/fdh/claim-batch/load";
 import { ADMIT_LABEL, OPD_MAX_DAYS, admitStatus, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
@@ -61,6 +63,9 @@ LEFT JOIN pttype t ON t.pttype = o.pttype
 LEFT JOIN kskdepartment k ON k.depcode = o.main_dep
 LEFT JOIN ovst_seq sq ON sq.vn = o.vn
 ${CLAIM_JOINS}`;
+// ผลส่ง FDH ของ HOSxP สำหรับสถานะเคลม (vn UNIQUE = eq_ref) ; ใส่เฉพาะ query รายการและผู้สมัครของตัวกรอง claim ไม่ใส่ใน FROM
+const FDH_JOIN = "LEFT JOIN fdh_claim_status fcs ON fcs.vn = o.vn";
+const FDH_COLS = "fcs.fdh_reservation_status AS fdh_resv, fcs.fdh_reservation_datetime AS fdh_resv_at, fcs.fdh_claim_status_message AS fdh_msg, fcs.fdh_claim_status_datetime AS fdh_msg_at";
 const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.vsttime,
        ${depSql("o")} AS dep_code, k.department AS dep_name,
        o.pttype, t.name AS pttype_name, vp.hospmain, vp.hospsub, vs.pdx, cd.name AS pdx_name, os.name AS ovst_status, os.export_code AS ovst_export, vs.income, vs.uc_money,
@@ -68,8 +73,9 @@ const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, 
        ${CLOSE_CODE_SQL} AS close_code,
        ${CLAIM_STATUS_SQL} AS claim_status,
        ${RCPT_SQL} AS rcpt_no,
-       NULLIF(o.an, '') AS an, ${OPD_LEFT_SQL} AS opd_left
-${FROM}`;
+       NULLIF(o.an, '') AS an, ${OPD_LEFT_SQL} AS opd_left, ${FDH_COLS}
+${FROM}
+${FDH_JOIN}`;
 
 // ตัวกรองหัวคอลัมน์: key = id คอลัมน์ของหน้า -> SQL ของค่า (allowlist) และชื่อที่แสดง
 // fund/ovst_status เป็นค่าที่คำนวณในโค้ด (pttype -> กองทุน, ovstost -> สถานะการจำหน่าย) จึงกรองผ่านรหัสต้นทาง
@@ -109,16 +115,16 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
     admit: { expr: ADMIT_SQL, labels: ADMIT_LABEL },
   };
 }
-// rep (สถานะ REP) และ srm_status (ผลตรวจสิทธิ srm_right_check) อยู่ insight ส่วน subfund (กองทุนย่อย) คำนวณในโค้ด
+// rep (สถานะ REP), srm_status (ผลตรวจสิทธิ srm_right_check) และ claim (สถานะเคลม) ใช้ข้อมูล insight ส่วน subfund (กองทุนย่อย) คำนวณในโค้ด
 // จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย VN ที่ตรง
-const KEY_FILTERS = ["rep", "subfund", "srm_status"] as const;
+const KEY_FILTERS = ["rep", "subfund", "srm_status", "claim"] as const;
 const FILTERABLE = ["vn", "hn", "patient_name", "fund", "hospmain", "pttype_name", "codes", "vstdate", "vsttime", "dep_name", "pdx", "ovst_status", "rcpt_no", "admit", ...KEY_FILTERS] as const;
 type FilterKey = (typeof FILTERABLE)[number];
 
 // REP ล่าสุดต่อ VN (seq_no = ovst.vn) ตรวจกับฐานจริงแล้ว: ใช้ rep_row_seq_no_idx, 30,000 VN ราว 0.3 วินาที
 const REP_SQL = latestRepSql("seq_no", "vn", "OP");
 
-type XlsxRow = VisitRow & Record<"admit_label" | "rep_no" | "rep_label" | "subfund_label" | "srm_right" | "srm_hcode" | "srm_status", string>;
+type XlsxRow = VisitRow & Record<"admit_label" | "rep_no" | "rep_label" | "claim_label" | "subfund_label" | "srm_right" | "srm_hcode" | "srm_status", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "vn", header: "VN", width: 14 },
   { key: "admit_label", header: "สถานะ Admit", width: 30 },
@@ -139,6 +145,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "pdx_name", header: "ชื่อโรคหลัก", width: 36 },
   { key: "ovst_status", header: "สถานะผู้ป่วย", width: 18 },
   { key: "rcpt_no", header: "เลขที่ใบเสร็จ", width: 16 },
+  { key: "claim_label", header: "สถานะเคลม", width: 30 },
   { key: "rep_no", header: "เลขที่ REP", width: 14 },
   { key: "rep_label", header: "สถานะ REP", width: 24 },
   { key: "subfund_label", header: "กองทุนย่อย", width: 36 },
@@ -147,6 +154,13 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
 ];
 
 /** Excel: คอลัมน์ "สถานะ Admit" (ในหน้าเป็นป้ายใต้ VN) ไม่ admit = ว่าง */
+type ClaimRaw = Pick<RawVisit, "pttype" | "vstdate" | "uc_money" | "claim_status" | "fdh_resv" | "fdh_resv_at" | "fdh_msg" | "fdh_msg_at">;
+/** ผู้สมัครของสถานะเคลม: OP ปิดสิทธิแล้ว = claim_status closed (OFC = มี Approval Code) */
+const claimCand = (k: string, r: ClaimRaw, fund: string): ClaimCand => ({
+  k, fund, date: r.vstdate, amount: Number(r.uc_money ?? 0), closed: r.claim_status === "closed",
+  fdh: { resv: r.fdh_resv, resv_at: r.fdh_resv_at, msg: r.fdh_msg, msg_at: r.fdh_msg_at },
+});
+
 function admitText(r: VisitRow): string {
   const s = admitStatus(r);
   if (s === "none") return "";
@@ -193,6 +207,9 @@ export async function GET(request: NextRequest) {
     let repVns: string[] | null = null;
     let subVns: string[] | null = null;
     let srmVns: string[] | null = null;
+    let claimVns: string[] | null = null;
+    /** ค่าตัวกรอง claim ของทุก visit ที่ผ่านตัวกรองอื่น (มีเมื่อใช้ตัวกรอง claim) ใช้นับปุ่มในแถบสรุปด้วย */
+    const claimVals: { vals: { k: string; v: string }[] | null } = { vals: null };
 
     /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet ของคอลัมน์นั้น) */
     const whereFor = (except: FilterKey | null) => {
@@ -215,12 +232,12 @@ export async function GET(request: NextRequest) {
         args.push(like, like, like);
       }
       if (unclosed) parts.push(`${CLOSE_CODE_SQL} IS NULL`);
-      for (const [key, vns] of [["rep", repVns], ["subfund", subVns], ["srm_status", srmVns]] as const)
+      for (const [key, vns] of [["rep", repVns], ["subfund", subVns], ["srm_status", srmVns], ["claim", claimVns]] as const)
         if (vns && except !== key) {
           parts.push(vns.length ? inList("o.vn", vns.length) : "1 = 0");
           args.push(...vns);
         }
-      const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined, srm_status: undefined }, except);
+      const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined, srm_status: undefined, claim: undefined }, except);
       return { sql: `WHERE ${[...parts, ...cfw.parts].join("\n  AND ")}`, params: [...args, ...cfw.params] };
     };
 
@@ -254,6 +271,18 @@ export async function GET(request: NextRequest) {
         if (facet === "srm_status") return facetRows(vals, (r) => r.v, facetQ, srmFilterLabel);
         const sel = new Set(filters.srm_status);
         srmVns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
+      },
+      // สถานะเคลม: 31 วันราว 18,000 VN (his ~1.3 วินาที + insight ~0.6 วินาที) จึงคำนวณเฉพาะเมื่อใช้ตัวกรองนี้
+      claim: async () => {
+        const w = whereFor("claim");
+        const cands = await hisQuery<ClaimRaw & { k: string }>(
+          `SELECT o.vn AS k, o.pttype, o.vstdate, vs.uc_money, ${CLAIM_STATUS_SQL} AS claim_status, ${FDH_COLS} ${FROM}\n${FDH_JOIN}\n${w.sql}`, w.params);
+        const claims = await loadClaims("OP", cands.map((c) => claimCand(c.k, c, toFund(c.pttype))), REP_SQL, "vn");
+        const vals = cands.map((c) => ({ k: c.k, v: claims.get(c.k)?.status ?? "" }));
+        if (facet === "claim") return facetRows(vals, (r) => r.v, facetQ, (v) => CLAIM_LABEL[v as keyof typeof CLAIM_LABEL] ?? v);
+        claimVals.vals = vals;
+        const sel = new Set(filters.claim);
+        claimVns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
       },
     };
     for (const key of [...KEY_FILTERS.filter((k) => k !== facet), ...KEY_FILTERS.filter((k) => k === facet)])
@@ -293,10 +322,21 @@ export async function GET(request: NextRequest) {
       console.error("opd/admissions srm", e instanceof Error ? e.message : e);
       return undefined;
     });
-    const rows = buildRows(raws, reps, toFund).map((r) => {
+    const built = buildRows(raws, reps, toFund);
+    // สถานะเคลม: ใช้ REP ที่โหลดแล้ว ; อ่าน insight ไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
+    const claims = await loadClaims(
+      "OP", raws.map((r, i) => claimCand(r.vn, r, built[i].fund)), REP_SQL, "vn",
+      // REP โหลดไม่ได้ = ให้ loadClaims อ่านเอง (ไม่งั้นรายที่มี REP จะขึ้นยังไม่ส่ง)
+      reps && new Map(built.flatMap((r) => (r.rep ? [[r.vn, r.rep] as const] : []))),
+    ).catch((e) => {
+      console.error("opd/admissions claim", e);
+      return undefined;
+    });
+    const rows = built.map((r) => {
       const c = rights?.get(r.hn);
       const his = { vn: r.vn, hn: r.hn, name: r.patient_name, fund: r.fund, pttype_name: r.pttype_name, hospmain: r.hospmain, hospsub: r.hospsub };
-      return { ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []), ...(c && { right: fromCache(his, c) }) };
+      const claim = claims?.get(r.vn);
+      return { ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []), ...(c && { right: fromCache(his, c) }), ...(claim && { claim }) };
     });
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
@@ -304,12 +344,16 @@ export async function GET(request: NextRequest) {
         admit_label: admitText(r),
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
+        claim_label: claimText(r.claim),
         subfund_label: subfundText(r.subfunds),
         ...srmText(r.right),
       }));
       return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }
-    const body: VisitsPage = { rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError, subfund_error: !subfunds };
+    const body: VisitsPage = {
+      rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError, subfund_error: !subfunds, claim_error: !claims,
+      ...(claimVals.vals && { claim_counts: claimCounts(claimVals.vals) }),
+    };
     return Response.json(body);
   } catch (e) {
     console.error("opd/admissions", e);

@@ -12,6 +12,8 @@ import {
 import { REP_FILTER_LABEL, latestRepSql, loadRepFilterValues, repLabel } from "@/app/api/fund/_lib/rep";
 import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
+import { CLAIM_LABEL, claimCounts, claimText } from "@/app/api/fdh/claim-batch/claim";
+import { loadClaims, type ClaimCand } from "@/app/api/fdh/claim-batch/load";
 import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
@@ -99,11 +101,21 @@ function filterDefs(lk: Lookups): ColumnFilterDefs {
 }
 const FILTERABLE = [
   "an", "hn", "patient_name", "fund", "pttype_name", "codes", "regdate", "dchdate", "dchstts_name", "dch_reason", "ward_name",
-  "los_days", "days_since_dch", "ipt_summary_status_id", "pdx", "drg", "finance_lock", "rep", "subfund",
+  "los_days", "days_since_dch", "ipt_summary_status_id", "pdx", "drg", "finance_lock", "rep", "subfund", "claim",
 ] as const;
 type FilterKey = (typeof FILTERABLE)[number];
+/** ตัวกรองที่จัดค่าในโค้ดแล้วกรองด้วย AN ที่ตรง (ไม่อยู่ใน filterDefs) */
+const KEY_FILTERS = ["rep", "subfund", "claim"] as const;
+const KEY_LABEL = { rep: "สถานะ REP", subfund: "กองทุนย่อย", claim: "สถานะเคลม" } as const;
 
-type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "rep_no" | "rep_label" | "subfund_label", string>;
+/** ผู้สมัครของสถานะเคลม: IP ปิดสิทธิแล้ว = ปิดสิทธิการเงิน (finance_lock) ; fdh_claim_status ไม่ใช้กับผู้ป่วยใน */
+type ClaimRaw = { k: string; pttype: string | null; dchdate: string | null; uc_money: number | string | null; finance_lock: string | null };
+const CLAIM_CAND_SQL = "SELECT i.an AS k, i.pttype, i.dchdate, s.uc_money, i.finance_lock";
+const claimCand = (r: ClaimRaw, fund: string): ClaimCand => ({
+  k: r.k, fund, date: r.dchdate, amount: Number(r.uc_money ?? 0), closed: r.finance_lock === "Y",
+});
+
+type XlsxRow = AdmissionRow & Record<"fund_label" | "finance_lock_label" | "claim_label" | "rep_no" | "rep_label" | "subfund_label", string>;
 const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "an", header: "AN", width: 12 },
   { key: "hn", header: "HN", width: 10 },
@@ -127,6 +139,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "adjrw", header: "AdjRW", width: 8 },
   { key: "adjrw_amount", header: "ยอดคำนวณเงิน (บาท)", width: 14, type: "money" },
   { key: "finance_lock_label", header: "ปิดสิทธิการเงิน", width: 12 },
+  { key: "claim_label", header: "สถานะเคลม", width: 30 },
   { key: "rep_no", header: "เลขที่ REP", width: 14 },
   { key: "rep_label", header: "สถานะ REP", width: 24 },
   { key: "subfund_label", header: "กองทุนย่อย", width: 36 },
@@ -165,12 +178,15 @@ export async function GET(request: NextRequest) {
   /** AN ที่สถานะ REP / กองทุนย่อย ตรงตัวกรองหัวคอลัมน์ rep / subfund (null = ไม่กรอง) */
   let repAns: string[] | null = null;
   let subAns: string[] | null = null;
+  let claimAns: string[] | null = null;
+  /** ค่าตัวกรอง claim ของทุก AN ที่ผ่านตัวกรองอื่น ใช้ทั้งตัวกรองและจำนวนในแถบสรุป */
+  const claimVals: { vals: { k: string; v: string }[] | null } = { vals: null };
   /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet) */
   const whereFor = (except: FilterKey | null) => {
     const like = `%${escapeLike(q)}%`;
     const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${dx ? ` AND EXISTS (SELECT 1 FROM iptdiag dg WHERE dg.an = i.an AND ${dx.sql})` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
-    const lists = ([["rep", repAns], ["subfund", subAns]] as const).filter(([k, v]) => v && except !== k).map(([, v]) => v as string[]);
-    const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined }, except);
+    const lists = ([["rep", repAns], ["subfund", subAns], ["claim", claimAns]] as const).filter(([k, v]) => v && except !== k).map(([, v]) => v as string[]);
+    const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined, claim: undefined }, except);
     const parts = [...lists.map((l) => (l.length ? inList("i.an", l.length) : "1 = 0")), ...cfw.parts];
     const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...lists.flat(), ...cfw.params];
     return { sql: parts.length ? `${base}\n  AND ${parts.join("\n  AND ")}` : base, params };
@@ -193,15 +209,29 @@ export async function GET(request: NextRequest) {
       const sel = new Set(filters.subfund);
       subAns = [...new Set(vals.filter((r) => sel.has(r.v)).map((r) => r.k))];
     },
+    claim: async () => {
+      const vals = await loadClaimVals();
+      if (facet === "claim") return facetRows(vals, (r) => r.v, facetQ, (v) => CLAIM_LABEL[v as keyof typeof CLAIM_LABEL] ?? v);
+      const sel = new Set(filters.claim);
+      claimAns = vals.filter((r) => sel.has(r.v)).map((r) => r.k);
+    },
   };
-  for (const key of facet === "rep" ? (["subfund", "rep"] as const) : (["rep", "subfund"] as const))
+  /** สถานะเคลมของทุก AN ที่ผ่านตัวกรองอื่น (90 วันราว 2,400 AN) */
+  const loadClaimVals = async () => {
+    const w = whereFor("claim");
+    const cands = await hisQuery<ClaimRaw>(`${CLAIM_CAND_SQL} ${FROM}\n${w.sql}`, w.params);
+    const claims = await loadClaims("IP", cands.map((c) => claimCand(c, toFund(c.pttype))), REP_SQL, "an");
+    return (claimVals.vals = cands.map((c) => ({ k: c.k, v: claims.get(c.k)?.status ?? "" })));
+  };
+  // ตัวที่เป็น facet ทำทีหลังสุด จึงได้ค่าตามตัวกรองตัวอื่นด้วย
+  for (const key of [...KEY_FILTERS.filter((k) => k !== facet), ...KEY_FILTERS.filter((k) => k === facet)])
     if (filters[key] || facet === key) {
       try {
         const page = await keyFilters[key]();
         if (page) return Response.json(page);
       } catch (e) {
         console.error(`ipd/admissions ${key} filter`, e);
-        return Response.json({ error: `อ่าน${key === "rep" ? "สถานะ REP" : "กองทุนย่อย"}ไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
+        return Response.json({ error: `อ่าน${KEY_LABEL[key]}ไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
       }
     }
   if (facet) {
@@ -225,6 +255,13 @@ export async function GET(request: NextRequest) {
           console.error("ipd/admissions rep_sent", e);
           return null;
         });
+  // ปุ่ม "ยังไม่ส่ง"/"เกินกำหนด" นับทั้งชุดที่ตรงตัวกรองอื่น (ใช้ผลของตัวกรอง claim ถ้าคำนวณแล้ว) ; อ่านไม่ได้ = null
+  const claimCount = xlsx
+    ? null
+    : (claimVals.vals ? Promise.resolve(claimVals.vals) : loadClaimVals()).then(claimCounts).catch((e) => {
+        console.error("ipd/admissions claim_counts", e);
+        return null;
+      });
   try {
     const [raws, count] = await Promise.all([
       hisQuery<RawAdmission>(`${SELECT}\n${where}\nORDER BY ${order}\nLIMIT ? OFFSET ?`, [todayIso(), ...whereParams, limit, offset]),
@@ -249,13 +286,27 @@ export async function GET(request: NextRequest) {
       console.error("ipd/admissions subfund", e);
       return undefined;
     });
-    const rows = buildRows(raws, reps, toFund).map((r) => ({ ...r, subfunds: subfunds && (subfunds.get(r.an) ?? []) }));
+    const built = buildRows(raws, reps, toFund);
+    // สถานะเคลม: ใช้ REP ที่โหลดแล้ว ; อ่าน insight ไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
+    const claims = await loadClaims(
+      "IP", raws.map((r, i) => claimCand({ ...r, k: r.an }, built[i].fund)), REP_SQL, "an",
+      // REP โหลดไม่ได้ = ให้ loadClaims อ่านเอง (ไม่งั้นรายที่มี REP จะขึ้นยังไม่ส่ง)
+      reps && new Map(built.flatMap((r) => (r.rep ? [[r.an, r.rep] as const] : []))),
+    ).catch((e) => {
+      console.error("ipd/admissions claim", e);
+      return undefined;
+    });
+    const rows = built.map((r) => {
+      const claim = claims?.get(r.an);
+      return { ...r, subfunds: subfunds && (subfunds.get(r.an) ?? []), ...(claim && { claim }) };
+    });
 
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
         ...r,
         fund_label: r.fund,
         finance_lock_label: r.finance_lock ? "ปิดแล้ว" : "ยังไม่ปิด",
+        claim_label: claimText(r.claim),
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
         subfund_label: subfundText(r.subfunds),
@@ -276,6 +327,8 @@ export async function GET(request: NextRequest) {
       rep_sent: await repSent,
       rep_error: repError,
       subfund_error: !subfunds,
+      claim_error: !claims,
+      claim_counts: await claimCount,
     };
     return Response.json(body);
   } catch (e) {

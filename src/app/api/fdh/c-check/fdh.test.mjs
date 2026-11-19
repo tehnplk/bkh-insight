@@ -84,12 +84,14 @@ test("ruleCodes match the codes written in each block, C160/C161 and dropped cod
   // กฎ STP ทุกตัวมีคำอธิบาย/วิธีแก้ และทุกคำอธิบายมีกฎ
   assert.deepEqual(stp.sort(), Object.keys(STP_RULES).sort());
   assert.ok(!ruleSummarySql("ip").includes("STP-R112"), "R112 เป็นกฎ OP เท่านั้น");
-  for (const c of ["160", "161", "106", "108", "115", "117", "438", "515"]) assert.ok(!all.has(c), c);
+  for (const c of ["160", "161", "106", "108", "115", "117", "438"]) assert.ok(!all.has(c), c);
   assert.deepEqual(ruleCodes("op", "INS"), ["127", "305", "349", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("ip", "INS"), ["125", "STP-R175", "STP-AUTH"]);
   assert.deepEqual(ruleCodes("op", "CHA"), ["302", "555"]);
   assert.deepEqual(ruleCodes("op", "ADP"), ["171", "514", "301", "234", "357", "634", "756", "190", "309", "914", "STP-R108", "STP-R188", "STP-R292", "STP-R180", "STP-R194"]);
-  assert.deepEqual(ruleCodes("op", "ORF"), ["STP-R113"]);
+  assert.deepEqual(ruleCodes("op", "ORF"), ["515", "STP-R113"]);
+  assert.deepEqual(ruleCodes("ip", "IRF"), ["515", "STP-R113"]);
+  assert.equal(codeLevel("515"), "error");
   assert.deepEqual(ruleCodes("op", "DRU"), ["301", "303", "565", "STP-R108"]);
   assert.ok(!ruleCodes("ip", "DRU").includes("565"), "C565 เป็นกฎ OP เท่านั้น");
   assert.equal(codeLevel("565"), "warn");
@@ -200,4 +202,31 @@ test("ODX/IDX: FDH DIAG unchanged; e-Claim ec_diag mapped via icd10_nhso with LE
     assert.ok(sql.includes(`LEFT JOIN icd10_nhso n5 ON n5.code = ${c} LEFT JOIN icd10_nhso n4 ON n4.code = LEFT(${c}, 4)`), f);
     assert.ok(!fileColumns(t, f).includes("ec_diag"), f);
   }
+});
+
+test("C515: ORF/IRF drop rows without a destination, AER has one row per visit/AN from ER or refer, rule/count/export share the refer formulas", async () => {
+  const { exportSql, ipAnExportSql } = await import("../files/sql.ts");
+  const refOk = (x) => `TRIM(COALESCE(${x}.refer_hospcode, ${x}.hospcode, '')) NOT IN ('', (SELECT hospitalcode FROM opdconfig LIMIT 1))`;
+  const refOut = (k) => `(SELECT MAX(r.referout_id) FROM referout r WHERE r.vn = ${k} AND ${refOk("r")})`;
+  const orfFrom = `p JOIN ovst v FORCE INDEX (ix_vstdate) ON v.vstdate BETWEEN p.s AND p.e INNER JOIN referout ro ON ro.vn = v.vn`;
+  // ORF ยึดวันรับบริการ (SEQ ชุดเดียวกับ OPD/AER) ไม่ใช่ refer_date
+  const orf = exportSql("op", "ORF");
+  assert.ok(orf.includes(`FROM ${orfFrom}`) && orf.includes(`AND ${refOk("ro")}`) && !orf.includes("ro.refer_date BETWEEN"));
+  assert.ok(countDef("op", "ORF").sql.includes(`${orfFrom} WHERE (v.an IS NULL OR v.an = '') AND ${refOk("ro")}`));
+  assert.ok(ruleSummarySql("op", "ORF").includes(`${orfFrom} WHERE (v.an IS NULL OR v.an = '') AND ${refOk("ro")}`));
+  for (const s of [exportSql("ip", "IRF"), countDef("ip", "IRF").sql, ruleSummarySql("ip", "IRF")]) assert.ok(s.includes(refOk("ro")), s.slice(0, 80));
+  // AER: referout ล่าสุดที่มีปลายทาง (OP ด้วย VN, IP ด้วย AN) และ referin ของ visit ; ไม่ผูกกับ er_regist อย่างเดียว
+  for (const [t, k] of [["op", "v.vn"], ["ip", "a.an"]]) {
+    const aer = exportSql(t, "AER");
+    assert.ok(aer.includes(`LEFT JOIN referout rout ON rout.referout_id = ${refOut(k)}`), t);
+    assert.ok(aer.includes("LEFT JOIN er_regist er ON er.vn = v.vn") && aer.includes(`LEFT JOIN referin rin ON rin.vn = v.vn AND ${refOk("rin")}`), t);
+    assert.ok(aer.includes("(er.vn IS NOT NULL OR rin.vn IS NOT NULL OR rout.referout_id IS NOT NULL)") && !aer.includes("JOIN er_regist er ON er.vstdate"), t);
+    assert.ok(countDef(t, "AER").sql.includes(`EXISTS (SELECT 1 FROM referout r WHERE r.vn = ${k} AND ${refOk("r")})`), t);
+    assert.ok(ruleSummarySql(t, t === "op" ? "ORF" : "IRF").includes(refOut(`o.${t === "op" ? "SEQ" : "AN"}`)), t);
+  }
+  // NOT_OPD ต้องอยู่ในวงเล็บเมื่อมี AND ต่อ
+  assert.ok(exportSql("op", "AER").includes("WHERE (v.an IS NULL OR v.an = '') AND"));
+  assert.ok(ipAnExportSql("AER", 2).includes("a.an IN (?, ?)"));
+  // C514 ไม่มี arm noAER แล้ว (AER มีทุก visit ที่ส่งต่อ)
+  assert.ok(!ruleSummarySql("op", "ADP").includes("noAER") && !ruleSummarySql("op", "ADP").includes("er.vn IS NULL"));
 });

@@ -16,7 +16,7 @@ export type OpFile = (typeof FILE_ORDER.op)[number];
 export type IpFile = (typeof FILE_ORDER.ip)[number];
 
 /** จำนวนรหัส C ที่มีกฎตรวจ (ทุกหมวดรวมกันไม่ซ้ำ ไม่นับกฎ STP) ต้องตรงกับ checks.ts (ตรวจใน fdh.test.mjs) */
-export const RULE_CODE_COUNT = 45;
+export const RULE_CODE_COUNT = 46;
 
 /** ระดับของกฎ: error = ติด C แน่ ; warn = อาจถูกตีกลับ ; info = ยังไม่ยืนยันว่ากองทุนตรวจ (ไม่นับเป็นติด C) */
 export type Level = "error" | "warn" | "info";
