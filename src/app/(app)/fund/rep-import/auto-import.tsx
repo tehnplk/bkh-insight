@@ -269,7 +269,7 @@ export function AutoImport() {
               )}
             </div>
             <p className="text-muted">
-              ใช้แท็บ e-Claim ที่ login ThaiD ไว้ใน Chrome นี้ · STM OFC อ่าน zone/จังหวัดจากหน้า Statement OFC ที่เปิดค้างในแท็บนั้น ·
+              ใช้แท็บ e-Claim ที่ login ThaiD ไว้ใน Chrome นี้ ·
               extension เวอร์ชัน <span className="tabular-nums">{extVersion}</span>
             </p>
             {outdated && (

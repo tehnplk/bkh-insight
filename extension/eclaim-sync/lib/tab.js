@@ -56,10 +56,32 @@ export function releaseFile() {
   return {};
 }
 
-/** zone/จังหวัดที่เลือกอยู่ในหน้า Statement OFC ที่เปิดค้างไว้ (ไม่มีคืน null) */
-export function ofcSelect() {
-  const v = (s) => document.querySelector(s)?.value || null;
-  return { zone: v('select[name="zone"], #zone'), province: v('select[name="province_id"], select[name="province"], #province_id, #province') };
+/**
+ * zone/จังหวัดของหน่วยบริการจากหน้า Statement OFC: fetch หน้าเองในแท็บ (ไม่ต้องเปิดค้าง) อ่านไม่ได้จึงใช้หน้าที่เปิดอยู่ ไม่พบคืน null
+ * หน้าจริงมี input hidden zone/province_id และ select ที่ล็อกไว้ตัวเลือกเดียว
+ */
+export async function ofcSelect() {
+  const pick = (doc, name) => {
+    for (const el of doc.querySelectorAll(`[name="${name}"]`)) {
+      if (el.tagName !== "SELECT") {
+        if (el.value) return el.value;
+        continue;
+      }
+      const opts = [...el.options].filter((o) => o.value);
+      const o = opts.find((x) => x.hasAttribute("selected")) ?? (opts.length === 1 ? opts[0] : null);
+      if (o) return o.value;
+    }
+    return null;
+  };
+  const read = (doc) => ({ zone: pick(doc, "zone"), province: pick(doc, "province_id") });
+  try {
+    const res = await fetch("/webComponent/nch/StatementReportWebAction.do");
+    const r = res.ok && read(new DOMParser().parseFromString(await res.text(), "text/html"));
+    if (r?.zone && r.province) return r;
+  } catch {
+    // ใช้หน้าที่เปิดอยู่แทน
+  }
+  return read(document);
 }
 
 // ---------- แท็บ/หน้า BKH Insight (ใช้ session ของแอป) ----------
