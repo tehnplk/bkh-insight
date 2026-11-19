@@ -69,7 +69,8 @@ function useKeptJson<T>(url: string) {
   };
 }
 
-/** ward จริง (นับเตียง) แยกจาก Home ward ที่ผู้ป่วยเกินจำนวน "เตียง" ได้ */
+/** ward จริง (ครองเตียง รวม ward แพทย์แผนไทยที่นอนเตียงของ ward อื่น) แยกจาก Home ward ที่ผู้ป่วยเกินจำนวน "เตียง" ได้
+ *  ตัวหารคือเตียงตามกรอบ ไม่ได้ตั้งจึงใช้ผลรวม ward.bedcount ของ HOSxP (รวมเตียงเสริม/แทรก จึงสูงเกินจริง) */
 function census(data: HomeOverviewResponse) {
   const wards = data.wards.filter((w) => !w.homeCare);
   const home = data.wards.filter((w) => w.homeCare);
@@ -77,7 +78,7 @@ function census(data: HomeOverviewResponse) {
     wards,
     home,
     occupied: wards.reduce((s, w) => s + w.admitted, 0),
-    beds: wards.reduce((s, w) => s + w.beds, 0),
+    beds: data.licensedBeds ?? wards.reduce((s, w) => s + w.beds, 0),
   };
 }
 
@@ -232,36 +233,30 @@ function Census({ data }: { data: HomeOverviewResponse }) {
         }
       />
       <table className="mt-4 w-full border-collapse text-sm tabular-nums">
-        <caption className="sr-only">ผู้ป่วยในขณะนี้ จำนวนเตียง และอัตราครองเตียงตามหอผู้ป่วย</caption>
+        <caption className="sr-only">ผู้ป่วยในขณะนี้ตามหอผู้ป่วย</caption>
         <thead className="text-xs text-muted">
           <tr>
             <th scope="col" className="pb-1.5 text-left font-medium">หอผู้ป่วย</th>
             <th scope="col" className="pb-1.5 pl-3 text-right font-medium whitespace-nowrap">คน</th>
-            <th scope="col" className="pb-1.5 pl-3 text-right font-medium whitespace-nowrap">เตียง</th>
-            <th scope="col" className="pb-1.5 pl-3 text-right font-medium whitespace-nowrap">ครองเตียง</th>
+            <th scope="col" className="pb-1.5 pl-3 text-right font-medium whitespace-nowrap">สัดส่วน</th>
           </tr>
         </thead>
         <tbody>
-          {wards.map((w, i) => {
-            const pct = w.beds > 0 ? (w.admitted / w.beds) * 100 : null;
-            return (
-              <tr key={w.code} className="border-t border-line">
-                <th scope="row" className="w-full max-w-0 py-1.5 text-left font-normal">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(${wardColor(i)})` }} />
-                    <span className="truncate" title={w.name}>
-                      {w.name}
-                    </span>
+          {/* ไม่แสดงเตียง/ครองเตียงราย ward: ward.bedcount ของ HOSxP รวมเตียงเสริม และผู้ป่วยแพทย์แผนไทยนอนเตียงของ ward อื่น */}
+          {wards.map((w, i) => (
+            <tr key={w.code} className="border-t border-line">
+              <th scope="row" className="w-full max-w-0 py-1.5 text-left font-normal">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(${wardColor(i)})` }} />
+                  <span className="truncate" title={w.name}>
+                    {w.name}
                   </span>
-                </th>
-                <td className={`py-1.5 pl-3 text-right ${w.admitted ? "font-medium" : "text-muted"}`}>{formatCount(w.admitted)}</td>
-                <td className="py-1.5 pl-3 text-right text-muted">{formatCount(w.beds)}</td>
-                <td className={`py-1.5 pl-3 text-right ${pct !== null && pct >= OCCUPANCY_WARN ? "font-medium text-warning" : "text-muted"}`}>
-                  {pct === null ? "–" : pctText(pct)}
-                </td>
-              </tr>
-            );
-          })}
+                </span>
+              </th>
+              <td className={`py-1.5 pl-3 text-right ${w.admitted ? "font-medium" : "text-muted"}`}>{formatCount(w.admitted)}</td>
+              <td className="py-1.5 pl-3 text-right text-muted">{share(w.admitted, occupied)}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </Card>

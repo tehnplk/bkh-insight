@@ -30,6 +30,8 @@ export type HomeOverviewResponse = {
   pyramid: { male: number[]; female: number[]; unknownSex: number };
   /** ผู้ป่วยในที่ยังไม่จำหน่าย ณ ตอนนี้ (ไม่ขึ้นกับช่วงวันที่) */
   wards: { code: string; name: string; beds: number; admitted: number; homeCare: boolean }[];
+  /** เตียงตามกรอบของโรงพยาบาล (env `HOSPITAL_BEDS`) ตัวหารอัตราครองเตียง ; null = ไม่ได้ตั้ง ใช้ผลรวม ward.bedcount แทน */
+  licensedBeds: number | null;
   /** ภาวะทุพโภชนาการ (E40–E46) ของผู้ป่วยในที่จำหน่ายในช่วง */
   malnutrition: Malnutrition;
 };

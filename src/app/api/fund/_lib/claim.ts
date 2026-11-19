@@ -1,4 +1,5 @@
 import "server-only";
+import { fundSql } from "./fund";
 
 // สถานะการเคลมต่อ visit (prove-query ผ่านแล้ว) ต้องมี alias: o = ovst, c = nhso_confirm_privilege, vp = visit_pttype
 // ปิดสิทธิ = ยืนยันกับ สปสช. แล้วไม่ถูกยกเลิก หรือไม่มี confirm แต่ auth_code เป็น EP
@@ -18,3 +19,13 @@ export const VISIT_AMOUNT_JOIN = `LEFT JOIN (
     SELECT vn, SUM(sum_price) AS amt FROM opitemrece FORCE INDEX (ix_vstdate)
     WHERE vstdate BETWEEN ? AND ? AND vn IS NOT NULL GROUP BY vn
   ) x ON x.vn = o.vn`;
+
+// OFC ผู้ป่วยนอก: ปิดสิทธิ = มี Approval Code EDC ตัวล่าสุด (ตัวท้ายของ ovst_seq.edc_approve_list_text) ไม่ fallback (สูตรเดียวกับ PERMITNO ของ fdh/files/sql.ts)
+// ต้องมี alias: t = pttype, sq = ovst_seq
+export const IS_OFC_SQL = `${fundSql("t")} = 'OFC'`;
+export const APPROVE_CODE_SQL = `NULLIF(SUBSTRING_INDEX(sq.edc_approve_list_text, ',', -1), '')`;
+/** ปิดสิทธิแล้ว (1/0) = claim_status 'closed' ของ /opd/admissions ใช้เป็น closed ของสถานะเคลม (loadClaims) */
+export const OP_CLOSED_SQL = `IF(${IS_OFC_SQL}, ${APPROVE_CODE_SQL} IS NOT NULL, ${CLOSED_SQL})`;
+// ผลส่ง FDH ของ HOSxP สำหรับสถานะเคลม (vn UNIQUE = eq_ref) ชื่อคอลัมน์ตรงกับ FdhStatus ของ claim-batch/claim.ts หลังตัด fdh_
+export const FDH_JOIN = "LEFT JOIN fdh_claim_status fcs ON fcs.vn = o.vn";
+export const FDH_COLS = "fcs.fdh_reservation_status AS fdh_resv, fcs.fdh_reservation_datetime AS fdh_resv_at, fcs.fdh_claim_status_message AS fdh_msg, fcs.fdh_claim_status_datetime AS fdh_msg_at";
