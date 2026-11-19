@@ -7,6 +7,11 @@ import type { SubFund } from "@/app/api/admin/ar-funds/rules";
 export const REP_FUND = "UCS";
 /** หลังจำหน่ายเกินจำนวนวันนี้และยังไม่มี REP = ตัวชี้ให้ตาม ไม่ได้แปลว่าผิด */
 export const OVERDUE_DAYS = 30;
+/** PDx ว่างหลังจำหน่ายไม่เกินจำนวนวันนี้ยังอยู่ในช่วงสรุปชาร์ต เกินแล้ว = ขาด */
+export const PDX_SUMMARY_DAYS = 7;
+/** PDx ว่าง: "pending" = จำหน่ายแล้ว 0–7 วัน (รอสรุป), "late" = เกิน 7 วันหรือไม่มีวันจำหน่าย (ขาด) */
+export const pdxMissing = (daysSinceDch: number | null) =>
+  daysSinceDch != null && daysSinceDch <= PDX_SUMMARY_DAYS ? "pending" : "late";
 
 /**
  * อัตราบาทต่อ AdjRW ตามวันจำหน่าย (ผู้ใช้กำหนด 13 พ.ย. 2569) เรียงจากใหม่ไปเก่า ใช้ตัวแรกที่ dchdate >= from
@@ -29,6 +34,7 @@ export type RawAdmission = {
   dchstts: string | null;
   dchstts_name: string | null;
   dch_reason: string | null;
+  ward: string | null;
   ward_name: string | null;
   los_days: number | string | null;
   income: number | string | null;
@@ -64,6 +70,8 @@ export type AdmissionRow = {
   dchstts_name: string | null;
   /** เหตุผลการจำหน่าย = ประเภทการจำหน่าย (ipt.dchtype + ชื่อจากตาราง dchtype ตรงกับ DISCHT ของแฟ้ม IPD) */
   dch_reason: string | null;
+  /** ward ที่จำหน่าย (ipt.ward) ชื่อจากตาราง ward */
+  ward: string | null;
   ward_name: string | null;
   los_days: number | null;
   income: number;
@@ -102,6 +110,10 @@ export type AdmissionsPage = GridPage<AdmissionRow> & {
   /** ผลรวม AdjRW × อัตรา และจำนวนรายที่คำนวณได้ (น้อยกว่า adjrw_n เมื่อมีรายที่จำหน่ายก่อนอัตราเก่าสุด) */
   adjrw_amount: number;
   adjrw_amount_n: number;
+  /** จำนวนรายที่ไม่มี PDx (an_stat.pdx ว่าง/NULL ตรงกับตัวกรองหัวคอลัมน์ pdx = [""]) */
+  no_pdx: number;
+  /** จำนวนรายของทั้งชุดที่ตรงตัวกรองที่มี REP แล้ว (ผ่าน/ติด C/Deny) null = โหลดไม่ได้ */
+  rep_sent: number | null;
   /** โหลดสถานะ REP จาก insight ไม่ได้ */
   rep_error: boolean;
   /** โหลดกองทุนย่อยไม่ได้ */
@@ -128,6 +140,7 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
       dchdate: r.dchdate,
       dchstts_name: r.dchstts_name || (r.dchstts ? r.dchstts : null),
       dch_reason: r.dch_reason?.trim() || null,
+      ward: r.ward,
       ward_name: r.ward_name,
       los_days: num(r.los_days),
       income: num(r.income) ?? 0,

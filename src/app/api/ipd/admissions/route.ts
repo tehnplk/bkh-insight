@@ -41,7 +41,7 @@ const AUTH_SQL = "(SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WH
 const CLAIM_SQL = "(SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)";
 const SELECT = `SELECT i.an, i.hn,
        ${FULL_NAME_SQL} AS patient_name,
-       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, COALESCE(dt.name, i.dchtype) AS dch_reason, w.name AS ward_name,
+       i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, COALESCE(dt.name, i.dchtype) AS dch_reason, i.ward, w.name AS ward_name,
        DATEDIFF(i.dchdate, i.regdate) AS los_days,
        s.income, s.uc_money,
        i.pttype, t.name AS pttype_name,
@@ -58,11 +58,14 @@ ${FROM}`;
 const RATE_CASE = `CASE ${ADJRW_RATES.map(() => "WHEN i.dchdate >= ? THEN ?").join(" ")} END`;
 const RATE_PARAMS = ADJRW_RATES.flatMap((r) => [r.from, r.rate]);
 const COUNT_SELECT = `SELECT COUNT(*) AS total, SUM(i.adjrw) AS adjrw_sum, COUNT(i.adjrw) AS adjrw_n,
-       SUM(i.adjrw * ${RATE_CASE}) AS adjrw_amount, COUNT(i.adjrw * ${RATE_CASE}) AS adjrw_amount_n
+       SUM(i.adjrw * ${RATE_CASE}) AS adjrw_amount, COUNT(i.adjrw * ${RATE_CASE}) AS adjrw_amount_n,
+       SUM(s.pdx IS NULL OR s.pdx = '') AS no_pdx
 ${FROM}`;
-type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: number; adjrw_amount: number | string | null; adjrw_amount_n: number };
+type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: number; adjrw_amount: number | string | null; adjrw_amount_n: number; no_pdx: number | string | null };
 
 const REP_SQL = latestRepSql("an", "an", "IP");
+// "เรียกเก็บแล้ว" = AN ที่มี REP IP อย่างน้อยหนึ่งแถว (ทุกสถานะ เท่ากับผ่าน + ติด C + Deny ของตัวกรอง rep) ; 90 วัน ~2,400 AN ใช้ rep_row_an_idx ~12 ms
+const REP_SENT_SQL = "SELECT COUNT(DISTINCT an)::int AS n FROM rep_row WHERE patient_type = 'IP' AND an = ANY($1::text[])";
 
 // ตัวกรองหัวคอลัมน์ (allowlist) ; RW/AdjRW/เงินเป็นตัวเลขต่อเนื่อง จึงไม่มีตัวกรอง
 // rep (สถานะ REP) อยู่ insight และ subfund (กองทุนย่อย) คำนวณในโค้ด จึงไม่อยู่ใน filterDefs: route จัดค่าในโค้ดแล้วกรองด้วย AN ที่ตรง
@@ -105,6 +108,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "an", header: "AN", width: 12 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
+  { key: "ward_name", header: "Ward", width: 20 },
   { key: "fund_label", header: "กองทุน", width: 8 },
   { key: "pttype_name", header: "สิทธิ", width: 28 },
   { key: "auth_code", header: "Authen Code", width: 16 },
@@ -113,7 +117,6 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "dchdate", header: "วันที่จำหน่าย", width: 12 },
   { key: "dchstts_name", header: "สถานะการจำหน่าย", width: 18 },
   { key: "dch_reason", header: "เหตุผลการจำหน่าย", width: 14 },
-  { key: "ward_name", header: "หอผู้ป่วย", width: 20 },
   { key: "los_days", header: "วันนอน", width: 8, type: "count" },
   { key: "days_since_dch", header: "หลังจำหน่าย (วัน)", width: 10, type: "count" },
   { key: "summary_status_name", header: "สรุปชาร์ต", width: 16 },
@@ -213,6 +216,15 @@ export async function GET(request: NextRequest) {
   const order = `${SORT_SQL[sort ?? "dchdate"]} ${(sort ? dir : "desc") === "desc" ? "DESC" : "ASC"}, i.an`;
   const [limit, offset] = xlsx ? [XLSX_MAX, 0] : [pageSize, (page - 1) * pageSize];
 
+  // ทั้งชุดที่ตรงตัวกรอง (ไม่ใช่แค่หน้านี้) ; อ่านไม่ได้ = null แสดง "–" ไม่ทำให้หน้าล้ม
+  const repSent = xlsx
+    ? null
+    : hisQuery<{ k: string }>(`SELECT i.an AS k ${FROM}\n${where}`, whereParams)
+        .then(async (keys) => (keys.length ? (await insightQuery<{ n: number }>(REP_SENT_SQL, [keys.map((r) => r.k)]))[0].n : 0))
+        .catch((e) => {
+          console.error("ipd/admissions rep_sent", e);
+          return null;
+        });
   try {
     const [raws, count] = await Promise.all([
       hisQuery<RawAdmission>(`${SELECT}\n${where}\nORDER BY ${order}\nLIMIT ? OFFSET ?`, [todayIso(), ...whereParams, limit, offset]),
@@ -260,6 +272,8 @@ export async function GET(request: NextRequest) {
       cmi: adjrwN ? Number(c?.adjrw_sum ?? 0) / adjrwN : null,
       adjrw_amount: Math.round(Number(c?.adjrw_amount ?? 0) * 100) / 100,
       adjrw_amount_n: Number(c?.adjrw_amount_n ?? 0),
+      no_pdx: Number(c?.no_pdx ?? 0),
+      rep_sent: await repSent,
       rep_error: repError,
       subfund_error: !subfunds,
     };

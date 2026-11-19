@@ -77,6 +77,8 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   exportPlacement?: "toolbar" | "summary";
   /** ปุ่มเพิ่มเติมวางหน้าปุ่มส่งออก Excel ในแถบสรุป (ใช้เมื่อ exportPlacement="summary" และมี renderSummary) */
   summaryActions?: ReactNode;
+  /** แถบใต้ตาราง (เหนือแถบแบ่งหน้า) รับค่าเหมือน renderSummary ระหว่างโหลดแสดงค่าเดิมแบบจาง ใช้กับ fitScreen ได้ (กรอบตารางเตี้ยลงให้แถบนี้อยู่ในจอ) */
+  renderFooter?: (data: R, grid: SummaryGrid) => ReactNode;
   /** "compact" = ช่องค้นหาแคบลง (เมื่อแถวตัวกรองแน่น) ค่าเริ่มต้น "default" */
   searchSize?: "default" | "compact";
   /** ไอคอนของปุ่มเปิดรายละเอียดหน้าแถว (detailMode="modal") ไม่ส่ง = ไอคอนเปิดหน้าต่าง */
@@ -184,6 +186,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   renderSummary,
   exportPlacement = "toolbar",
   summaryActions,
+  renderFooter,
   searchSize = "default",
   detailIcon,
   reorderable = false,
@@ -404,6 +407,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   const scrollRef = useRef<HTMLDivElement>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
   const headRowRef = useRef<HTMLTableRowElement>(null);
   const [pinLefts, setPinLefts] = useState<number[]>([]);
   const [tableWidth, setTableWidth] = useState(0);
@@ -414,13 +418,15 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     const tbl = tableRef.current;
     const head = headRowRef.current;
     if (!box || !tbl) return;
-    // กรอบตาราง = ความสูงที่เหลือใน <main> (ลบแถบแบ่งหน้าด้านล่าง) ตั้งที่ DOM ตรงๆ ไม่ต้อง render ใหม่
+    const foot = footerRef.current;
+    // กรอบตาราง = ความสูงที่เหลือใน <main> (ลบแถบใต้ตาราง + gap-3 และแถบแบ่งหน้าด้านล่าง) ตั้งที่ DOM ตรงๆ ไม่ต้อง render ใหม่
     const fit = () => {
       // ใน DetailModal (dialog อยู่ใต้ main ใน DOM) วัดจาก dialog ; size "wide" สูงคงที่ จึงเติมเต็ม modal พอดี
       const main = box.closest("dialog") ?? box.closest("main");
       if (!main) return;
       const top = box.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
-      box.style.maxHeight = `${Math.max(320, main.clientHeight - top - 76)}px`;
+      const footH = foot ? foot.offsetHeight + 12 : 0;
+      box.style.maxHeight = `${Math.max(320, main.clientHeight - top - 76 - footH)}px`;
     };
     const ro = new ResizeObserver(() => {
       fit();
@@ -435,6 +441,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
     ro.observe(tbl);
     ro.observe(box);
     if (head) ro.observe(head);
+    if (foot) ro.observe(foot);
     window.addEventListener("resize", fit);
     return () => {
       ro.disconnect();
@@ -471,6 +478,8 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   }
 
   const exportInSummary = exportPlacement === "summary" && !!renderSummary;
+  const summaryGrid: SummaryGrid = { columnFilters, setColumnFilter, reload: reloadPage };
+  const stale = data && (loading || error) ? "opacity-50" : "";
   const exportLink = (
     <a href={exportHref} download className={`${btn} aria-disabled:pointer-events-none aria-disabled:opacity-40`} aria-disabled={!total || undefined}>
       <Icon d="M10 3v10M6 9l4 4 4-4M4 16h12" />
@@ -601,8 +610,8 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
 
       {renderSummary && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div className={`flex min-h-5 min-w-0 flex-wrap items-center gap-x-4 gap-y-1 transition-opacity ${data && (loading || error) ? "opacity-50" : ""}`}>
-            {data ? renderSummary(data, { columnFilters, setColumnFilter, reload: reloadPage }) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
+          <div className={`flex min-h-5 min-w-0 flex-wrap items-center gap-x-4 gap-y-1 transition-opacity ${stale}`}>
+            {data ? renderSummary(data, summaryGrid) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
           </div>
           {exportInSummary && (
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -711,6 +720,12 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           <tbody className={`transition-opacity ${loading && data ? "opacity-50" : ""}`}>{body}</tbody>
         </table>
       </div>
+
+      {renderFooter && (
+        <div ref={footerRef} className={`flex min-h-5 min-w-0 flex-wrap items-center gap-x-4 gap-y-1 transition-opacity ${stale}`}>
+          {data ? renderFooter(data, summaryGrid) : <div className="h-4 w-56 animate-pulse rounded bg-hover" />}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-muted">
         <p role="status" className="tabular-nums">

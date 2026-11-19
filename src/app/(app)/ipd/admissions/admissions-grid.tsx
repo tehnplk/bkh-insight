@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { ChevronRight, ReceiptText } from "lucide-react";
-import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
 import {
   DateRangeFilter,
   useDateRange,
@@ -20,6 +20,8 @@ import {
   IPD_MAX_DAYS,
   MAX_EXPORT_ANS,
   MAX_SELECT_ANS,
+  PDX_SUMMARY_DAYS,
+  pdxMissing,
   type AdmissionDetail,
   type AdmissionRow,
   type AdmissionsPage,
@@ -148,9 +150,24 @@ function Codes({ row }: { row: AdmissionRow }) {
   );
 }
 
-/** รหัส PDx พร้อมชื่อโรค (ชื่อยาวตัดด้วย title) ไม่มี PDx = ขาด */
+/** รหัส PDx พร้อมชื่อโรค (ชื่อยาวตัดด้วย title) ไม่มี PDx: จำหน่ายเกิน 7 วัน = ขาด ไม่งั้น รอสรุป */
 function Pdx({ row }: { row: AdmissionRow }) {
-  if (!row.pdx) return <span className="font-medium text-danger">ขาด</span>;
+  if (!row.pdx) {
+    const days = row.days_since_dch;
+    const ago = days == null ? "" : `จำหน่ายแล้ว ${formatCount(days)} วัน`;
+    return pdxMissing(days) === "pending" ? (
+      <span className={`${chip} border-line text-muted`} title={`${ago} (สรุปภายใน ${PDX_SUMMARY_DAYS} วัน)`}>
+        รอสรุป
+      </span>
+    ) : (
+      <span
+        className={`${chip} border-danger-line bg-danger-soft font-medium text-danger`}
+        title={ago ? `${ago} ยังไม่มี PDx` : "ยังไม่มี PDx"}
+      >
+        ขาด
+      </span>
+    );
+  }
   return (
     <span
       className="flex max-w-64 items-baseline gap-1.5"
@@ -170,7 +187,6 @@ const text = (
     | "an"
     | "hn"
     | "patient_name"
-    | "ward_name"
     | "drg"
     | "pttype_name"
     | "dchstts_name"
@@ -262,6 +278,11 @@ const columns = col.columns([
   text("an", "AN"),
   text("hn", "HN"),
   text("patient_name", "ชื่อ-สกุล", false),
+  col.accessor("ward_name", {
+    header: "Ward",
+    cell: (c) => <span title={c.row.original.ward ?? undefined}>{c.getValue() || dash}</span>,
+    meta: filterable,
+  }),
   col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
   text("pttype_name", "สิทธิ"),
   col.display({
@@ -274,7 +295,6 @@ const columns = col.columns([
   date("dchdate", "วันที่จำหน่าย"),
   text("dchstts_name", "สถานะการจำหน่าย"),
   text("dch_reason", "เหตุผลการจำหน่าย"),
-  text("ward_name", "หอผู้ป่วย"),
   count("los_days", "วันนอน"),
   col.accessor("days_since_dch", {
     header: "หลังจำหน่าย (วัน)",
@@ -542,13 +562,67 @@ function Stat({
   );
 }
 
+/** ค่าของตัวกรองหัวคอลัมน์ rep ที่แปลว่ามี REP แล้ว (ตรงกับ rep_sent ของ route) เรียงแล้ว */
+const REP_SENT = ["c", "deny", "pass"];
+
+/** กล่องสรุปที่กดแล้วตั้งตัวกรองหัวคอลัมน์ col = values (ชุดเดียวกับติ๊กในหัวคอลัมน์) กดอีกครั้ง = ล้าง ; n null = โหลดไม่ได้ */
+function FilterStat({
+  grid,
+  col,
+  values,
+  label,
+  n,
+  title,
+}: {
+  grid: SummaryGrid;
+  col: string;
+  values: string[];
+  label: string;
+  n: number | null;
+  title: string;
+}) {
+  const cls = `inline-flex items-baseline gap-1.5 rounded-md border px-2.5 py-1 ${STAT_TONE.neutral}`;
+  if (n == null)
+    return (
+      <span className={cls} title={title}>
+        <span className="text-sm">{label}</span>
+        <span className="font-semibold text-muted">–</span>
+      </span>
+    );
+  const cur = grid.columnFilters[col] ?? [];
+  // เทียบความยาวด้วย: ไม่มีตัวกรอง ([]) กับ [""] join แล้วได้ "" เหมือนกัน
+  const on = cur.length === values.length && [...cur].sort().join() === values.join();
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={() => grid.setColumnFilter(col, on ? [] : values)}
+      title={`${title} · ${on ? "กดเพื่อล้างตัวกรอง" : "กดเพื่อกรองตาราง"}`}
+      className={`${cls} cursor-pointer hover:bg-hover ${on ? "ring-2 ring-ring" : ""} ${focusRing}`}
+    >
+      <span className="text-sm">{label}</span>
+      <span className="font-semibold">{formatCount(n)}</span> ราย
+    </button>
+  );
+}
+
+const pct = (n: number, total: number) => (total ? ` (${((n / total) * 100).toFixed(1)}%)` : "");
+
 // CMI ของทั้งชุดที่ตรงตัวกรอง (ไม่ใช่แค่หน้าปัจจุบัน) = ผลรวม AdjRW / จำนวนรายที่มี AdjRW
-const renderSummary = (d: AdmissionsPage) => (
+const renderSummary = (d: AdmissionsPage, grid: SummaryGrid) => (
   <div className="flex flex-col gap-1.5">
     <p className="flex flex-wrap items-center gap-2 tabular-nums">
       <Stat label="จำนวน">
         <span className="font-semibold">{formatCount(d.total)}</span> ราย
       </Stat>
+      <FilterStat
+        grid={grid}
+        col="rep"
+        values={REP_SENT}
+        label="เรียกเก็บแล้ว"
+        n={d.rep_sent}
+        title={d.rep_sent == null ? "โหลด REP ไม่ได้" : `มี REP แล้ว ${formatCount(d.rep_sent)} จาก ${formatCount(d.total)} ราย${pct(d.rep_sent, d.total)}`}
+      />
       <Stat
         label="CMI"
         title="CMI = ผลรวม AdjRW ÷ จำนวนรายที่มี AdjRW"
@@ -562,18 +636,15 @@ const renderSummary = (d: AdmissionsPage) => (
         <span className="font-semibold">{d.adjrw_sum.toFixed(4)}</span> จาก{" "}
         {formatCount(d.adjrw_n)} ราย
       </Stat>
-      {/* ยอดเงินเด่นสุดในแถบ: พื้นเขียวสด (--accent) ตัวอักษร --accent-fg ที่ออกแบบให้อ่านบนพื้นนี้ */}
-      <Stat label="ยอดคำนวณเงิน" title={RATE_NOTE} tone="strong">
-        <span className="font-semibold">{formatBaht(d.adjrw_amount)}</span> บาท
-      </Stat>
+      <FilterStat
+        grid={grid}
+        col="pdx"
+        values={[""]}
+        label="ไม่มี PDx"
+        n={d.no_pdx}
+        title={`ไม่มีรหัสโรคหลัก ${formatCount(d.no_pdx)} จาก ${formatCount(d.total)} ราย${pct(d.no_pdx, d.total)}`}
+      />
     </p>
-    {d.adjrw_amount_n < d.adjrw_n && (
-      <p role="status" className="text-xs text-warning">
-        {formatCount(d.adjrw_n - d.adjrw_amount_n)} รายจำหน่ายก่อน{" "}
-        {formatThaiDate(ADJRW_RATES[ADJRW_RATES.length - 1].from)}{" "}
-        ยังไม่มีอัตราบาทต่อ AdjRW จึงไม่รวมในยอด
-      </p>
-    )}
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
         โหลดสถานะ REP ไม่ได้ คอลัมน์ REP จึงว่าง
@@ -587,7 +658,23 @@ const renderSummary = (d: AdmissionsPage) => (
   </div>
 );
 
-const split = (v: string) => (v ? v.split(",") : []);
+// ยอดเงินใต้ตาราง พื้นเขียวสด (--accent) ตัวอักษร --accent-fg ที่ออกแบบให้อ่านบนพื้นนี้ ; คำเตือนรายที่ไม่รวมในยอดอยู่ข้างยอด
+const renderFooter = (d: AdmissionsPage) => (
+  <>
+    <Stat label="ยอดคำนวณเงิน" title={RATE_NOTE} tone="strong">
+      <span className="font-semibold tabular-nums">{formatBaht(d.adjrw_amount)}</span> บาท
+    </Stat>
+    {d.adjrw_amount_n < d.adjrw_n && (
+      <p role="status" className="text-xs text-warning">
+        {formatCount(d.adjrw_n - d.adjrw_amount_n)} รายจำหน่ายก่อน{" "}
+        {formatThaiDate(ADJRW_RATES[ADJRW_RATES.length - 1].from)}{" "}
+        ยังไม่มีอัตราบาทต่อ AdjRW จึงไม่รวมในยอด
+      </p>
+    )}
+  </>
+);
+
+const split =(v: string) => (v ? v.split(",") : []);
 const SELECT_CLASS = `h-9 rounded-md border border-line bg-surface pr-8 pl-3 text-sm font-medium ${focusRing}`;
 const CUSTOM = "custom";
 
@@ -669,7 +756,7 @@ function SelectionBar({ onClear }: { onClear: () => void }) {
     <div className="mb-3 flex flex-col gap-1.5 rounded-lg border border-accent-line bg-accent-soft px-3 py-2 text-sm text-accent-text">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span>
-          เลือกส่ง FDH{" "}
+          เลือก{" "}
           <span className="font-semibold tabular-nums">{formatCount(n)}</span>{" "}
           ราย
         </span>
@@ -801,12 +888,13 @@ export function AdmissionsGrid({
         renderSummary={renderSummary}
         exportPlacement="summary"
         summaryActions={<PreviewButton onOpen={() => setPreviewOpen(true)} />}
+        renderFooter={renderFooter}
         searchSize="compact"
         detailIcon={<ReceiptText aria-hidden className="size-4" />}
         reorderable
         hideable
         fitScreen
-        pinColumns={6}
+        pinColumns={7}
       />
     </SelectionContext.Provider>
   );
