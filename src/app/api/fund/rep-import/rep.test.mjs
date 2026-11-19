@@ -120,6 +120,7 @@ function otherBook(opts) {
 
 test("file name -> hcode, type, CE date", () => {
   assert.deepEqual(parseFileName("eclaim_11252_IPCS_25691005_145720713 (1).xls"), { hcode: "11252", type: "IPCS", fileDate: "2026-10-05" });
+  assert.deepEqual(parseFileName("eclaim_11252_OPCS_25691105_143000123.xls"), { hcode: "11252", type: "OPCS", fileDate: "2026-11-05" });
   assert.deepEqual(parseFileName("eclaim_11252_OPLGO_25691103_154808375 (12).xls"), { hcode: "11252", type: "OPLGO", fileDate: "2026-11-03" });
   assert.equal(parseFileName("eclaim_11252_IPCS_25691005_145720713(1).xls"), null);
   assert.deepEqual(parseFileName("eclaim_11252_OP_APPEAL_CD_25690821_115328402.xls"), { hcode: "11252", type: "OP_APPEAL_CD", fileDate: "2026-08-21" });
@@ -232,6 +233,7 @@ for (const lgo of [false, true]) {
 test("scheme from file type and layout", () => {
   assert.equal(schemeOf("OP_APPEAL_CD", "uc"), "UCS");
   assert.equal(schemeOf("IPCS", "other"), "OFC");
+  assert.equal(schemeOf("OPCS", "other"), "OFC");
   assert.equal(schemeOf("IPLGO", "other"), "LGO");
   assert.equal(schemeOf("OPLGO", "other"), "LGO");
   assert.equal(schemeOf("OPBKK", "other"), "BKK");

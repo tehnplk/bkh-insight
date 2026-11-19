@@ -14,6 +14,7 @@ export const EXPIRED = "e-Claim หมดอายุ: login ThaiD ในแท�
 export const APP_EXPIRED = "BKH Insight หมดอายุ: login ใหม่แล้วลองอีกครั้ง";
 export const CANCELLED = "ยกเลิกแล้ว";
 export const STM_UNSUPPORTED = "ข้าม STM BKK/BMT/SSS/LGO: ยังไม่รองรับ";
+export const OFC_NO_ZONE = "ไม่รู้ zone/จังหวัด: อ่านจากหน้า Statement OFC ของ e-Claim ไม่ได้ (เปิดหน้านั้นในแท็บ e-Claim ได้หรือไม่ หรือใส่ --zone= --province= เมื่อรันคำสั่ง)";
 export const OFC_DATE_NOTE = "STM OFC ใช้ \"ออกรายงานวันที่\" ในไฟล์เป็นวันที่ออก STM เพราะรายการบน e-Claim ไม่มีวันที่ออก (รอยืนยันกับไฟล์จริง)";
 
 /** หยุดทั้งรอบพร้อมข้อความ (หมดอายุ, ไม่มีแท็บ, ยกเลิก) ; Error อื่นนับเป็นไม่สำเร็จรายการเดียว */
@@ -90,8 +91,8 @@ export function beToIso(s) {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? `${y}-${pad(mo)}-${pad(d)}` : null;
 }
 
-// ชนิด REP ที่ /api/fund/rep-import อ่านได้และทดสอบกับไฟล์จริงแล้ว (rep.ts) ; ORF ไม่มีตัวอ่าน, OPCS ยังไม่ได้ทดสอบ
-const REP_OK = /^(IP|OP|OP_APPEAL\w*|IPCS|IPLGO|OPLGO|OPBKK|OPBMT)$/;
+// ชนิด REP ที่ /api/fund/rep-import อ่านได้และนำเข้าไฟล์จริงแล้ว (rep.ts) ; ORF ไม่มีตัวอ่าน
+const REP_OK = /^(IP|OP|OP_APPEAL\w*|IPCS|OPCS|IPLGO|OPLGO|OPBKK|OPBMT)$/;
 const REP_FILE = /^eclaim_\d+_[A-Za-z0-9_]+?_\d{8}_\d+\.ecd$/;
 
 /** eclaim_{hcode}_{TYPE}_{yyyymmdd พ.ศ.}_{n}.ecd -> TYPE */
@@ -167,22 +168,29 @@ export function cellsOf(tr) {
 
 /**
  * รายการ STM UC (statementUCSViewAction) -> [{ doc, personType, hcode, hname, province, issued, argc }]
- * issued = "วันที่ออก Statement" (dd/mm/yyyy พ.ศ.) จากคอลัมน์ที่หัวตารางมีคำว่า "วันที่ออก"
+ * issued = "วันที่ออก Statement" (dd/mm/yyyy พ.ศ.) จากคอลัมน์ที่หัวตารางมีคำว่า "วันที่ออก" ; ไม่พบ issued = null และ head = ข้อความหัวตาราง (ไว้ดูว่าหน้าเปลี่ยนอย่างไร)
  * shortcut: ลำดับอาร์กิวเมนต์ downloadBill เดาจากลำดับ param ของ URL ดาวน์โหลด ถ้า "ตรวจรายการ" ฟ้อง "รูปแบบปุ่มดาวน์โหลด" ให้แก้ลำดับที่นี่
  */
 export function parseUcStmList(html) {
   const out = [];
   let idx = -1;
-  for (const tr of html.split(/<tr[\s>]/i).slice(1)) {
+  let head = null;
+  // หน้าจริง: หัวตารางเป็น <thead><th>.. ไม่มี <tr> และแถวข้อมูลมี <td> ที่ comment ไว้ (ทำให้นับช่องเลื่อน)
+  for (const tr of html.replace(/<!--[\s\S]*?-->/g, "").split(/<(?:tr|thead)[\s>]/i).slice(1)) {
     const row = cellsOf(tr);
     const calls = callArgs(tr, "downloadBill");
     if (!calls.length) {
-      const h = row.findIndex((c) => c.includes("วันที่ออก"));
+      const h = row.findIndex((c) => /วันที่ออก|ออก\s*Statement/i.test(c));
       if (h >= 0) idx = h;
+      if (row.length > 1) head ??= row;
       continue;
     }
-    const issued = idx >= 0 ? (/\d{2}\/\d{2}\/\d{4}/.exec(row[idx] ?? "")?.[0] ?? null) : null;
-    for (const a of calls) out.push({ doc: a[0], personType: a[1], hcode: a[2], hname: a[3], province: a[4], issued, argc: a.length });
+    // ไม่พบหัวคอลัมน์: ใช้ช่องที่เป็นวันที่ พ.ศ. ล้วนถ้ามีช่องเดียว
+    const dates = row.filter((c) => /^\d{2}\/\d{2}\/25\d\d$/.test(c));
+    const issued = (idx >= 0 ? /\d{2}\/\d{2}\/\d{4}/.exec(row[idx] ?? "")?.[0] : null) ?? (dates.length === 1 ? dates[0] : null);
+    for (const a of calls) {
+      out.push({ doc: a[0], personType: a[1], hcode: a[2], hname: a[3], province: a[4], issued, argc: a.length, ...(!issued && { head: head?.join(" | ") ?? "" }) });
+    }
   }
   return out;
 }
@@ -278,7 +286,7 @@ export function checkMessage(m) {
 //
 // io (แต่ละที่ทำเอง ผลเป็นรูปเดียวกัน: ข้อมูล หรือ { expired } | { status } (HTTP ของ e-Claim) | { fatal } (หยุดทั้งรอบ) | { error }):
 //   list(kind, p) -> { items }        download(kind, p) -> { size, ... } (handle ส่งต่อให้ chunk/release)
-//   chunk(handle, start, end) -> { b64 }    release(handle)    select() -> { zone, province } ของหน้า Statement OFC ที่เปิดอยู่
+//   chunk(handle, start, end) -> { b64 }    release(handle)    select() -> { zone, province } จากหน้า Statement OFC ของ e-Claim
 //   done(path, key) -> { values } | { status }   upload(path, name, fields, chunks) -> { status, body }   (ฝั่งแอป ใช้ session ของแอป)
 
 /** ผลจาก io ฝั่ง e-Claim: ผิดพลาด throw (Stop = หยุดทั้งรอบ) */
@@ -409,7 +417,7 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
             continue;
           }
           if (!issued) {
-            fail(res, g, it.doc, "ไม่พบวันที่ออก Statement ในรายการ");
+            fail(res, g, it.doc, `ไม่พบวันที่ออก Statement ในรายการ${it.head ? ` (หัวตาราง: ${it.head})` : ""}`);
             continue;
           }
           if (stmDone.has(it.doc)) {
@@ -426,14 +434,14 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
     }
   }
 
-  // STM OFC: zone/จังหวัดจาก option หรือ select ของหน้า Statement OFC ที่เปิดค้างในแท็บ e-Claim
+  // STM OFC: zone/จังหวัดจาก option (--zone/--province) หรือหน้า Statement OFC ที่ io.select อ่านในแท็บ e-Claim
   {
     const g = "STM OFC";
     const sel = opt.zone && opt.province ? {} : ((await io.select()) ?? {});
     const zone = opt.zone ?? sel.zone;
     const province = opt.province ?? sel.province;
     if (!zone || !province) {
-      skip(res, g, "ไม่รู้ zone/จังหวัด: เปิดหน้า Statement OFC ในแท็บ e-Claim ก่อน");
+      skip(res, g, OFC_NO_ZONE);
     } else {
       const seen = new Set();
       for (const { y, m } of ms) {
