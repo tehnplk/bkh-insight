@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag, revalidateTag } from "next/cache";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type GridPage, type RowGetters } from "@/lib/grid-query";
 import { todayIso } from "@/lib/thai-date";
@@ -11,11 +11,15 @@ import {
   type ReconcileRow, type ReconcileStatus, type ReconcileSummary, type SmtApiRow, type SmtLine, type StmFileInput,
 } from "./reconcile";
 
-export type SmtReconcilePage = GridPage<ReconcileRow> & { summary: ReconcileSummary; smt_error: string | null };
+/** smt_fetched_at = เวลาที่ดึง SMT จริง (ISO UTC) ของข้อมูลใน cache ; null = ดึงไม่สำเร็จ */
+export type SmtReconcilePage = GridPage<ReconcileRow> & { summary: ReconcileSummary; smt_error: string | null; smt_fetched_at: string | null };
 
 // SMT ของ สปสช. เป็น API สาธารณะ (ไม่ต้อง login) หนึ่ง request คืนทุกรายการโอนในช่วงวันที่ (budgetYear ไม่มีผล กรองด้วยวันที่โอนเท่านั้น)
 const SMT_URL = "https://smt.nhso.go.th/smtf/api/budgetreport/budgetSummaryByVendorReport/search";
 const SMT_TIMEOUT_MS = 20_000;
+/** POST ดึงใหม่: ข้อมูลใน cache อายุไม่ถึงค่านี้ใช้ของเดิม กันกดถี่จนยิง SMT รัว */
+const REFRESH_MIN_AGE_MS = 30_000;
+const smtTag = (fy: number) => `smt-reconcile:${fy}`;
 
 const SORTABLE = ["key", "period_month", "patient_type", "smt_date", "smt_total", "stm_doc", "stm_total", "diff", "status"] as const;
 const FILTER_GET = {
@@ -32,10 +36,11 @@ const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 const beDate = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${+iso.slice(0, 4) + 543}`;
 
 // รายการโอนสิทธิ UC ทั้งปีงบ fy ถึงสิ้นปีงบถัดไป (โอนเพิ่ม/อุทธรณ์ของงวดปีนี้มาถึงปีหน้า) ใช้ราว 2-3 วินาที
-// cache สั้น (cacheLife "minutes") แค่กันยิงซ้ำตอนเรียง/กรอง/เปลี่ยนหน้า error ไม่ถูก cache
-async function loadSmt(fy: number, end: string): Promise<SmtLine[]> {
+// cache สั้น (cacheLife "minutes") แค่กันยิงซ้ำตอนเรียง/กรอง/เปลี่ยนหน้า error ไม่ถูก cache ; ปุ่ม "ดึงใหม่" (POST) ล้างด้วย tag ของปีงบ
+async function loadSmt(fy: number, end: string): Promise<{ lines: SmtLine[]; fetched_at: string }> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(smtTag(fy));
   const [cfg] = await hisQuery<{ hospitalcode: string | null }>("SELECT hospitalcode FROM opdconfig LIMIT 1");
   const hcode = String(cfg?.hospitalcode ?? "").trim();
   if (!/^\d{5}$/.test(hcode)) throw new Error("ไม่พบรหัสหน่วยบริการ (opdconfig.hospitalcode)");
@@ -51,7 +56,21 @@ async function loadSmt(fy: number, end: string): Promise<SmtLine[]> {
   if (!res.ok) throw new Error(`SMT ตอบ HTTP ${res.status}`);
   const body = (await res.json()) as { status?: string; datas?: SmtApiRow[] };
   if (body.status !== "success" || !Array.isArray(body.datas)) throw new Error("SMT ตอบรูปแบบที่ไม่รู้จัก");
-  return body.datas.map(toLine);
+  return { lines: body.datas.map(toLine), fetched_at: new Date().toISOString() };
+}
+
+/** วันโอนสุดท้ายที่ดึง: สิ้นปีงบถัดไป หรือวันนี้ถ้ายังไม่ถึง */
+function smtEnd(fy: number, today: string) {
+  const nextFyEnd = `${fy - 542}-09-30`;
+  return nextFyEnd < today ? nextFyEnd : today;
+}
+
+const smtErrorText = (e: Error) => `ดึงข้อมูล SMT ไม่สำเร็จ: ${e.name === "TimeoutError" ? "หมดเวลารอ" : e.message}`;
+
+/** ปีงบจาก ?fy= (ไม่ส่ง = ปีงบปัจจุบัน) ; null = ไม่ถูกต้อง */
+function parseFy(params: URLSearchParams, today: string) {
+  const currentFy = fiscalYearOf(today);
+  return params.get("fy") ? parseFiscalYear(params.get("fy")!, currentFy) : currentFy;
 }
 
 const STM_SQL = `SELECT doc_no, patient_type, period_month, run_no, transfer_date, net_total
@@ -77,8 +96,7 @@ export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
   const params = request.nextUrl.searchParams;
   const today = todayIso();
-  const currentFy = fiscalYearOf(today);
-  const fy = params.get("fy") ? parseFiscalYear(params.get("fy")!, currentFy) : currentFy;
+  const fy = parseFy(params, today);
   if (fy === null) return badRequest("fy ไม่ถูกต้อง");
   const grid = parseGridQuery(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
@@ -87,11 +105,10 @@ export async function GET(request: NextRequest) {
   if (!cf.ok) return badRequest(cf.error);
   const { filters, facet, facetQ } = cf.query;
 
-  const nextFyEnd = `${fy - 542}-09-30`;
   const [smt, files] = await Promise.all([
-    loadSmt(fy, nextFyEnd < today ? nextFyEnd : today).then(
-      (lines) => ({ lines, error: null }),
-      (e: Error) => ({ lines: [] as SmtLine[], error: `ดึงข้อมูล SMT ไม่สำเร็จ: ${e.name === "TimeoutError" ? "หมดเวลารอ" : e.message}` }),
+    loadSmt(fy, smtEnd(fy, today)).then(
+      (r) => ({ ...r, error: null }),
+      (e: Error) => ({ lines: [] as SmtLine[], fetched_at: null, error: smtErrorText(e) }),
     ),
     insightQuery<StmFileInput>(STM_SQL, [`${fy - 544}-10-01`, `${fy - 543}-09-01`]),
   ]);
@@ -124,6 +141,23 @@ export async function GET(request: NextRequest) {
     total: rows.length,
     summary: summarize(rows),
     smt_error: smt.error,
+    smt_fetched_at: smt.fetched_at,
   };
   return Response.json(body);
+}
+
+/** ปุ่ม "ดึงใหม่": ล้าง cache SMT ของปีงบ (?fy=) ให้ GET ถัดไปดึงสดจาก SMT ; revalidateTag เพราะ updateTag ใช้ได้แค่ใน Server Action */
+export async function POST(request: NextRequest) {
+  if (!(await isAuthed())) return unauthorized();
+  const today = todayIso();
+  const fy = parseFy(request.nextUrl.searchParams, today);
+  if (fy === null) return badRequest("fy ไม่ถูกต้อง");
+  try {
+    // cache ว่างจะดึงสดตรงนี้เลย (อายุ ~0) จึงไม่ต้องล้าง
+    const { fetched_at } = await loadSmt(fy, smtEnd(fy, today));
+    if (Date.now() - Date.parse(fetched_at) >= REFRESH_MIN_AGE_MS) revalidateTag(smtTag(fy), { expire: 0 });
+  } catch (e) {
+    return Response.json({ error: smtErrorText(e as Error) }, { status: 502 });
+  }
+  return Response.json({ ok: true });
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { useState, type ReactNode } from "react";
+import { RefreshCw } from "lucide-react";
+import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate, todayIso } from "@/lib/thai-date";
 import { FY_BACK, fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import type { SmtReconcilePage } from "@/app/api/fund/smt-reconcile/route";
 import { RECONCILE_STATUSES, STATUS_LABEL, type ReconcileRow, type ReconcileStatus } from "@/app/api/fund/smt-reconcile/reconcile";
-import { Money, focusRing, num, useUrlParams } from "../_components/ui";
+import { Money, btn, focusRing, num, useUrlParams } from "../_components/ui";
 import { Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { periodLabel } from "../stm-import/labels";
 
@@ -111,8 +112,53 @@ const detailTitle = (r: ReconcileRow) => (
 const Value = ({ children }: { children: ReactNode }) => <span className="font-semibold text-foreground">{children}</span>;
 const dot = <span aria-hidden="true"> · </span>;
 
-const renderSummary = ({ summary: s, smt_error }: SmtReconcilePage) => (
+/** "14:05 น." ถ้าเป็นวันนี้ ไม่งั้นนำหน้าด้วยวันที่ พ.ศ. (เวลาไทย UTC+7 ไม่มี DST) */
+function thaiTime(iso: string) {
+  const t = new Date(Date.parse(iso) + 7 * 3_600_000).toISOString();
+  const day = t.slice(0, 10);
+  return `${day === todayIso() ? "" : `${formatThaiDate(day)} `}${t.slice(11, 16)} น.`;
+}
+
+/** เวลาที่ดึง SMT + ปุ่มดึงใหม่ (POST ล้าง cache แล้วให้ grid โหลดใหม่ ซึ่งดึง SMT สด) */
+function SmtRefresh({ fetchedAt, reload }: { fetchedAt: string | null; reload: () => void }) {
+  const { fy } = useUrlParams(FILTER_KEYS);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ fy: string; msg: string } | null>(null);
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/fund/smt-reconcile${fy ? `?fy=${encodeURIComponent(fy)}` : ""}`, { method: "POST" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? `ดึงข้อมูล SMT ไม่สำเร็จ (HTTP ${res.status})`);
+      reload();
+    } catch (e) {
+      setError({ fy, msg: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {fetchedAt && <span className="text-muted tabular-nums">ข้อมูล SMT ณ {thaiTime(fetchedAt)}</span>}
+      <button type="button" onClick={refresh} disabled={busy} className={`${btn} gap-1.5 disabled:cursor-wait disabled:opacity-60`}>
+        <RefreshCw aria-hidden="true" className={`size-4 ${busy ? "motion-safe:animate-spin" : ""}`} />
+        {busy ? "กำลังดึง…" : "ดึงใหม่"}
+      </button>
+      {error?.fy === fy && (
+        <p role="alert" className="text-danger">
+          {error.msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const renderSummary = ({ summary: s, smt_error, smt_fetched_at }: SmtReconcilePage, grid: SummaryGrid) => (
   <div className="flex flex-col gap-1">
+    <SmtRefresh fetchedAt={smt_fetched_at} reload={grid.reload} />
     {smt_error && (
       <p role="alert" className="text-danger">
         {smt_error} แสดงเฉพาะฝั่ง STM ลองโหลดใหม่ภายหลัง
