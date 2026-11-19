@@ -15,8 +15,9 @@ import { AdmitBadge, AdmitFilter } from "./admit-badge";
 import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, formatCid, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
 import { Money, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
-import { FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
+import { ClaimStats, FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
+import { ClaimBadge } from "@/app/(app)/fund/_components/claim-badge";
 import { HisHcode, RightCheckContext, RightCheckStatus, SrmHcode, SrmRight, SrmStatus, useRightCheck } from "./right-check";
 
 const FILTERS = ["pttypes", "deps", "unclosed"] as const;
@@ -137,6 +138,13 @@ const columns = col.columns([
     meta: filterable,
   }),
   col.accessor("rcpt_no", { header: "เลขที่ใบเสร็จ", cell: (c) => c.getValue() || dash, meta: timeCell, enableSorting: false }),
+  // สถานะเคลมจากหลักฐานที่แรงสุด (STM > REP > HOSxP FDH > ส่งออกจากระบบนี้) คำนวณใน route จึงไม่มี sort ตัวกรองเป็นสถานะ
+  col.display({
+    id: "claim",
+    header: "สถานะเคลม",
+    cell: (c) => <ClaimBadge claim={c.row.original.claim} type="OP" />,
+    meta: { filter: true },
+  }),
   // REP อยู่ insight (คนละฐาน) จึงไม่มี sort ตัวกรองเป็นสถานะ (route จัดในโค้ด) ; พบ REP แสดงทุกกองทุน "ยังไม่มี REP" เฉพาะ UCS
   col.display({
     id: "rep",
@@ -205,6 +213,7 @@ const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
         <span className="font-semibold">{formatCount(d.total)}</span> visit
       </span>
       <AdmitFilter active={grid.columnFilters.admit ?? []} onFilter={(v) => grid.setColumnFilter("admit", v)} />
+      <ClaimStats grid={grid} counts={d.claim_counts} type="OP" />
     </p>
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
@@ -214,6 +223,11 @@ const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
     {d.subfund_error && (
       <p role="status" className="text-xs text-warning">
         โหลดกองทุนย่อยไม่ได้ คอลัมน์กองทุนย่อยจึงว่าง
+      </p>
+    )}
+    {d.claim_error && (
+      <p role="status" className="text-xs text-warning">
+        โหลดสถานะเคลมไม่ได้ คอลัมน์สถานะเคลมจึงว่าง
       </p>
     )}
   </div>

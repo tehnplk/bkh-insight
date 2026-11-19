@@ -5,6 +5,7 @@ import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { CLAIM_JOINS, STATUS_SQL } from "../_lib/claim";
 import { badRequest, inList, isAuthed, loadLookups, parseRange, pttypeName, unauthorized } from "../_lib/fund";
+import { STM_PAID_SQL } from "../_lib/stm";
 import {
   GROUPS, REASON_LABEL, STEP_LABEL, classify, inGroup, markClosed, matches, sortRows, summarize, viewOf,
   type Funnel, type Group, type HisCase, type PipelineRow, type PipelineType, type RepLatest, type SortKey, type View,
@@ -64,21 +65,6 @@ const REP_SQL = (col: "seq_no" | "an", pt: "OP" | "IP") => `SELECT DISTINCT ON (
 FROM rep_row r JOIN rep_file f ON f.id = r.rep_file_id
 WHERE r.patient_type = '${pt}' AND r.${col} = ANY($1::text[])
 ORDER BY r.${col}, r.tran_id::bigint DESC`;
-// เงินเข้าต่อ VN/AN (ติดลบได้ = เรียกคืน) ; STM UC ยุคแรกไม่มี seq_no จึงจับผ่าน rep_row ด้วย tran_id
-const STM_SQL = {
-  op: `SELECT key, sum(paid) AS paid FROM (
-  SELECT r.seq_no AS key, sum(r.paid_total) AS paid
-  FROM stm_row r JOIN stm_file f ON f.id = r.stm_file_id
-  WHERE f.patient_type = 'OP' AND r.seq_no = ANY($1::text[]) GROUP BY r.seq_no
-  UNION ALL
-  SELECT rr.seq_no, sum(r.paid_total)
-  FROM stm_row r JOIN stm_file f ON f.id = r.stm_file_id JOIN rep_row rr ON rr.tran_id = r.tran_id
-  WHERE f.patient_type = 'OP' AND NULLIF(r.seq_no, '') IS NULL AND rr.seq_no = ANY($1::text[]) GROUP BY rr.seq_no
-) u GROUP BY key`,
-  ip: `SELECT r.an AS key, sum(r.paid_total) AS paid
-FROM stm_row r JOIN stm_file f ON f.id = r.stm_file_id
-WHERE f.patient_type = 'IP' AND r.an = ANY($1::text[]) GROUP BY r.an`,
-};
 
 async function byChunks<T>(sql: string, keys: string[]): Promise<T[]> {
   const out: T[] = [];
@@ -99,7 +85,7 @@ async function load(view: View, start: string, end: string, codes: string[], nam
   const [reps, stm] = keys.length
     ? await Promise.all([
         byChunks<RepLatest & { key: string }>(type === "op" ? REP_SQL("seq_no", "OP") : REP_SQL("an", "IP"), keys),
-        byChunks<{ key: string; paid: string }>(STM_SQL[type], keys),
+        byChunks<{ key: string; paid: string }>(STM_PAID_SQL[type], keys),
       ])
     : [[], []];
   const repBy = new Map(reps.map((r) => [r.key, r]));

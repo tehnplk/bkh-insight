@@ -1,6 +1,6 @@
 ---
 name: fdh-c-check
-description: ชุดกฎตรวจรหัสติด C ของ 16 แฟ้ม FDH / e-Claim สปสช. จากฐาน HOSxP ก่อนส่งเคลม (45 รหัส C พร้อมระดับ error/warn/info และกฎกองทุน STP) เป็น SELECT ล้วนแบบ bind parameter ไม่สร้าง view หรือตารางในฐาน HOSxP ใช้ได้ทั้งรันตรวจเร็วด้วย db-cli และสร้างระบบตรวจ (Next.js หรือ Flask) ใช้ skill นี้ทุกครั้งที่ผู้ใช้พูดถึง ตรวจ C, รหัสติด C, ติด C, ตรวจก่อนส่งเคลม, ตรวจ 16 แฟ้ม, FDH, e-Claim, REP ตีกลับ, C-check, backtest กับ REP หรือขอนับจำนวนเคสที่น่าจะติด C จาก HOSxP แม้ไม่ได้บอกชื่อ skill และให้ใช้แทน fdh-pre-validate เมื่อฐานต้องอ่านอย่างเดียวหรือต้องการกฎครบกว่า
+description: ชุดกฎตรวจรหัสติด C ของ 16 แฟ้ม FDH / e-Claim สปสช. จากฐาน HOSxP ก่อนส่งเคลม (46 รหัส C พร้อมระดับ error/warn/info และกฎกองทุน STP) เป็น SELECT ล้วนแบบ bind parameter ไม่สร้าง view หรือตารางในฐาน HOSxP ใช้ได้ทั้งรันตรวจเร็วด้วย db-cli และสร้างระบบตรวจ (Next.js หรือ Flask) ใช้ skill นี้ทุกครั้งที่ผู้ใช้พูดถึง ตรวจ C, รหัสติด C, ติด C, ตรวจก่อนส่งเคลม, ตรวจ 16 แฟ้ม, FDH, e-Claim, REP ตีกลับ, C-check, backtest กับ REP หรือขอนับจำนวนเคสที่น่าจะติด C จาก HOSxP แม้ไม่ได้บอกชื่อ skill และให้ใช้แทน fdh-pre-validate เมื่อฐานต้องอ่านอย่างเดียวหรือต้องการกฎครบกว่า
 ---
 
 # fdh-c-check: กฎตรวจรหัสติด C ของ 16 แฟ้ม FDH (อ่านอย่างเดียว)
@@ -9,7 +9,7 @@ skill นี้คือกฎตรวจ C ชุดเดียวกับ�
 ทุกไฟล์เป็น `SELECT` (ขึ้นต้นด้วย `WITH`) statement เดียว รับค่าเป็น bind parameter `?` ไม่สร้าง view ตาราง หรือเขียนอะไรลงฐาน
 จึงรันกับฐาน replica หรือ user ที่มีสิทธิ์ `SELECT` อย่างเดียวได้ ต่างจาก `fdh-pre-validate` ที่ต้องสร้าง view 20 ตัวในฐาน HOSxP
 
-สิ่งที่ได้มากกว่า `fdh-pre-validate` (22 รหัส): 45 รหัส C, ระดับ error/warn/info ที่ปรับจาก backtest กับ REP จริง, กฎกองทุน STP 13 กฎ,
+สิ่งที่ได้มากกว่า `fdh-pre-validate` (22 รหัส): 46 รหัส C, ระดับ error/warn/info ที่ปรับจาก backtest กับ REP จริง, กฎกองทุน STP 13 กฎ,
 กฎแล็บหมวด 07, C305/C349 (Authen), C565 (ยานอกบัญชี OFC/LGO) และกฎของแฟ้ม ADP/DRU/CHA/CHT ที่อ่าน `opitemrece`
 
 ## ไฟล์ใน skill
@@ -113,7 +113,8 @@ DB_PASSWORD='...' db-cli -g my ... -e "$(node scripts/fill_params.mjs sql/ip/cas
 | C152 | ODX | โรคหลักเดียวกันใน visit อื่นของวันเดียวกัน | info | |
 | C952 | OOP, ADP (ip), DRU (ip) | ราคาหัตถการ > 99,999 (OOP) หรือเกิน 999 รายการต่อหมวด (IP) | error | |
 | C171 | ADP (op) | ค่าพาหนะ S1801–S1803 แต่ไม่มีข้อมูลส่งต่อ | error | |
-| C514 | ADP (op) | ค่าพาหนะ มีส่งต่อแต่ไม่มี AER หรือ UCS/WEL ส่งต่อในจังหวัดเดียวกัน | error | |
+| C514 | ADP (op) | ค่าพาหนะ ส่งต่อ UCS/WEL ไปโรงพยาบาลในจังหวัดเดียวกัน (ส่งต่อที่มีปลายทางมีแถว AER เสมอ) | error | |
+| C515 | ORF, IRF | แถวส่งต่อไม่มี AER ของ SEQ/AN เดียวกันที่ REFMAINO = REFER (เช่น visit ส่งต่อหลายโรงพยาบาล) หรือ REFER ว่าง/เป็นรหัสโรงพยาบาลตัวเอง ; แฟ้มส่งออกตัดแถวที่ไม่มีปลายทางและสร้าง AER ให้ทุก visit/AN ที่มาทาง ER หรือมีรับ/ส่งต่อ | error | |
 | C301 | ADP, DRU, CHT | ราคาติดลบ (ADP/DRU) หรือยอดรวมว่าง/≤ 0 (CHT) | warn | |
 | C234 | ADP (op) | ทดสอบการตั้งครรภ์ 30014 แต่ไม่มีรหัสโรค Z32 | error | |
 | C357 | ADP (op) | อุปกรณ์ผู้พิการ 8901/8902/8706/8707/8711 ของ UCS/WEL | warn | |
@@ -148,7 +149,7 @@ DB_PASSWORD='...' db-cli -g my ... -e "$(node scripts/fill_params.mjs sql/ip/cas
 | STP-R116 | ODX, IDX | มีรหัส S/T แต่ไม่มีสาเหตุภายนอก (DXTYPE 5) | error |
 
 แฟ้มที่ยังไม่มีกฎ: OP: LABFU, PHDB ; IP: IOP, LVD, LABFU, PHDB (มีแค่ `rows_*`) ให้หน้าจอบอกว่า "ยังไม่มีกฎตรวจ" ไม่ใช่ "ผ่าน"
-C160/C161 ปิดไว้เพราะ HOSxP ไม่มี SVCTYPE ส่วน C106, C108, C115, C117, C438, C515 ไม่อยู่ในชุดนี้ (เคยมีหรือถูกพิจารณาแล้วตัดออก) อย่าเพิ่มกลับโดยไม่ backtest
+C160/C161 ปิดไว้เพราะ HOSxP ไม่มี SVCTYPE ส่วน C106, C108, C115, C117, C438 ไม่อยู่ในชุดนี้ (เคยมีหรือถูกพิจารณาแล้วตัดออก) อย่าเพิ่มกลับโดยไม่ backtest
 
 ## กฎที่ต้องมีข้อมูลเสริม (ทางเลือก)
 
@@ -172,6 +173,7 @@ C160/C161 ปิดไว้เพราะ HOSxP ไม่มี SVCTYPE ส่
 - รหัสเบิกของรายการไม่ใช่ยาคือ `nondrugitems.nhso_adp_code` (C309 และกฎค่าพาหนะ/PRT/USG/อุปกรณ์อ่านจากที่นี่) ยานอกบัญชีดูจาก `income = '20'` หรือ `drugitems.drugaccount` ว่าง/`-`
 - `ovstdiag.icd10` เก็บหัตถการ ICD-9-CM ปนอยู่ กฎ ODX ใช้เฉพาะแถวที่ขึ้นต้นด้วยตัวอักษร
 - `ipt.bw` เป็นกรัม, C514 เทียบจังหวัดจาก `opdconfig.hospitalcode` → `hospcode.chwpart`
+- ส่งต่อ (C514/C515/C171): ปลายทางคือ `referout.refer_hospcode` (ที่ BKH `hospcode` ว่างทุกแถว ใช้เป็นค่าสำรอง) referout ของผู้ป่วยในเก็บ `vn = AN` ; แฟ้ม ORF ยึด `ovst.vstdate` และ AER หนึ่งแถวต่อ visit/AN ใช้ referout ล่าสุดที่มีปลายทาง วัตถุประสงค์ (IREFTYPE/OREFTYPE) แปลงจาก `rfrcs.export_code`
 - PERMITNO ต่อสิทธิ: UCS = `nhso_confirm_privilege.nhso_authen_code` ที่ปิดแล้ว ไม่มีใช้ `visit_pttype.auth_code` ; OFC ผู้ป่วยนอก = Approve Code ตัวล่าสุดใน `ovst_seq.edc_approve_list_text` ; OFC/LGO ผู้ป่วยใน = `ipt_pttype.claim_code` แล้ว `auth_code` ; STP = `auth_code` ; อื่น ๆ = `pttypeno` ถ้าโรงพยาบาลเก็บต่างจากนี้ C125/C127 จะผิด
 - รุ่นฐานข้อมูล: ต้องมี CTE และ `JSON_TABLE` = MariaDB 10.6+ หรือ MySQL 8.0.4+ (BKH ใช้ MariaDB 10.11)
   MariaDB 10.2–10.5: แทนสองบรรทัด `sel AS (...JSON_TABLE...)`/`cl AS (...)` ด้วย `sel AS (SELECT CAST(NULL AS SIGNED) AS k FROM DUAL WHERE 1 = 0)` (และ `cl` แบบเดียวกัน) แล้วไม่ส่ง parameter สองตัวนั้น
@@ -217,7 +219,7 @@ right panel สรุปต่อรหัส (รหัส, เงื่อน�
 
 ## ข้อจำกัดที่ต้องบอกผู้ใช้
 
-- กฎมี 45 จาก ~680 รหัส ไม่พบไม่ได้แปลว่าจะไม่ติด C
+- กฎมี 46 จาก ~680 รหัส ไม่พบไม่ได้แปลว่าจะไม่ติด C
 - รหัสที่ สปสช. ตัดสินจากฐานของตัวเอง (เช่น C999 ไม่พบสิทธิ, ความถูกต้องของ Approve/Authen Code) ตรวจจากฝั่งโรงพยาบาลไม่ได้ C305/C349 เป็นแค่สัญญาณเตือน
 - กฎแล็บ (C190/C914) และ Drug Catalog ขึ้นกับไฟล์ catalog ของหน่วยบริการ ไม่มีไฟล์ = ผลไม่น่าเชื่อ
 - ระดับในชุดนี้ปรับจาก REP ของ BKH โรงพยาบาลอื่นควร backtest ใหม่

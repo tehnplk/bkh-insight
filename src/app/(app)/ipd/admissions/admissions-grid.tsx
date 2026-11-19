@@ -46,6 +46,8 @@ import {
   Section,
 } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
+import { ClaimBadge } from "@/app/(app)/fund/_components/claim-badge";
+import { OVERDUE_VALUES, UNSENT_VALUES } from "@/app/api/fdh/claim-batch/claim";
 
 const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
 const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
@@ -353,6 +355,13 @@ const columns = col.columns([
       c.getValue() ? "ปิดแล้ว" : <span className="text-muted">ยังไม่ปิด</span>,
     meta: filterable,
   }),
+  // สถานะเคลมจากหลักฐานที่แรงสุด (STM > REP > ส่งออกจากระบบนี้) คำนวณใน route จึงไม่มี sort ตัวกรองเป็นสถานะ
+  col.display({
+    id: "claim",
+    header: "สถานะเคลม",
+    cell: (c) => <ClaimBadge claim={c.row.original.claim} type="IP" />,
+    meta: { filter: true },
+  }),
   // พบ REP แสดงทุกกองทุน ; "ยังไม่มี REP" เฉพาะ UCS แถวกองทุนอื่นแสดงขีด
   col.display({
     id: "rep",
@@ -576,8 +585,8 @@ function Stat({
 /** ค่าของตัวกรองหัวคอลัมน์ rep ที่แปลว่ามี REP แล้ว (ตรงกับ rep_sent ของ route) เรียงแล้ว */
 const REP_SENT = ["c", "deny", "pass"];
 
-/** กล่องสรุปที่กดแล้วตั้งตัวกรองหัวคอลัมน์ col = values (ชุดเดียวกับติ๊กในหัวคอลัมน์) กดอีกครั้ง = ล้าง ; n null = โหลดไม่ได้ */
-function FilterStat({
+/** กล่องสรุปที่กดแล้วตั้งตัวกรองหัวคอลัมน์ col = values (ชุดเดียวกับติ๊กในหัวคอลัมน์) กดอีกครั้ง = ล้าง ; n null = โหลดไม่ได้, undefined = ไม่ได้นับ (แสดงแค่ป้าย) */
+export function FilterStat({
   grid,
   col,
   values,
@@ -589,11 +598,11 @@ function FilterStat({
   col: string;
   values: string[];
   label: string;
-  n: number | null;
+  n?: number | null;
   title: string;
 }) {
   const cls = `inline-flex items-baseline gap-1.5 rounded-md border px-2.5 py-1 ${STAT_TONE.neutral}`;
-  if (n == null)
+  if (n === null)
     return (
       <span className={cls} title={title}>
         <span className="text-sm">{label}</span>
@@ -612,7 +621,11 @@ function FilterStat({
       className={`${cls} cursor-pointer hover:bg-hover ${on ? "ring-2 ring-ring" : ""} ${focusRing}`}
     >
       <span className="text-sm">{label}</span>
-      <span className="font-semibold">{formatCount(n)}</span> ราย
+      {n !== undefined && (
+        <>
+          <span className="font-semibold">{formatCount(n)}</span> ราย
+        </>
+      )}
     </button>
   );
 }
@@ -655,6 +668,7 @@ const renderSummary = (d: AdmissionsPage, grid: SummaryGrid) => (
         n={d.no_pdx}
         title={`ไม่มีรหัสโรคหลัก ${formatCount(d.no_pdx)} จาก ${formatCount(d.total)} ราย${pct(d.no_pdx, d.total)}`}
       />
+      <ClaimStats grid={grid} counts={d.claim_counts} type="IP" />
     </p>
     {d.rep_error && (
       <p role="status" className="text-xs text-warning">
@@ -666,8 +680,27 @@ const renderSummary = (d: AdmissionsPage, grid: SummaryGrid) => (
         โหลดกองทุนย่อยไม่ได้ คอลัมน์กองทุนย่อยจึงว่าง
       </p>
     )}
+    {d.claim_error && (
+      <p role="status" className="text-xs text-warning">
+        โหลดสถานะเคลมไม่ได้ คอลัมน์สถานะเคลมจึงว่าง
+      </p>
+    )}
   </div>
 );
+
+/** ปุ่ม "ยังไม่ส่ง" (รวมรอปิดสิทธิ) และ "เกินกำหนด" ตั้งตัวกรองหัวคอลัมน์ claim ; counts undefined = ไม่ได้นับ, null = โหลดไม่ได้ */
+export function ClaimStats({ grid, counts, type }: { grid: SummaryGrid; counts?: { unsent: number; overdue: number } | null; type: "OP" | "IP" }) {
+  const unit = type === "OP" ? "visit" : "ราย";
+  const n = (k: "unsent" | "overdue") => (counts === undefined ? undefined : (counts?.[k] ?? null));
+  const title = (k: "unsent" | "overdue", what: string) =>
+    counts === null ? "โหลดสถานะเคลมไม่ได้" : counts ? `${what} ${formatCount(counts[k])} ${unit}` : `กรองตารางเฉพาะ${what}`;
+  return (
+    <>
+      <FilterStat grid={grid} col="claim" values={UNSENT_VALUES} label="ยังไม่ส่ง" n={n("unsent")} title={title("unsent", "ยังไม่มีหลักฐานการส่งเคลม (รวมรอปิดสิทธิ)")} />
+      <FilterStat grid={grid} col="claim" values={OVERDUE_VALUES} label="เกินกำหนด" n={n("overdue")} title={title("overdue", "ยังไม่ส่งและเกินกำหนดส่ง")} />
+    </>
+  );
+}
 
 // ยอดเงินใต้ตาราง พื้นเขียวสด (--accent) ตัวอักษร --accent-fg ที่ออกแบบให้อ่านบนพื้นนี้ ; คำเตือนรายที่ไม่รวมในยอดอยู่ข้างยอด
 const renderFooter = (d: AdmissionsPage) => (

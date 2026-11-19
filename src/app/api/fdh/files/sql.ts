@@ -41,8 +41,19 @@ const TOTCOPAY = "ROUND(CASE WHEN op.paidst = '03' THEN op.sum_price ELSE 0 END,
 const CHA = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE\`, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS \`CHRGITEM\`, ROUND(SUM(op.sum_price), 2) AS \`AMOUNT\`, pt.cid AS \`PERSON_ID\`, COALESCE(op.vn, '') AS \`SEQ\`, ROUND(SUM(CASE WHEN op.paidst = '02' THEN op.sum_price ELSE 0 END), 2) AS claim_amount`;
 // claim_amount (ไม่มี backtick จึงไม่อยู่ใน fileColumns/แฟ้ม FDH) = ยอดเบิกได้ (paidst 02) ไว้แยก CHRGITEM x1/x2 ของแฟ้ม e-Claim (eclaim.ts)
 const CHA_GROUP = "GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid\nHAVING ROUND(SUM(op.sum_price), 2) > 0";
-const AER = `v.hn AS \`HN\`, COALESCE(v.an, '') AS \`AN\`, DATE_FORMAT(er.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(NULLIF(ac.claim_code, ''), '') AS \`AUTHAE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, er.vstdate), '%Y-%m-%d') AS \`AEDATE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, v.vsttime), '%H%i') AS \`AETIME\`, COALESCE(ac.ac_type, '') AS \`AETYPE\`, COALESCE(rin.referin_number, rin.docno, '') AS \`REFER_NO\`, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS \`REFMAINI\`, CASE WHEN rin.vn IS NOT NULL THEN '1100' ELSE '' END AS \`IREFTYPE\`, COALESCE(rout.refer_hospcode, '') AS \`REFMAINO\`, CASE WHEN rout.vn IS NOT NULL THEN '1100' ELSE '' END AS \`OREFTYPE\`, COALESCE(NULLIF(ac.ac_ae, ''), NULLIF(ept.ucae, 'N'), '') AS \`UCAE\`, '' AS \`EMTYPE\`, er.vn AS \`SEQ\`, '' AS \`AESTATUS\`, '' AS \`DALERT\`, '' AS \`TALERT\``;
-const AER_JOIN = "LEFT JOIN er_nursing_detail ed ON ed.vn = er.vn LEFT JOIN referin rin ON rin.vn = er.vn LEFT JOIN referout rout ON rout.vn = er.vn LEFT JOIN er_pt_type ept ON ept.er_pt_type = er.er_pt_type LEFT JOIN ipt_accident ac ON ac.an = v.an";
+// AER = visit/admission ที่มาทาง ER หรือมีรับ/ส่งต่อ (C515: ORF/IRF ทุกแถวต้องมี AER ที่ REFMAINO = REFER) ; ช่อง AE ว่างเมื่อไม่ได้มาทาง ER
+// REFOK = ส่งต่อที่มีปลายทางและไม่ใช่ รพ. ตัวเอง (ORF/IRF ตัดแถวอื่นทิ้ง C515) ; refOut = referout ล่าสุดที่ REFOK ของ key (AER หนึ่งแถวต่อ visit/AN)
+// IREFTYPE/OREFTYPE = วัตถุประสงค์ 4 หลัก (วินิจฉัย/รักษา/รักษาต่อเนื่อง/ตามความต้องการผู้ป่วย) จาก rfrcs.export_code (รหัส CAUSEOUT) ไม่เข้าเกณฑ์ใช้ 1100
+// checks.ts ใช้ REFOK/refOut ข้อความเดียวกัน (fdh.test.mjs ตรวจ)
+const REFOK = (x: string) => `TRIM(COALESCE(${x}.refer_hospcode, ${x}.hospcode, '')) NOT IN ('', ${HCODE})`;
+const refOut = (key: string) => `(SELECT MAX(r.referout_id) FROM referout r WHERE r.vn = ${key} AND ${REFOK("r")})`;
+const refType = (x: string, has: string) =>
+  `CASE WHEN ${has} IS NULL THEN '' ELSE CASE (SELECT c.export_code FROM rfrcs c WHERE c.rfrcs = ${x}.rfrcs) WHEN '2' THEN '1000' WHEN '3' THEN '0010' WHEN '5' THEN '0001' ELSE '1100' END END`;
+const AER = `v.hn AS \`HN\`, COALESCE(v.an, '') AS \`AN\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, COALESCE(NULLIF(ac.claim_code, ''), '') AS \`AUTHAE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, er.vstdate), '%Y-%m-%d') AS \`AEDATE\`, DATE_FORMAT(COALESCE(ed.accident_datetime, IF(er.vn IS NULL, NULL, v.vsttime)), '%H%i') AS \`AETIME\`, COALESCE(ac.ac_type, '') AS \`AETYPE\`, COALESCE(rin.referin_number, rin.docno, '') AS \`REFER_NO\`, COALESCE(rin.refer_hospcode, rin.hospcode, '') AS \`REFMAINI\`, ${refType("rin", "rin.vn")} AS \`IREFTYPE\`, COALESCE(rout.refer_hospcode, rout.hospcode, '') AS \`REFMAINO\`, ${refType("rout", "rout.referout_id")} AS \`OREFTYPE\`, COALESCE(NULLIF(ac.ac_ae, ''), NULLIF(ept.ucae, 'N'), '') AS \`UCAE\`, '' AS \`EMTYPE\`, v.vn AS \`SEQ\`, '' AS \`AESTATUS\`, '' AS \`DALERT\`, '' AS \`TALERT\``;
+// outKey = key ของ referout: OP = VN, IP = AN (HOSxP เก็บ referout ของผู้ป่วยในด้วย vn = AN) ; referin ใช้ VN ของ visit (IP = visit ที่ admit)
+const aerJoin = (outKey: string) =>
+  `LEFT JOIN er_regist er ON er.vn = v.vn LEFT JOIN er_nursing_detail ed ON ed.vn = er.vn LEFT JOIN referin rin ON rin.vn = v.vn AND ${REFOK("rin")} LEFT JOIN referout rout ON rout.referout_id = ${refOut(outKey)} LEFT JOIN er_pt_type ept ON ept.er_pt_type = er.er_pt_type LEFT JOIN ipt_accident ac ON ac.an = v.an`;
+const AER_HAS = "(er.vn IS NOT NULL OR rin.vn IS NOT NULL OR rout.referout_id IS NOT NULL)";
 // TMLTCODE เติมในโค้ดด้วย applyLabTmlt จาก icode (alias ไม่มี backtick จึงไม่อยู่ใน fileColumns และถูกลบก่อนส่งออก)
 // ec_tmlt = TMLTCODE ของ e-Claim แบบไฟล์ของ HOSxP: TMLT ของ lab_items_sub_group (group_icode) ก่อน ; มีกลุ่มแต่ไม่มี TMLT และ icode มี lab_items ไม่ใช่ 1 รายการ = ว่าง ;
 // ไม่งั้น lab_items ที่ active ค่าเดียว (backtest 82 แถวแล็บของไฟล์ HOSxP ตรงทั้งหมด)
@@ -90,9 +101,10 @@ const OP_SQL = {
     `v.hn AS \`HN\`, ${CLINIC} AS \`CLINIC\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, DATE_FORMAT(v.vsttime, '%H%i') AS \`TIMEOPD\`, v.vn AS \`SEQ\`, '1' AS \`UUC\`, SUBSTRING(REPLACE(REPLACE(COALESCE(s.cc, ''), '\\r', ' '), '\\n', ' '), 1, 255) AS \`DETAIL\`, ROUND(s.temperature, 1) AS \`BTEMP\`, ROUND(s.bps) AS \`SBP\`, ROUND(s.bpd) AS \`DBP\`, ROUND(s.pulse) AS \`PR\`, ROUND(s.rr) AS \`RR\`, '' AS \`OPTYPE\`, CASE WHEN rf_in.vn IS NOT NULL THEN '3' WHEN oa.hn IS NOT NULL THEN '2' ELSE '1' END AS \`TYPEIN\`, COALESCE(NULLIF(ost.export_code, '1'), CASE WHEN i.an IS NOT NULL THEN '2' WHEN rf_out.vn IS NOT NULL THEN '3' END, '1') AS \`TYPEOUT\`, ${EC_CLINIC}`,
     `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e LEFT JOIN opdscreen s ON s.vn = v.vn LEFT JOIN ipt i ON i.vn = v.vn LEFT JOIN referin rf_in ON rf_in.vn = v.vn LEFT JOIN referout rf_out ON rf_out.vn = v.vn LEFT JOIN oapp oa ON oa.hn = v.hn AND oa.nextdate = v.vstdate LEFT JOIN ovstost ost ON ost.ovstost = v.ovstost ${SP_V}\nORDER BY v.vstdate, v.vn, rf_out.referout_id, oa.oapp_id`,
   ),
+  // ORF ยึดวันรับบริการ (ไม่ใช่ refer_date) ให้ SEQ ชุดเดียวกับ OPD/AER ของช่วง ; FORCE INDEX ไม่งั้น optimizer สแกน referout ทั้งตาราง
   ORF: q(
-    `ro.hn AS \`HN\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`DATEOPD\`, ${CLINIC} AS \`CLINIC\`, COALESCE(ro.refer_hospcode, ro.hospcode) AS \`REFER\`, '2' AS \`REFERTYPE\`, ro.vn AS \`SEQ\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`REFERDATE\`, ${EC_CLINIC}`,
-    `FROM p JOIN referout ro ON ro.refer_date BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = ro.vn ${SP_V}\nWHERE ${NOT_OPD}\nORDER BY ro.refer_date, ro.vn, ro.referout_id`,
+    `ro.hn AS \`HN\`, DATE_FORMAT(v.vstdate, '%Y-%m-%d') AS \`DATEOPD\`, ${CLINIC} AS \`CLINIC\`, COALESCE(ro.refer_hospcode, ro.hospcode) AS \`REFER\`, '2' AS \`REFERTYPE\`, ro.vn AS \`SEQ\`, DATE_FORMAT(ro.refer_date, '%Y-%m-%d') AS \`REFERDATE\`, ${EC_CLINIC}`,
+    `FROM p JOIN ovst v FORCE INDEX (ix_vstdate) ON v.vstdate BETWEEN p.s AND p.e INNER JOIN referout ro ON ro.vn = v.vn ${SP_V}\nWHERE (${NOT_OPD}) AND ${REFOK("ro")}\nORDER BY v.vstdate, v.vn, ro.referout_id`,
   ),
   // ec_drdx = DRDX ของ e-Claim: แพทย์ของ visit (ovst.doctor) แบบไฟล์ e-Claim ของ HOSxP (FDH ยังใช้แพทย์ของแต่ละวินิจฉัย)
   ODX: q(
@@ -110,7 +122,7 @@ const OP_SQL = {
     `FROM p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn LEFT JOIN (SELECT op.vn, SUM(op.sum_price) AS t, SUM(CASE WHEN op.paidst IN ('01', '03') THEN op.sum_price ELSE 0 END) AS pd FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e WHERE ${OP_ONLY} GROUP BY op.vn) x ON x.vn = vs.vn\nWHERE ${NOT_OPD}\nORDER BY vs.vstdate, vs.vn`,
   ),
   CHA: q(CHA, `${OP_RANGE} INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income\nWHERE ${OP_ONLY}\n${CHA_GROUP}\nORDER BY \`DATE\`, \`SEQ\`, \`HN\`, \`AN\`, \`CHRGITEM\``),
-  AER: q(AER, `FROM p JOIN er_regist er ON er.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = er.vn ${AER_JOIN}\nWHERE ${NOT_OPD}\nORDER BY er.vstdate, er.vn, rout.referout_id`),
+  AER: q(AER, `FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${aerJoin("v.vn")}\nWHERE (${NOT_OPD}) AND ${AER_HAS}\nORDER BY v.vstdate, v.vn`),
   ADP: q(ADP, `${OP_RANGE} ${ADP_JOIN}\nWHERE ${OP_ONLY} AND ${NOT_DRUG}\nORDER BY op.vstdate, op.vn, op.hos_guid`),
   DRU: q(dru(OP_REMARK), `${OP_RANGE} ${DRU_JOIN}\nWHERE ${OP_ONLY}\nORDER BY op.vstdate, op.vn, op.hos_guid`),
   LABFU: q(LABFU, `FROM p JOIN lab_head lh ON lh.order_date BETWEEN p.s AND p.e ${LABFU_JOIN}\nWHERE ${LABFU_OP_WHERE}\nORDER BY lh.order_date, lh.lab_order_number, lo.lab_items_code`),
@@ -130,7 +142,7 @@ const IP_SQL = {
   // HOSxP เก็บ referout ของผู้ป่วยในด้วย vn = AN
   IRF: q(
     "a.an AS `AN`, COALESCE(ro.refer_hospcode, ro.hospcode) AS `REFER`, '2' AS `REFERTYPE`",
-    `${AI} INNER JOIN referout ro ON ro.vn = a.an\nORDER BY a.dchdate, a.an, ro.referout_id`,
+    `${AI} INNER JOIN referout ro ON ro.vn = a.an\nWHERE ${REFOK("ro")}\nORDER BY a.dchdate, a.an, ro.referout_id`,
   ),
   IDX: q(
     `id.an AS \`AN\`, ${ID_DIAG} AS \`DIAG\`, COALESCE(id.diagtype, '1') AS \`DXTYPE\`, COALESCE(doc.licenseno, id.doctor, '') AS \`DRDX\`, ${ecDiag(ID_DIAG)}`,
@@ -145,7 +157,7 @@ const IP_SQL = {
     `${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn\nORDER BY a.dchdate, a.an`,
   ),
   CHA: q(CHA, `${IP_ITEMS} INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income\n${CHA_GROUP}\nORDER BY \`AN\`, \`DATE\`, \`SEQ\`, \`CHRGITEM\`, \`HN\``),
-  AER: q(AER, `${AI} INNER JOIN ovst v ON v.an = a.an INNER JOIN er_regist er ON er.vn = v.vn ${AER_JOIN}\nORDER BY a.dchdate, a.an, er.vn, rout.referout_id`),
+  AER: q(AER, `${AI} INNER JOIN ovst v ON v.an = a.an ${aerJoin("a.an")}\nWHERE ${AER_HAS}\nORDER BY a.dchdate, a.an, v.vn`),
   ADP: q(ADP, `${IP_ITEMS} ${ADP_JOIN}\nWHERE ${NOT_DRUG}\nORDER BY a.dchdate, a.an, op.vstdate, op.hos_guid`),
   LVD: q(
     "hl.ipt_home_leave_id AS `SEQLVD`, hl.an AS `AN`, DATE_FORMAT(hl.dch_date, '%Y-%m-%d') AS `DATEOUT`, DATE_FORMAT(hl.dch_time, '%H%i') AS `TIMEOUT`, DATE_FORMAT(hl.reg_date, '%Y-%m-%d') AS `DATEIN`, DATE_FORMAT(hl.reg_time, '%H%i') AS `TIMEIN`, DATEDIFF(hl.reg_date, hl.dch_date) AS `QTYDAY`",

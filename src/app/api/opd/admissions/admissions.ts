@@ -4,6 +4,7 @@ import type { GridPage } from "@/lib/grid-query";
 import type { RepInfo } from "@/app/api/ipd/admissions/admissions";
 import type { SubFund } from "@/app/api/admin/ar-funds/rules";
 import type { RightRow } from "@/app/api/opd/right-check/srm";
+import type { ClaimCounts, ClaimInfo } from "@/app/api/fdh/claim-batch/claim";
 
 /** = REP_FUND ของ ipd/admissions (ไฟล์นี้ import ค่าข้ามไฟล์ไม่ได้ เพราะ test รัน .ts ตรง) */
 const REP_FUND = "UCS";
@@ -49,6 +50,11 @@ export type RawVisit = {
   an: string | null;
   /** ยอดรายการที่ยังค้างฝั่งผู้ป่วยนอกของ visit ที่ admit (opitemrece ที่ vn = visit) ไม่มีรายการ/ไม่ admit = null */
   opd_left: number | string | null;
+  /** fdh_claim_status ของ HOSxP (สถานะเคลม) ไม่มีแถว = null */
+  fdh_resv: string | null;
+  fdh_resv_at: string | null;
+  fdh_msg: string | null;
+  fdh_msg_at: string | null;
 };
 
 /** สถานะ admit ของ visit (ตัวกรอง cf "admit" จากปุ่มในแถบสรุป): none ไม่ admit, clear admit แล้วไม่มีรายการค้าง, left admit แล้วยังมีรายการค้างฝั่งผู้ป่วยนอก */
@@ -117,6 +123,8 @@ export type VisitRow = {
   subfunds?: SubFund[];
   /** ผลตรวจสิทธิกับ สปสช. ที่บันทึกไว้ไม่เกิน 24 ชั่วโมงของ HN นี้ เทียบกับสิทธิของ visit (ไม่มี = ยังไม่ได้ตรวจหรือโหลดไม่ได้) */
   right?: RightRow;
+  /** สถานะส่งเคลม (ไม่มี = กองทุนที่ไม่ต้องส่ง/ไม่มีลูกหนี้สิทธิและไม่มีหลักฐาน หรือโหลดไม่ได้) */
+  claim?: ClaimInfo;
 };
 
 export type VisitsPage = GridPage<VisitRow> & {
@@ -124,6 +132,10 @@ export type VisitsPage = GridPage<VisitRow> & {
   rep_error: boolean;
   /** โหลดกองทุนย่อยไม่ได้ */
   subfund_error: boolean;
+  /** โหลดสถานะเคลมไม่ได้ */
+  claim_error: boolean;
+  /** จำนวนรายของปุ่ม "ยังไม่ส่ง"/"เกินกำหนด" มีเฉพาะเมื่อใช้ตัวกรอง claim (ผู้ป่วยนอกนับทั้งชุดแพงเกินไปทุกครั้ง) */
+  claim_counts?: ClaimCounts;
 };
 
 /** ovstost.export_code -> สถานะการจำหน่าย (รหัส TYPEOUT 43 แฟ้ม) */
