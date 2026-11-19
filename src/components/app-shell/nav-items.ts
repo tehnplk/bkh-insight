@@ -74,7 +74,10 @@ export const navItems: NavItem[] = [
   {
     label: "รับเงิน",
     icon: "wallet",
-    children: [{ label: "นำเข้า STM", href: "/fund/stm-import" }],
+    children: [
+      { label: "นำเข้า STM", href: "/fund/stm-import" },
+      { label: "เทียบยอดโอน SMT กับ STM", href: "/fund/smt-reconcile" },
+    ],
   },
   {
     label: "ตรวจสอบข้อมูล",

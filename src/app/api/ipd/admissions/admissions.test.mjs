@@ -1,12 +1,12 @@
 // รัน: node --test src/app/api/ipd/admissions/admissions.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows, repFilterValues } from "./admissions.ts";
+import { buildRows, pdxMissing, repFilterValues } from "./admissions.ts";
 
 const FUND = { "89": "UCS", O1: "OFC", S1: "SSS" };
 const fundOf = (p) => FUND[p] ?? "UNKNOWN";
 const raw = (an, hn, extra = {}) => ({
-  an, hn, patient_name: ` name ${an} `, regdate: "2026-10-01", dchdate: "2026-10-03", dchstts: "02", dchstts_name: "Improved", auth_code: " PP0000000001 ", claim_code: "F00000000001", ward_name: "W1", los_days: 2,
+  an, hn, patient_name: ` name ${an} `, regdate: "2026-10-01", dchdate: "2026-10-03", dchstts: "02", dchstts_name: "Improved", auth_code: " PP0000000001 ", claim_code: "F00000000001", ward: "01", ward_name: "W1", los_days: 2,
   income: "1500.50", uc_money: "1200.00", pttype: "89", pttype_name: "UC", finance_lock: "Y", ipt_summary_status_id: 1,
   summary_status_name: "สรุปแล้ว", pdx: "J189", pdx_name: "Pneumonia", drg: "", rw: "0.8123", adjrw: null,
   days_since_dch: 10, ...extra,
@@ -76,4 +76,8 @@ test("REP header filter value: latest status on any fund, none only on UCS, blan
     fundOf,
   );
   assert.deepEqual(vals.map((r) => r.v), ["c", "pass", "none", "", ""]);
+});
+
+test("missing PDx: pending within 7 days after discharge, late after (or no discharge date)", () => {
+  assert.deepEqual([0, 7, 8, 30, null].map(pdxMissing), ["pending", "pending", "late", "late", "late"]);
 });

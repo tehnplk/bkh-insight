@@ -11,8 +11,8 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
 import { srmFilterLabel } from "@/app/api/opd/right-check/srm";
-import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
-import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
+import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, formatCid, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
+import { Money, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
@@ -144,10 +144,22 @@ const columns = col.columns([
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
 ]);
 
+/** PDPA: โหลดเลขบัตรเฉพาะตอนเปิด modal ไม่อยู่ในแถว grid หรือ Excel */
+function Cid({ vn }: { vn: string }) {
+  const { loading, data, error } = useJson<{ cid: string | null }>(`/api/opd/admissions/cid?vn=${vn}`);
+  if (loading) return <span className="text-muted">กำลังโหลด…</span>;
+  const cid = formatCid(data?.cid);
+  if (error || !cid) return <span className="text-muted" title={error}>–</span>;
+  return <span className="select-all">{cid}</span>;
+}
+
 const renderDetail = (r: VisitRow) => (
   <div className="text-sm">
     <Facts>
       <Fact label="HN">{r.hn}</Fact>
+      <Fact label="เลขบัตรประชาชน">
+        <Cid vn={r.vn} />
+      </Fact>
       <Fact label="สิทธิ">{r.pttype_name ? `${r.pttype_name} (${r.fund})` : r.fund}</Fact>
       <Fact label="วันที่มา">{`${formatThaiDate(r.vstdate)} ${r.vsttime ?? ""}`.trim()}</Fact>
       <Fact label="แผนก">{r.dep_name}</Fact>
@@ -245,7 +257,7 @@ function SelectionBar({ onClear }: { onClear: () => void }) {
     <div className="mb-3 flex flex-col gap-1.5 rounded-lg border border-accent-line bg-accent-soft px-3 py-2 text-sm text-accent-text">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span>
-          เลือกส่ง FDH <span className="font-semibold tabular-nums">{formatCount(n)}</span> visit
+          เลือก <span className="font-semibold tabular-nums">{formatCount(n)}</span> visit
         </span>
         <button type="button" onClick={onClear} className={`rounded px-1.5 underline-offset-2 hover:underline ${focusRing}`}>
           ล้างที่เลือก

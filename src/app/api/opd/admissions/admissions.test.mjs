@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/opd/admissions/admissions.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows } from "./admissions.ts";
+import { buildRows, formatCid } from "./admissions.ts";
 
 const fundOf = (p) => ({ "89": "UCS", O1: "OFC" })[p] ?? "UNKNOWN";
 const raw = (vn, extra = {}) => ({
@@ -52,4 +52,13 @@ test("REP: found = latest on any fund, missing = null only on UCS, not loaded = 
   assert.equal(rows[2].rep.status, "pass");
   assert.equal("rep" in rows[3], false);
   assert.equal("rep" in buildRows([raw("1")], undefined, fundOf)[0], false);
+});
+
+test("formatCid: 13 digits grouped 1-4-5-2-1, others raw, empty blank", () => {
+  assert.equal(formatCid("1234567890123"), "1-2345-67890-12-3");
+  assert.equal(formatCid(" 1234567890123 "), "1-2345-67890-12-3");
+  assert.equal(formatCid("12345"), "12345");
+  assert.equal(formatCid("A123456789012"), "A123456789012");
+  assert.equal(formatCid(null), "");
+  assert.equal(formatCid("  "), "");
 });

@@ -139,3 +139,10 @@ export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf
     };
   });
 }
+
+/** เลขบัตรประชาชน 13 หลักเป็น 1-2345-67890-12-3 ; ไม่ใช่ 13 หลักคืนค่าเดิม (trim) ; ว่าง/null คืน "" */
+export function formatCid(cid: string | null | undefined): string {
+  const s = (cid ?? "").trim();
+  const m = /^(\d)(\d{4})(\d{5})(\d{2})(\d)$/.exec(s);
+  return m ? m.slice(1).join("-") : s;
+}
