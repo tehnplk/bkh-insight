@@ -49,6 +49,7 @@ export const navItems: NavItem[] = [
       { label: "ติดตามเคลม STP", href: "/fund/stp-claim" },
       { label: "ตรวจสอบ C ก่อนส่ง", href: "/fdh/c-check" },
       { label: "16 แฟ้มมาตรฐาน", href: "/fdh/files" },
+      { label: "ประวัติส่งออกเคลม", href: "/fdh/claim-batch" },
     ],
   },
   {

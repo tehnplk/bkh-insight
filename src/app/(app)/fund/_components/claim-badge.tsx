@@ -13,6 +13,7 @@ const TONE: Record<ClaimStatusKey, string> = {
   rep_c: BAD,
   rep_deny: BAD,
   nhso: "border-accent-line bg-accent-soft text-accent-text",
+  submitted: "border-accent-line bg-accent-soft text-accent-text",
   exported: NEUTRAL,
   unclaimed: NEUTRAL,
   failed: BAD,
@@ -27,13 +28,14 @@ function evidence(c: ClaimInfo, type: PatientType): string {
   if (NO_EVIDENCE.includes(c.status))
     return `${c.days != null ? `${formatCount(c.days)} วันหลัง${type === "OP" ? "วันรับบริการ" : "วันจำหน่าย"}` : "ไม่มีวันที่"} (กำหนด ${CLAIM_DEADLINE_DAYS[type]} วัน)`;
   const at = formatThaiDate(c.at);
-  return [c.status === "paid" ? "STM" : c.status.startsWith("rep_") ? "REP" : null, c.detail, c.amount != null ? `${formatBaht(c.amount)} บาท` : null, at]
+  const batch = c.batch ? `ชุดส่งออก #${c.batch} (ดูที่ประวัติส่งออกเคลม)` : null;
+  return [c.status === "paid" ? "STM" : c.status.startsWith("rep_") ? "REP" : null, c.detail, c.amount != null ? `${formatBaht(c.amount)} บาท` : null, at, batch]
     .filter(Boolean)
     .join(" · ");
 }
 
 /**
- * คอลัมน์ "สถานะเคลม" ของ /opd/admissions และ /ipd/admissions: ป้ายสถานะจากหลักฐานที่แรงสุด (STM > REP > HOSxP FDH > ส่งออกจากระบบนี้)
+ * คอลัมน์ "สถานะเคลม" ของ /opd/admissions และ /ipd/admissions: ป้ายสถานะจากหลักฐานที่แรงสุด (STM > REP > HOSxP FDH > ชุดส่งออกที่ยืนยันแล้ว > HOSxP จองส่ง > ชุดที่ยังไม่ยืนยัน)
  * ยังไม่มีหลักฐานแสดงจำนวนวันตั้งแต่วันรับบริการ/จำหน่าย ; ไม่มีสถานะ (กองทุนที่ไม่ต้องส่งหรือโหลดไม่ได้) แสดงขีด
  */
 export function ClaimBadge({ claim, type }: { claim?: ClaimInfo; type: PatientType }) {

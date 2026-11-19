@@ -4,6 +4,7 @@
 // ข้อมูลมาจาก endpoint ของหน้า (POST { [idField]: ids, format: "json" }) ตรวจ C ผ่าน checkUrl (POST { [idField]: ids, file })
 // ยิงทีละชุดไม่เกิน chunkSize ราย เรียงกันไม่ขนาน (pool ของ his มี 3 connection ใช้ร่วมทุกผู้ใช้) แล้วรวมผลด้วย batch.ts
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { todayIso } from "@/lib/thai-date";
@@ -65,15 +66,19 @@ async function downloadZip(entries: [path: string, data: string | Uint8Array][],
   return [...new Uint8Array(await subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** บันทึกรายที่อยู่ในไฟล์เป็นหลักฐาน "ส่งออกแล้ว" ของคอลัมน์สถานะเคลม ; บันทึกไม่สำเร็จไม่กันการดาวน์โหลด คืนคำเตือนแทน */
-async function logBatch(channel: Channel, files: FdhPreview["files"], source: Source, sha: string | null): Promise<string | undefined> {
+/** ผลของปุ่มส่งออก: คำเตือนหลังสร้างไฟล์ และชุดที่บันทึกแล้ว (ไว้ยืนยันส่งแล้ว) */
+type ZipResult = { warn?: string; batch?: { id: string; channel: Channel } };
+
+/** บันทึกรายที่อยู่ในไฟล์เป็นหลักฐาน "ส่งออกแล้ว รอยืนยัน" ของคอลัมน์สถานะเคลม ; บันทึกไม่สำเร็จไม่กันการดาวน์โหลด คืนคำเตือนแทน */
+async function logBatch(channel: Channel, files: FdhPreview["files"], source: Source, sha: string | null): Promise<ZipResult> {
   const type = source.idField === "ans" ? "IP" : "OP";
   const items = batchItems(files, type);
-  if (!items.length) return;
+  if (!items.length) return {};
   try {
-    await postJson("/api/fdh/claim-batch", { channel, patient_type: type, file_sha256: sha, items });
+    const { id } = await postJson<{ id: string }>("/api/fdh/claim-batch", { channel, patient_type: type, file_sha256: sha, items });
+    return { batch: { id, channel } };
   } catch (e) {
-    return `ดาวน์โหลดแล้ว แต่บันทึกประวัติการส่งออกไม่สำเร็จ (${(e as Error).message}) สถานะเคลมจึงยังไม่ขึ้น "ส่งออกแล้ว"`;
+    return { warn: `ดาวน์โหลดแล้ว แต่บันทึกประวัติการส่งออกไม่สำเร็จ (${(e as Error).message}) สถานะเคลมจึงยังไม่ขึ้น "ส่งออกแล้ว"` };
   }
 }
 
@@ -99,17 +104,20 @@ async function downloadEclaim(files: FdhPreview["files"], source: Source, dbf = 
   const name = `eclaim-${dbf ? "dbf-" : ""}${source.zipPrefix}-${todayIso()}-${source.ids.length}.zip`;
   const sha = await downloadZip(folders.flatMap((d) => d.files.map((f): [string, string | Uint8Array] => [`${d.name}/${f.name}`, f.data])), name);
   const big = folders.filter((d) => d.bytes > ECLAIM_MAX_BYTES).map((d) => `${d.name} ${(d.bytes / 1024 / 1024).toFixed(1)} MB`);
-  const logWarn = await logBatch(dbf ? "eclaim_dbf" : "eclaim_txt", files, source, sha);
-  return [big.length ? `เกิน 10 MB ต่อการนำเข้า: ${big.join(", ")} เลือกรายน้อยลงแล้วส่งออกหลายครั้ง` : "", logWarn].filter(Boolean).join(" ; ") || undefined;
+  const logged = await logBatch(dbf ? "eclaim_dbf" : "eclaim_txt", files, source, sha);
+  const warn = [big.length ? `เกิน 10 MB ต่อการนำเข้า: ${big.join(", ")} เลือกรายน้อยลงแล้วส่งออกหลายครั้ง` : "", logged.warn].filter(Boolean).join(" ; ");
+  return { ...logged, warn: warn || undefined };
 }
 
-/** ปุ่มส่งออก zip พร้อมป้ายเตือนว่ายังไม่ได้ทดสอบกับระบบปลายทาง (ไม่ส่ง target = ไม่มีป้าย) ; make คืนคำเตือนหลังสร้างไฟล์ (ถ้ามี) */
-function ZipButton({ target, label, make }: { target?: string; label: string; make: () => Promise<string | undefined | void> }) {
+/** ปุ่มส่งออก zip พร้อมป้ายเตือนว่ายังไม่ได้ทดสอบกับระบบปลายทาง (ไม่ส่ง target = ไม่มีป้าย) ; make คืนคำเตือนและชุดที่บันทึก (ส่งต่อ onBatch) */
+function ZipButton({ target, label, make, onBatch }: { target?: string; label: string; make: () => Promise<ZipResult>; onBatch: (b: NonNullable<ZipResult["batch"]>) => void }) {
   const [state, setState] = useState<{ busy: boolean; error?: string; warn?: string }>({ busy: false });
   async function run() {
     setState({ busy: true });
     try {
-      setState({ busy: false, warn: (await make()) ?? undefined });
+      const r = await make();
+      setState({ busy: false, warn: r.warn });
+      if (r.batch) onBatch(r.batch);
     } catch (e) {
       setState({ busy: false, error: `สร้างไฟล์ไม่สำเร็จ: ${(e as Error).message}` });
     }
@@ -146,6 +154,56 @@ async function downloadXlsx(sheets: XlsxSheet[], filename: string) {
   const url = URL.createObjectURL(await res.blob());
   Object.assign(document.createElement("a"), { href: url, download: filename }).click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * หลังส่งออกและบันทึกชุดแล้ว: ยืนยันว่าอัปโหลดขึ้นระบบปลายทางแล้ว (สถานะเคลม "ส่งแล้ว") ไม่บังคับ
+ * ยืนยันภายหลังหรือยกเลิกชุดที่ส่งออกผิดได้ที่ /fdh/claim-batch
+ */
+function ConfirmExport({ batch }: { batch: NonNullable<ZipResult["batch"]> }) {
+  const [state, setState] = useState<{ busy: boolean; done?: boolean; error?: string }>({ busy: false });
+  const target = batch.channel === "fdh" ? "FDH" : "e-Claim";
+  async function confirm() {
+    setState({ busy: true });
+    const res = await fetch("/api/fdh/claim-batch", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "confirm", ids: [batch.id] }),
+    }).catch(() => null);
+    const body = await res?.json().catch(() => null);
+    if (!res?.ok) return setState({ busy: false, error: body?.error ?? (res ? `ยืนยันไม่สำเร็จ (HTTP ${res.status})` : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้") });
+    if (!body?.confirmed?.length) return setState({ busy: false, error: "ยืนยันไม่ได้: ชุดนี้ถูกยกเลิกหรือยืนยันไปแล้ว" });
+    setState({ busy: false, done: true });
+  }
+  const history = (
+    <Link href="/fdh/claim-batch" className={`text-accent-text underline underline-offset-2 ${focusRing}`}>
+      ประวัติส่งออกเคลม
+    </Link>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm">
+      {state.done ? (
+        <p role="status" className="text-success">
+          ยืนยันส่งแล้ว ชุด #{batch.id} สถานะเคลมของรายในชุดเป็น &quot;ส่งแล้ว&quot; ดูได้ที่ {history}
+        </p>
+      ) : (
+        <>
+          <span>
+            ชุด #{batch.id} ยืนยันว่าอัปโหลดขึ้น {target} แล้ว
+          </span>
+          <button type="button" disabled={state.busy} onClick={confirm} className={`${btn} disabled:cursor-not-allowed disabled:opacity-60`}>
+            {state.busy ? "กำลังบันทึก…" : "ยืนยันส่งแล้ว"}
+          </button>
+          <span className="text-muted">ยืนยันภายหลังได้ที่ {history}</span>
+        </>
+      )}
+      {state.error && (
+        <p role="alert" className="w-full text-danger">
+          {state.error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function XlsxButton({ build, filename, label, rows }: { build: () => XlsxSheet[]; filename: string; label: string; rows: number }) {
@@ -244,6 +302,7 @@ function PreviewContent({ files, allFiles, counts, file, onFile, source }: { fil
   const [checks, setChecks] = useState<Record<string, FileCheck>>({});
   const [info, setInfo] = useState<Record<string, string>>({});
   const [onlyC, setOnlyC] = useState(false);
+  const [exported, setExported] = useState<NonNullable<ZipResult["batch"]> | null>(null);
   const running = Object.values(checks).some((c) => c.status === "pending" || c.status === "running");
   // เฉพาะแถวที่ติด C/เตือน: แสดงเฉพาะแฟ้มที่มีแถวเหล่านั้น และเฉพาะแถวนั้น (แถวที่มีแต่ระดับข้อมูลไม่นับ)
   const failedFiles = files.filter((f) => flagged(checks[f.file]).length > 0);
@@ -338,12 +397,14 @@ function PreviewContent({ files, allFiles, counts, file, onFile, source }: { fil
             target="FDH"
             label={`ส่งออก 16 แฟ้ม (.zip) ${formatCount(allFiles.length)} แฟ้ม`}
             make={() => downloadFdh(allFiles, source)}
+            onBatch={setExported}
           />
-          <ZipButton target="e-Claim" label="ส่งออก e-Claim (.zip)" make={() => downloadEclaim(allFiles, source)} />
+          <ZipButton target="e-Claim" label="ส่งออก e-Claim (.zip)" make={() => downloadEclaim(allFiles, source)} onBatch={setExported} />
           {/* ใช้ป้าย "ยังไม่ได้ทดสอบกับ e-Claim" ร่วมกับปุ่ม TEXT ข้างหน้า */}
-          <ZipButton label="ส่งออก e-Claim (.dbf)" make={() => downloadEclaim(allFiles, source, true)} />
+          <ZipButton label="ส่งออก e-Claim (.dbf)" make={() => downloadEclaim(allFiles, source, true)} onBatch={setExported} />
         </div>
       </div>
+      {exported && <ConfirmExport key={exported.id} batch={exported} />}
       {notes.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-xs text-warning">
           {notes.map(([f, c]) => (
