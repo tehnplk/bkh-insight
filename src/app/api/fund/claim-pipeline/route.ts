@@ -40,7 +40,7 @@ async function loadHis(view: View, start: string, end: string, codes: string[]):
     );
     // ปิดสิทธิผ่านระบบนี้ (Production เท่านั้น) ไม่อยู่ใน HOSxP ; ไม่ใช้กับ OFC เพราะปิดสิทธิ สปสช. ไม่ใช่ Approval Code
     const closed = rows.length && view === "op"
-      ? await byChunks<{ vn: string }>("SELECT DISTINCT vn FROM nhso_close_log WHERE ok AND zone = 'prod' AND vn = ANY($1::text[])", rows.map((r) => r.vn))
+      ? await byChunks<{ vn: string }>("SELECT DISTINCT vn FROM nhso_save_endpoint_log WHERE ok AND zone = 'prod' AND vn = ANY($1::text[])", rows.map((r) => r.vn))
       : [];
     return markClosed(
       rows.map((r) => ({ key: r.vn, hn: r.hn, date: String(r.vstdate).slice(0, 10), pttype: r.pttype, debtor: Number(r.amt), claim: r.status })),

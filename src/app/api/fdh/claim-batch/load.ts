@@ -12,7 +12,7 @@ FROM claim_batch_item i JOIN claim_batch b ON b.id = i.batch_id
 WHERE i.patient_type = $1 AND i.ref = ANY($2::text[]) AND b.cancelled_at IS NULL
 ORDER BY i.ref, b.confirmed_at IS NULL, b.created_at DESC`;
 // ปิดสิทธิผ่าน /fund/close-privilege (ไม่ย้อนเข้า HOSxP) นับเป็นปิดสิทธิแล้ว เหมือน claim-pipeline
-const CLOSED_SQL = "SELECT DISTINCT vn AS key FROM nhso_close_log WHERE ok AND zone = 'prod' AND vn = ANY($1::text[])";
+const CLOSED_SQL = "SELECT DISTINCT vn AS key FROM nhso_save_endpoint_log WHERE ok AND zone = 'prod' AND vn = ANY($1::text[])";
 
 /** รายจาก his: k = VN (OP) / AN (IP) ; fdh เฉพาะ OP */
 export type ClaimCand = Omit<ClaimInput, "type" | "rep" | "stm" | "batch"> & { k: string };

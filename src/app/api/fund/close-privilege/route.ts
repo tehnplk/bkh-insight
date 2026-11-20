@@ -5,7 +5,7 @@ import { badRequest, inList, loadDepartments, loadLookups, pttypeName, unauthori
 import { dispenseStatus, type DispenseStatus } from "./dispense";
 import { PID, VN, buildClaimBody, isClosableNow, postClaim, readConfig, thaiDate, type Zone } from "./nhso";
 
-// ปิดสิทธิผ่าน NHSO ENDPOINT ทีละราย (เจ้าหน้าที่เลือกเอง ไม่มีการปิดอัตโนมัติ) ผลไม่ย้อนเข้า HOSxP จึงบันทึกที่ nhso_close_log
+// ปิดสิทธิผ่าน NHSO ENDPOINT ทีละราย (เจ้าหน้าที่เลือกเอง ไม่มีการปิดอัตโนมัติ) ผลไม่ย้อนเข้า HOSxP จึงบันทึกที่ nhso_save_endpoint_log
 // ห้ามส่งเลขบัตร (pid/recorderPid) ไป client ห้าม log และห้ามเก็บลงฐาน
 
 export type CloseRow = {
@@ -136,7 +136,7 @@ export async function GET(request: NextRequest) {
   );
   const [done, rx] = list.length
     ? await Promise.all([
-        insightQuery<{ vn: string }>("SELECT vn FROM nhso_close_log WHERE ok AND zone = $1 AND vn = ANY($2::text[])", [config.zone, list.map((r) => r.vn)]).then(
+        insightQuery<{ vn: string }>("SELECT vn FROM nhso_save_endpoint_log WHERE ok AND zone = $1 AND vn = ANY($2::text[])", [config.zone, list.map((r) => r.vn)]).then(
           (rows) => new Set(rows.map((r) => r.vn)),
         ),
         loadDispense(list.map((r) => r.vn)),
@@ -210,7 +210,7 @@ async function closeOne(
   return insightTransaction(async (tx) => {
     const [{ locked }] = await tx<{ locked: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext('nhso_close'), hashtext($1)) AS locked", [vn]);
     if (!locked) return fail("มีผู้ใช้อื่นกำลังปิดสิทธิรายนี้อยู่");
-    const [prev] = await tx("SELECT 1 FROM nhso_close_log WHERE ok AND zone = $1 AND vn = $2", [config.zone, vn]);
+    const [prev] = await tx("SELECT 1 FROM nhso_save_endpoint_log WHERE ok AND zone = $1 AND vn = $2", [config.zone, vn]);
     if (prev) return fail("ปิดสิทธิผ่านระบบนี้แล้ว");
     // ตรวจกับ HOSxP ทันทีก่อนยิง (อาจปิดใน HOSxP ระหว่างที่หน้าเปิดค้างไว้)
     const [v] = await hisQuery<Visit>(VISIT_SQL(1), [vn, vn]);
@@ -222,7 +222,7 @@ async function closeOne(
     const amounts = { total: Number(v.total_amount), privilege: Number(v.privilege_amount), cash: Number(v.cash_amount) };
     const log = async (r: { ok: boolean; httpStatus: number | null; seq?: string; authenCode?: string; error?: string; dataError?: string | null }, requestAt: Date) => {
       await tx(
-        `INSERT INTO nhso_close_log (vn, transaction_id, zone, request_at, response_at, ok, http_status, seq, authen_code, error,
+        `INSERT INTO nhso_save_endpoint_log (vn, transaction_id, zone, request_at, response_at, ok, http_status, seq, authen_code, error,
            requested_by, user_id, doctor_code, total_amount, privilege_amount, cash_amount, data_error)
          VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [vn, `${hcode}${vn}`, config.zone, requestAt, r.ok, r.httpStatus, r.seq ?? null, r.authenCode ?? null, r.error ?? null,
