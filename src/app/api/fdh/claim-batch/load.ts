@@ -7,7 +7,7 @@ import { classifyClaim, type ClaimInfo, type ClaimInput, type PatientType } from
 
 // ชุดส่งออกต่อราย (claim_batch_item_ref_idx): ไม่นับชุดที่ยกเลิก ยืนยันแล้วก่อน แล้วล่าสุด
 const BATCH_SQL = `SELECT DISTINCT ON (i.ref) i.ref AS key, b.id::text AS id, b.created_at::text AS at, b.channel,
-  b.confirmed_at::text AS confirmed_at, b.confirmed_by, b.submitted_on::text AS submitted_on
+  b.created_by, b.confirmed_at::text AS confirmed_at, b.confirmed_by, b.submitted_on::text AS submitted_on
 FROM claim_batch_item i JOIN claim_batch b ON b.id = i.batch_id
 WHERE i.patient_type = $1 AND i.ref = ANY($2::text[]) AND b.cancelled_at IS NULL
 ORDER BY i.ref, b.confirmed_at IS NULL, b.created_at DESC`;
@@ -33,7 +33,7 @@ export async function loadClaims(
   const [repRows, stm, batch, closed] = await Promise.all([
     reps ? null : insightQuery<RepInfo & Record<"vn" | "an", string>>(repSql, [keys]),
     insightQuery<{ key: string; paid: string; paid_at: string | null }>(STM_PAID_SQL[type === "OP" ? "op" : "ip"], [keys]),
-    insightQuery<NonNullable<ClaimInput["batch"]> & { key: string }>(BATCH_SQL, [type, keys]),
+    insightQuery<NonNullable<ClaimInput["batch"]> & { key: string; created_by: string }>(BATCH_SQL, [type, keys]),
     type === "OP" ? insightQuery<{ key: string }>(CLOSED_SQL, [keys]) : [],
   ]);
   const repBy = reps ?? new Map(repRows!.map((r) => [r[repKey], r]));

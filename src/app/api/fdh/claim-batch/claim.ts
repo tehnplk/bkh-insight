@@ -33,8 +33,21 @@ export const CLAIM_LABEL: Record<ClaimStatusKey, string> = {
 export const UNSENT_VALUES = ["unsent", "wait_close"];
 export const OVERDUE_VALUES = ["overdue"];
 
-/** สถานะเคลมของแถว: at = วันที่ของหลักฐาน (ยังไม่ส่ง = วันรับบริการ/จำหน่าย), detail = แหล่ง/ข้อความ, days = วันนับจาก at ถึงวันนี้, amount = ยอด STM, batch = id ของชุดส่งออก */
-export type ClaimInfo = { status: ClaimStatusKey; at: string | null; detail?: string; days?: number; amount?: number; batch?: string };
+/**
+ * สถานะเคลมของแถว: at = วันที่ของหลักฐาน (ยังไม่ส่ง = วันรับบริการ/จำหน่าย), detail = แหล่ง/ข้อความ, days = วันนับจาก at ถึงวันนี้, amount = ยอด STM, batch = id ของชุดส่งออก
+ * เฉพาะสถานะจากชุดส่งออก: channel, by = ผู้ยืนยัน (submitted) / ผู้ส่งออก (exported), exported_at = วันที่ส่งออกของชุดที่ยืนยันแล้ว
+ */
+export type ClaimInfo = {
+  status: ClaimStatusKey;
+  at: string | null;
+  detail?: string;
+  days?: number;
+  amount?: number;
+  batch?: string;
+  channel?: Channel;
+  by?: string;
+  exported_at?: string | null;
+};
 export type ClaimCounts = { unsent: number; overdue: number };
 
 /** fdh_claim_status ของ HOSxP (OP เท่านั้น: IP จองส่งก่อนวันจำหน่าย = ของ visit ผู้ป่วยนอก) */
@@ -57,7 +70,15 @@ export type ClaimInput = {
   rep?: { status: "pass" | "c" | "deny"; rep_date: string | null; rep_no: string | null } | null;
   stm?: { paid: number | string; paid_at: string | null } | null;
   /** ชุดส่งออกที่ยังไม่ยกเลิกต่อราย: ยืนยันแล้วก่อน แล้วล่าสุด (BATCH_SQL ใน load.ts) */
-  batch?: { id?: string; at: string; channel: Channel; confirmed_at?: string | null; confirmed_by?: string | null; submitted_on?: string | null } | null;
+  batch?: {
+    id?: string;
+    at: string;
+    channel: Channel;
+    created_by?: string | null;
+    confirmed_at?: string | null;
+    confirmed_by?: string | null;
+    submitted_on?: string | null;
+  } | null;
 };
 
 const day = (s: string | null | undefined) => (s ? String(s).slice(0, 10) : null);
@@ -77,9 +98,17 @@ export function classifyClaim(x: ClaimInput, today: string): ClaimInfo | undefin
   const b = x.batch;
   const batchId = b?.id ? { batch: String(b.id) } : {};
   if (b?.confirmed_at)
-    return { status: "submitted", at: day(b.submitted_on ?? b.confirmed_at), detail: `ยืนยันโดย ${b.confirmed_by ?? "ไม่ทราบชื่อ"}`, ...batchId };
+    return {
+      status: "submitted",
+      at: day(b.submitted_on ?? b.confirmed_at),
+      detail: `ยืนยันโดย ${b.confirmed_by ?? "ไม่ทราบชื่อ"}`,
+      ...batchId,
+      channel: b.channel,
+      ...(!!b.confirmed_by && { by: b.confirmed_by }),
+      exported_at: day(b.at),
+    };
   if (f?.resv === "Y") return { status: "nhso", at: day(f.resv_at), detail: "HOSxP ส่ง FDH" };
-  if (b) return { status: "exported", at: day(b.at), detail: CHANNEL_LABEL[b.channel], ...batchId };
+  if (b) return { status: "exported", at: day(b.at), detail: CHANNEL_LABEL[b.channel], ...batchId, channel: b.channel, ...(!!b.created_by && { by: b.created_by }) };
   if (f?.msg && FDH_UNCLAIMED.test(f.msg)) return { status: "unclaimed", at: day(f.msg_at), detail: `FDH: ${f.msg}` };
   if (f?.resv === "N") return { status: "failed", at: day(f.resv_at), detail: "HOSxP ส่ง FDH ไม่สำเร็จ" };
   if (!CLAIM_FUNDS.includes(x.fund) || !(x.amount > 0)) return undefined;

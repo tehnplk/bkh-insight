@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import type { ReactNode } from "react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import type { Patient } from "@/app/api/example/components-demo/patients";
 
 const STATUS_STYLE: Record<Patient["status"], string> = {
@@ -33,8 +35,8 @@ const columns = col.columns([
 ]);
 
 function PatientDetail({ p }: { p: Patient }) {
-  const items: [string, string][] = [
-    ["HN", p.hn],
+  const items: [string, ReactNode][] = [
+    ["HN", copyable(p.hn, "HN")],
     ["เพศ / อายุ", `${p.sex} ${p.age} ปี`],
     ["หอผู้ป่วย", p.ward],
     ["วันที่รับไว้", dateTh(p.admitDate)],

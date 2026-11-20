@@ -3,6 +3,7 @@ import { escapeLike, hisQuery } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs } from "@/lib/column-filter-sql";
 import { xlsxResponse } from "@/lib/xlsx";
+import { sexAgeText } from "@/lib/sex-age";
 import type { FundVisitRow } from "../../types";
 import {
   FULL_NAME_SQL, OPI_BY_DATE, activePttypes, depNameSql, depSql, badRequest, effectiveCodes, fundPttypeFilter, fundSql, inList, isAuthed,
@@ -143,24 +144,30 @@ export async function GET(request: NextRequest) {
     LEFT JOIN (${itemSql}) a ON a.vn = v.vn
     LEFT JOIN patient p ON p.hn = v.hn
     LEFT JOIN pttype t ON t.pttype = v.pttype
-    LEFT JOIN kskdepartment k ON k.depcode = v.main_dep`;
+    LEFT JOIN kskdepartment k ON k.depcode = v.main_dep
+    LEFT JOIN vn_stat vs ON vs.vn = v.vn`;
   const select = `SELECT v.vn, v.vstdate, v.hn, ${FULL_NAME_SQL} AS full_name, v.pttype, IFNULL(t.name, v.pttype) AS pttype_name,
     ${fundSql("t")} AS fund_code, ${depSql("v")} AS dep_code, ${depNameSql("v")} AS dep_name,
+    vs.sex, vs.age_y, vs.age_m, vs.age_d,
     IFNULL(a.amount, 0) AS amount ${from}`;
   // sort มาจาก allowlist และ dir เป็น asc|desc เท่านั้น
   const orderBy = `ORDER BY ${sort ? `${SORT_SQL[sort]} ${dir}, ` : "v.vstdate, "}v.vn`;
   const allParams = [...itemParams, ...whereParams];
   if (facet) return Response.json(await loadFacet(hisQuery, FILTER_DEFS, facet, cf.query.facetQ, from, { sql: where, params: allParams }));
 
-  const normalize = (r: FundVisitRow): FundVisitRow => ({ ...r, pttype: r.pttype ?? "", amount: round2(r.amount) });
+  type RawRow = Omit<FundVisitRow, "sex_age"> & { sex: string | null; age_y: number | null; age_m: number | null; age_d: number | null };
+  const normalize = ({ sex, age_y, age_m, age_d, ...r }: RawRow): FundVisitRow => ({
+    ...r, pttype: r.pttype ?? "", amount: round2(r.amount), sex_age: sexAgeText(sex, age_y, age_m, age_d),
+  });
 
   if (format === "xlsx") {
-    const rows = (await hisQuery<FundVisitRow>(`${select} ${where} ${orderBy}`, allParams)).map(normalize);
+    const rows = (await hisQuery<RawRow>(`${select} ${where} ${orderBy}`, allParams)).map(normalize);
     return xlsxResponse<FundVisitRow>(`opd-fund-${start}_${end}.xlsx`, [
       { key: "vstdate", header: "วันที่รับบริการ", width: 14 },
       { key: "vn", header: "VN", width: 14 },
       { key: "hn", header: "HN", width: 12 },
       { key: "full_name", header: "ชื่อ-นามสกุล", width: 28 },
+      { key: "sex_age", header: "เพศ/อายุ", width: 18 },
       { key: "pttype_name", header: "สิทธิ", width: 32 },
       { key: "fund_code", header: "กองทุน", width: 10 },
       { key: "dep_name", header: "แผนก", width: 24 },
@@ -169,7 +176,7 @@ export async function GET(request: NextRequest) {
   }
 
   const [rows, [{ total }]] = await Promise.all([
-    hisQuery<FundVisitRow>(`${select} ${where} ${orderBy} LIMIT ? OFFSET ?`, [...allParams, pageSize, (page - 1) * pageSize]),
+    hisQuery<RawRow>(`${select} ${where} ${orderBy} LIMIT ? OFFSET ?`, [...allParams, pageSize, (page - 1) * pageSize]),
     hisQuery<{ total: number }>(`SELECT COUNT(*) AS total ${from} ${where}`, allParams),
   ]);
   const body: GridPage<FundVisitRow> = { rows: rows.map(normalize), total: Number(total) };

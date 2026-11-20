@@ -2,6 +2,7 @@
 
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { copyable } from "@/components/copy-button/copy-button";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { admitStatus, type AdmitInfo, type VisitRow } from "@/app/api/opd/admissions/admissions";
@@ -94,7 +95,7 @@ function AnInfo({ vn }: { vn: string }) {
   if (error || !a) return <LoadError what="ข้อมูล AN" error={error} retry={retry} />;
   return (
     <Facts>
-      <Fact label="AN">{a.an}</Fact>
+      <Fact label="AN">{copyable(a.an, "AN")}</Fact>
       <Fact label="วันที่ admit">{dateTime(a.regdate, a.regtime)}</Fact>
       <Fact label="วันที่จำหน่าย">{dateTime(a.dchdate, a.dchtime) ?? "ยังไม่จำหน่าย"}</Fact>
       <Fact label="สถานะการจำหน่าย">{a.dchstts_name}</Fact>

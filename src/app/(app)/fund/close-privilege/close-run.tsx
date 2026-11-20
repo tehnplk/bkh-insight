@@ -3,6 +3,7 @@
 // ชิ้นที่ใช้ร่วมระหว่าง /fund/close-privilege กับปุ่ม "ปิดสิทธิ" ของ /opd/admissions: ยืนยัน ยิงทีละราย และแสดงผลรายต่อราย
 import type { ReactNode } from "react";
 import { AuthNotice } from "@/components/auth-card/auth-card";
+import { copyable } from "@/components/copy-button/copy-button";
 import { formatCount } from "@/lib/number-format";
 import type { CloseReady, CloseResult } from "@/app/api/fund/close-privilege/route";
 import type { Zone } from "@/app/api/fund/close-privilege/nhso";
@@ -89,7 +90,7 @@ export function CloseResults({ run, onClose }: { run: CloseItem[]; onClose: () =
       <ol aria-live="polite" className="divide-y divide-line rounded-lg border border-line">
         {run.map((i) => (
           <li key={i.vn} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2">
-            <span className="tabular-nums">VN {i.vn}</span>
+            <span className="tabular-nums">VN {copyable(i.vn, "VN")}</span>
             {i.state === "wait" && <span className="text-muted">รอส่ง</span>}
             {i.state === "sending" && <span className="text-muted">กำลังส่ง…</span>}
             {i.result?.ok && (

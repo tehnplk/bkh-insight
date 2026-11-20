@@ -1,7 +1,10 @@
 "use client";
 
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
+import { PatientName } from "@/components/patient-name/patient-name";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import type { GridPage } from "@/lib/grid-query";
 import { formatBaht, formatCount } from "@/lib/number-format";
@@ -43,23 +46,10 @@ const money = (key: "debtor" | "debt_amount" | "compensation" | "diff", header: 
   col.accessor(key, { header, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 const text = (key: "vn" | "an" | "hn" | "pttype_name" | "drg" | "rep_no", header: string) =>
   col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: { ...nowrap, filter: true } });
-// shortcut: DataGrid ไม่เปิด modal ให้ cell เรียกได้ จึงกดปุ่ม "รายละเอียด" ของแถวเดียวกันแทน ถ้า DataGrid มี meta.openDetail ให้เปลี่ยนไปใช้
-function openRowDetail(e: MouseEvent<HTMLButtonElement>) {
-  e.currentTarget.closest("tr")?.querySelector<HTMLButtonElement>('td:first-child button[aria-haspopup="dialog"]')?.click();
-}
 const name = col.accessor("full_name", {
   header: "ชื่อ-สกุล",
-  cell: (c) => (
-    <button
-      type="button"
-      aria-haspopup="dialog"
-      onClick={openRowDetail}
-      className={`-mx-1 cursor-pointer rounded-sm px-1 text-left whitespace-nowrap text-accent-text underline-offset-2 hover:underline ${focusRing}`}
-    >
-      {c.getValue() || "–"}
-    </button>
-  ),
-  meta: { filter: true },
+  cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+  meta: { ...nowrap, filter: true },
 });
 const tail = [
   text("rep_no", "REP"),
@@ -85,7 +75,7 @@ const COLUMNS = {
 const renderDetail = (r: UcDebtorRow) => <UcDebtorDetail row={r} status={<Status row={r} />} />;
 const detailTitle = (r: UcDebtorRow) => (
   <>
-    {r.full_name} <span className="font-normal text-muted tabular-nums">{r.an ? `AN ${r.an}` : `VN ${r.vn}`}</span>
+    {r.full_name} <span className="font-normal text-muted tabular-nums">{r.an ? <>AN {copyable(r.an, "AN")}</> : <>VN {copyable(r.vn, "VN")}</>}</span>
   </>
 );
 
@@ -153,6 +143,8 @@ export function UcDebtorGrid() {
       columns={COLUMNS[type]}
       getRowId={(r) => r.key}
       renderDetail={renderDetail}
+      detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+      detailInColumn="full_name"
       detailTitle={detailTitle}
       detailSize="medium"
       renderSummary={renderSummary}

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { copyable } from "@/components/copy-button/copy-button";
 import { ChevronRight } from "lucide-react";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
@@ -47,7 +48,7 @@ export function VisitItems({ vn }: { vn: string }) {
         <dt className="text-muted">กองทุน</dt>
         <dd>{d.fund_name}</dd>
         <dt className="text-muted">VN</dt>
-        <dd className="tabular-nums">{d.vn}</dd>
+        <dd className="tabular-nums">{copyable(d.vn, "VN")}</dd>
       </dl>
 
       <div className="mt-5">

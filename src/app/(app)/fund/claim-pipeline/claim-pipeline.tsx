@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatBaht, formatCompactBaht, formatCount } from "@/lib/number-format";
@@ -136,7 +137,7 @@ function Days({ row, type }: { row: PipelineRow; type: PipelineType }) {
 }
 
 /** ยอดเงินที่กดเปิดรายละเอียดใน modal ; ไม่มีค่า = "–" กดไม่ได้ */
-function MoneyDetail({ value, label, title, children }: { value: number | null; label: string; title: string; children: () => ReactNode }) {
+function MoneyDetail({ value, label, title, children }: { value: number | null; label: string; title: ReactNode; children: () => ReactNode }) {
   const [open, setOpen] = useState(false);
   if (value == null) return dash;
   return (
@@ -236,13 +237,20 @@ function StmCaseView({ type, caseKey }: { type: PipelineType; caseKey: string })
 
 const col = gridColumnHelper<PipelineRow>();
 const nowrap = { className: "whitespace-nowrap" };
-const caseTitle = (type: PipelineType, r: PipelineRow) => `${type === "op" ? "VN" : "AN"} ${r.key} · HN ${r.hn}`;
+const caseTitle = (type: PipelineType, r: PipelineRow) => {
+  const ref = type === "op" ? "VN" : "AN";
+  return (
+    <>
+      {ref} {copyable(r.key, ref)} · HN {copyable(r.hn, "HN")}
+    </>
+  );
+};
 const debtor = col.accessor("debtor", { header: "ลูกหนี้สิทธิ (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 const stmPaid = (type: PipelineType) =>
   col.accessor("stm_paid", {
     header: "เงินเข้า STM (บาท)",
     cell: (c) => (
-      <MoneyDetail value={c.getValue()} label="ดูรายการ STM เงินเข้า" title={`STM ${caseTitle(type, c.row.original)}`}>
+      <MoneyDetail value={c.getValue()} label="ดูรายการ STM เงินเข้า" title={<>STM {caseTitle(type, c.row.original)}</>}>
         {() => <StmCaseView type={type} caseKey={c.row.original.key} />}
       </MoneyDetail>
     ),
@@ -254,7 +262,7 @@ const compensation = (type: PipelineType) =>
     cell: (c) => {
       const r = c.row.original;
       return (
-        <MoneyDetail value={c.getValue()} label="ดูรายละเอียด REP ชดเชยสุทธิ" title={`REP ${caseTitle(type, r)}`}>
+        <MoneyDetail value={c.getValue()} label="ดูรายละเอียด REP ชดเชยสุทธิ" title={<>REP {caseTitle(type, r)}</>}>
           {() => (
             <>
               <Facts>

@@ -5,6 +5,7 @@ import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } fr
 import { todayIso } from "@/lib/thai-date";
 import { dxGroupSql, parseDx } from "@/lib/dx-groups";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
+import { sexAgeText } from "@/lib/sex-age";
 import {
   FULL_NAME_SQL, activePttypes, badRequest, effectiveCodes, fundFilterDef, fundOf, inList, isAuthed, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
@@ -43,6 +44,10 @@ const AUTH_SQL = "(SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WH
 const CLAIM_SQL = "(SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)";
 const SELECT = `SELECT i.an, i.hn,
        ${FULL_NAME_SQL} AS patient_name,
+       p.sex,
+       TIMESTAMPDIFF(YEAR, p.birthday, i.regdate) AS age_y,
+       MOD(TIMESTAMPDIFF(MONTH, p.birthday, i.regdate), 12) AS age_m,
+       DATEDIFF(i.regdate, DATE_ADD(p.birthday, INTERVAL TIMESTAMPDIFF(MONTH, p.birthday, i.regdate) MONTH)) AS age_d,
        i.regdate, i.dchdate, i.dchstts, d.name AS dchstts_name, i.dchtype, COALESCE(dt.name, i.dchtype) AS dch_reason, i.ward, w.name AS ward_name,
        DATEDIFF(i.dchdate, i.regdate) AS los_days,
        s.income, s.uc_money,
@@ -120,6 +125,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "an", header: "AN", width: 12 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
+  { key: "sex_age", header: "เพศ/อายุ", width: 18 },
   { key: "ward_name", header: "Ward", width: 20 },
   { key: "fund_label", header: "กองทุน", width: 8 },
   { key: "pttype_name", header: "สิทธิ", width: 28 },
@@ -296,9 +302,9 @@ export async function GET(request: NextRequest) {
       console.error("ipd/admissions claim", e);
       return undefined;
     });
-    const rows = built.map((r) => {
+    const rows = built.map((r, i) => {
       const claim = claims?.get(r.an);
-      return { ...r, subfunds: subfunds && (subfunds.get(r.an) ?? []), ...(claim && { claim }) };
+      return { ...r, sex_age: sexAgeText(raws[i].sex, raws[i].age_y, raws[i].age_m, raws[i].age_d), subfunds: subfunds && (subfunds.get(r.an) ?? []), ...(claim && { claim }) };
     });
 
     if (xlsx) {

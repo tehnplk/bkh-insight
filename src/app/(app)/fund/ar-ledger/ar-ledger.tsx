@@ -3,6 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import type { GridPage } from "@/lib/grid-query";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate } from "@/lib/thai-date";
@@ -45,7 +46,7 @@ function groupByFiscalYear(months: string[]) {
 function syncResult(log: SyncLog) {
   const c = log.counts;
   const n = (k: string) => formatCount(c[k] ?? 0);
-  return `ตั้งหนี้ใหม่ OPD ${n("opd_set")} IPD ${n("ipd_set")} · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${n("ipd_reverse")} · รับชำระตาม STM ${n("stm_settle")}${c.stm_unmatched ? ` (STM ที่ไม่พบลูกหนี้ที่ตัดได้ ${n("stm_unmatched")})` : ""}`;
+  return `ตั้งหนี้ใหม่ OPD ${n("opd_set")} IPD ${n("ipd_set")} · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${n("ipd_reverse")}${c.stm_settle ? ` · รับชำระตาม STM ${n("stm_settle")}` : ""}${c.stm_unmatched ? ` (STM ที่ไม่พบลูกหนี้ที่ตัดได้ ${n("stm_unmatched")})` : ""}`;
 }
 
 function SyncButton({ onDone }: { onDone: (log: SyncLog | null, error?: string) => void }) {
@@ -159,7 +160,11 @@ const renderSummary = ({ total, summary }: EntriesPage) => (
   </p>
 );
 
-const detailTitle = (r: LedgerEntry) => `${r.an ? `AN ${r.an}` : r.vn ? `VN ${r.vn}` : r.ref} · ${r.patient_type}`;
+const detailTitle = (r: LedgerEntry) => (
+  <>
+    {r.an ? <>AN {copyable(r.an, "AN")}</> : r.vn ? <>VN {copyable(r.vn, "VN")}</> : r.ref} · {r.patient_type}
+  </>
+);
 
 function LedgerDetail({ row, account, onResync }: { row: LedgerEntry; account: ReactNode; onResync: () => void }) {
   return (

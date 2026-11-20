@@ -1,8 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ReceiptText } from "lucide-react";
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
+import { PatientName } from "@/components/patient-name/patient-name";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { MultiSelect } from "@/components/multi-select/multi-select";
 import { FdhPreviewModal } from "@/components/fdh-preview/fdh-preview";
@@ -12,13 +14,14 @@ import { formatThaiDate } from "@/lib/thai-date";
 import type { CodeOptionGroup } from "@/app/api/fund/types";
 import { srmFilterLabel } from "@/app/api/opd/right-check/srm";
 import { AdmitBadge, AdmitFilter } from "./admit-badge";
-import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, formatCid, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
-import { Money, btn, focusRing, num, useJson, useUrlParams } from "@/app/(app)/fund/_components/ui";
+import { MAX_EXPORT_VNS, MAX_SELECT_VNS, OPD_MAX_DAYS, type ClaimStatus, type VisitRow, type VisitsPage } from "@/app/api/opd/admissions/admissions";
+import { Money, btn, focusRing, num, useUrlParams } from "@/app/(app)/fund/_components/ui";
 import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-detail";
 import { ClaimStats, FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
 import { ClaimBadge } from "@/app/(app)/fund/_components/claim-badge";
 import { ClosePrivilegeButton } from "./close-button";
+import { AppCloseBadge, Cid, HisCloseBadge } from "./close-log";
 import { HisHcode, RightCheckContext, RightCheckStatus, SrmHcode, SrmRight, SrmStatus, useRightCheck } from "./right-check";
 
 const FILTERS = ["pttypes", "deps", "unclosed"] as const;
@@ -34,13 +37,17 @@ function Code({ value, missing }: { value: string | null; missing: string }) {
   );
 }
 
-/** Authen / ปิดสิทธิ คั่นด้วย "/" ; OFC ปิดสิทธิด้วย Approval Code จาก EDC */
+/** Authen / ปิดสิทธิ คั่นด้วย "/" ; OFC ปิดสิทธิด้วย Approval Code จาก EDC
+ *  เลขปิดสิทธิสีตามที่มา: HOSxP (ฟ้า) / ปิดผ่านระบบนี้ (เขียว กดดูประวัติ) มีทั้งคู่แสดงทั้งคู่ */
 function Codes({ row }: { row: VisitRow }) {
+  const missing = row.fund === "OFC" ? "ไม่พบ Approval Code" : "ไม่พบเลขปิดสิทธิ";
   return (
-    <span className="tabular-nums whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 tabular-nums whitespace-nowrap">
       <Code value={row.auth_code} missing="ไม่พบ Authen" />
-      <span className="mx-1 text-muted">/</span>
-      <Code value={row.close_code} missing={row.fund === "OFC" ? "ไม่พบ Approval Code" : "ไม่พบเลขปิดสิทธิ"} />
+      <span className="text-muted">/</span>
+      {row.close_code && <HisCloseBadge code={row.close_code} />}
+      <AppCloseBadge row={row} title={detailTitle(row)} />
+      {!row.close_code && !row.app_close && <Code value={null} missing={missing} />}
     </span>
   );
 }
@@ -95,7 +102,7 @@ const col = gridColumnHelper<VisitRow>();
 // ทุกคอลัมน์ (ยกเว้นเงิน) กรองจากหัวคอลัมน์ได้ ค่าและรายการมาจาก /api/opd/admissions?facet=<id>
 const filterable = { ...nowrap, filter: true } as const;
 const timeCell = { className: "whitespace-nowrap tabular-nums", filter: true } as const;
-const text = (key: "hn" | "patient_name" | "pttype_name" | "dep_name", header: string, sortable = true) =>
+const text = (key: "hn" | "pttype_name" | "dep_name", header: string, sortable = true) =>
   col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: filterable, enableSorting: sortable });
 const money = (key: "income" | "uc_money", header: string) =>
   col.accessor(key, { header, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
@@ -118,7 +125,12 @@ const columns = col.columns([
     meta: filterable,
   }),
   text("hn", "HN"),
-  text("patient_name", "ชื่อ-สกุล", false),
+  col.accessor("patient_name", {
+    header: "ชื่อ-สกุล",
+    cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+    meta: filterable,
+    enableSorting: false,
+  }),
   col.accessor("fund", { header: "กองทุน", meta: filterable, enableSorting: false }),
   col.accessor("hospmain", { header: "HCODE(HIS)", cell: (c) => <HisHcode row={c.row.original} value={c.getValue()} />, meta: timeCell, enableSorting: false }),
   // ผลตรวจสิทธิกับ สปสช.: ที่บันทึกไว้ไม่เกิน 24 ชม. มากับแถว (row.right อยู่ใน Excel ด้วย) ผลจากปุ่มรอบนี้ทับ ; คนละฐานกับ his จึงไม่มี sort
@@ -164,19 +176,10 @@ const columns = col.columns([
   money("uc_money", "ลูกหนี้สิทธิ (บาท)"),
 ]);
 
-/** PDPA: โหลดเลขบัตรเฉพาะตอนเปิด modal ไม่อยู่ในแถว grid หรือ Excel */
-function Cid({ vn }: { vn: string }) {
-  const { loading, data, error } = useJson<{ cid: string | null }>(`/api/opd/admissions/cid?vn=${vn}`);
-  if (loading) return <span className="text-muted">กำลังโหลด…</span>;
-  const cid = formatCid(data?.cid);
-  if (error || !cid) return <span className="text-muted" title={error}>–</span>;
-  return <span className="select-all">{cid}</span>;
-}
-
 const renderDetail = (r: VisitRow) => (
   <div className="text-sm">
     <Facts>
-      <Fact label="HN">{r.hn}</Fact>
+      <Fact label="HN">{copyable(r.hn, "HN")}</Fact>
       <Fact label="เลขบัตรประชาชน">
         <Cid vn={r.vn} />
       </Fact>
@@ -184,7 +187,8 @@ const renderDetail = (r: VisitRow) => (
       <Fact label="วันที่มา">{`${formatThaiDate(r.vstdate)} ${r.vsttime ?? ""}`.trim()}</Fact>
       <Fact label="แผนก">{r.dep_name}</Fact>
       <Fact label="Authen">{r.auth_code}</Fact>
-      <Fact label={r.fund === "OFC" ? "Approval Code (EDC)" : "ปิดสิทธิ"}>{r.close_code}</Fact>
+      <Fact label={r.fund === "OFC" ? "Approval Code (EDC)" : "ปิดสิทธิ (HOSxP)"}>{r.close_code}</Fact>
+      {r.app_close && <Fact label="ปิดสิทธิ (BKH Insight)">{r.app_close.authen_code || "ปิดแล้ว"}</Fact>}
       <Fact label="สถานะปิดสิทธิ">{CLAIM_LABEL[r.claim_status]}</Fact>
       <Fact label="สถานะผู้ป่วย">{r.ovst_status && r.ovst_status_detail && r.ovst_status !== r.ovst_status_detail ? `${r.ovst_status} (${r.ovst_status_detail})` : r.ovst_status}</Fact>
       <Fact label="เลขที่ใบเสร็จ">{r.rcpt_no}</Fact>
@@ -201,7 +205,7 @@ const renderDetail = (r: VisitRow) => (
 );
 const detailTitle = (r: VisitRow) => (
   <>
-    {r.patient_name || "–"} <span className="font-normal text-muted tabular-nums">VN {r.vn}</span>
+    {r.patient_name || "–"} <span className="font-normal text-muted tabular-nums">VN {copyable(r.vn, "VN")}</span>
   </>
 );
 
@@ -233,6 +237,11 @@ const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
     {d.subfund_error && (
       <p role="status" className="text-xs text-warning">
         โหลดกองทุนย่อยไม่ได้ คอลัมน์กองทุนย่อยจึงว่าง
+      </p>
+    )}
+    {d.app_close_error && (
+      <p role="status" className="text-xs text-warning">
+        โหลดการปิดสิทธิผ่าน BKH Insight ไม่ได้ คอลัมน์ปิดสิทธิจึงแสดงเฉพาะเลขของ HOSxP
       </p>
     )}
     {d.claim_error && (
@@ -386,7 +395,8 @@ export function VisitsGrid({ pttypeOptions, depOptions }: { pttypeOptions: CodeO
               </>
             }
             searchSize="compact"
-            detailIcon={<ReceiptText aria-hidden className="size-4" />}
+            detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+            detailInColumn="patient_name"
             reorderable
             hideable
             fitScreen

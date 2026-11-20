@@ -51,6 +51,8 @@ export type PrecheckSource = {
   an: string | null;
   hn: string;
   patient_name: string;
+  /** เพศ อายุ ณ วันรับบริการ/วัน admit เช่น "ชาย 25ปี 10ด 15ว" (ar-precheck-summary ไม่ใช้) */
+  sex_age?: string | null;
   /** OPD = วันรับบริการ, IPD = วันจำหน่าย */
   date: string;
   regdate: string | null;

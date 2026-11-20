@@ -13,6 +13,8 @@ export type HisDebtor = {
   hn: string;
   date: string;
   full_name: string;
+  /** เพศ อายุ ณ วันรับบริการ/วัน admit เช่น "ชาย 25ปี 10ด 15ว" */
+  sex_age: string | null;
   pttype_name: string;
   drg: string | null;
   adjrw: number | null;

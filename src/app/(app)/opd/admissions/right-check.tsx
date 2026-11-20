@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { CircleCheck } from "lucide-react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { copyable } from "@/components/copy-button/copy-button";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import { focusRing } from "@/app/(app)/fund/_components/ui";
@@ -219,7 +220,7 @@ export function SrmStatus({ row, reload }: { row: Row; reload?: () => void }) {
         size="medium"
         title={
           <>
-            {r.name || "–"} <span className="font-normal text-muted tabular-nums">VN {r.vn}</span>
+            {r.name || "–"} <span className="font-normal text-muted tabular-nums">VN {copyable(r.vn, "VN")}</span>
           </>
         }
       >

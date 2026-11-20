@@ -23,6 +23,7 @@
   --hover: #e7ebe5; /* hover fill on the canvas */
   --foreground: #18201b;
   --muted: #5c665f; /* secondary text, table headers */
+  --subtle: #7a847d; /* tertiary text (2nd line in grid cells): 3.9:1 on surface, >= 3.2:1 on hover/selected rows */
 
   --accent: #22c55e; /* bright green fill: primary button, highlights */
   --accent-fg: #052e16; /* text/icons on --accent */
@@ -46,6 +47,10 @@
   --success: #157a3b;
   --success-soft: #ecfbf1;
   --success-line: #b4ebc6;
+  /* ข้อมูลจากระบบอื่น (เช่น ปิดสิทธิโดย HOSxP ใน /opd/admissions) ; --info-text บน --info-soft 7.3:1 */
+  --info-soft: #bfdbff;
+  --info-text: #1e3a8a;
+  --info-line: #8fbcf5;
 
   /* Chart series: categorical, fixed order, one slot per entity (never re-assigned by rank).
      Validated on --surface with the dataviz palette validator: adjacent CVD dE >= 9.1, normal-vision >= 19.6.
@@ -70,6 +75,7 @@
   --hover: #1f2722;
   --foreground: #e4ebe6;
   --muted: #96a39a;
+  --subtle: #6e7a72; /* 3.9:1 on surface, >= 3.1:1 on hover/selected rows */
 
   --accent: #2fb864;
   --accent-fg: #04170a;
@@ -92,6 +98,9 @@
   --success: #7fdca0;
   --success-soft: #12281a;
   --success-line: #22502f;
+  --info-soft: #172a47;
+  --info-text: #a9cbff;
+  --info-line: #2b4a78;
 
   /* Same hues stepped for the dark surface: adjacent CVD dE >= 8.4, all >= 3:1. */
   --chart-1: #3987e5;
@@ -112,6 +121,7 @@
   --color-hover: var(--hover);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
   --color-accent: var(--accent);
   --color-accent-fg: var(--accent-fg);
   --color-accent-text: var(--accent-text);
@@ -132,6 +142,9 @@
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-success-line: var(--success-line);
+  --color-info-soft: var(--info-soft);
+  --color-info-text: var(--info-text);
+  --color-info-line: var(--info-line);
   /* Type scale: nothing above 13px except `text-title` and `text-kpi`. Only xs/sm/base/title/kpi exist (text-lg, text-2xl …
      are not generated); headings step up by weight and color, not size. Line heights leave room for Thai vowels and tone marks. */
   --text-*: initial;
@@ -154,6 +167,9 @@
   --text-grid-head--line-height: 18px;
   --text-grid-cell: 11px;
   --text-grid-cell--line-height: 16px;
+  /* Secondary line inside a grid cell (e.g. sex/age under the name): smaller than the cell text, use with text-subtle. */
+  --text-grid-sub: 8px;
+  --text-grid-sub--line-height: 11px;
   /* Inter for Latin and digits, Noto Sans Thai for Thai glyphs. */
   --font-sans: var(--font-inter), var(--font-noto-thai), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
