@@ -118,7 +118,7 @@ export function classify(
   return { ...row, step: "paid", reason: null };
 }
 
-/** ราย OP ที่ปิดสิทธิผ่าน /fund/close-privilege (nhso_close_log ไม่ย้อนเข้า HOSxP) นับเป็นปิดสิทธิแล้ว */
+/** ราย OP ที่ปิดสิทธิผ่าน /fund/close-privilege (nhso_save_endpoint_log ไม่ย้อนเข้า HOSxP) นับเป็นปิดสิทธิแล้ว */
 export const markClosed = <T extends Pick<HisCase, "key" | "claim">>(cases: T[], closed: Set<string>): T[] =>
   closed.size ? cases.map((c) => (closed.has(c.key) ? { ...c, claim: "closed" } : c)) : cases;
 

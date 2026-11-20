@@ -29,7 +29,7 @@ test("every statement file: header has no placeholder, ? count matches the docum
     assert.ok(!sql.includes("%%"), s.sql);
   }
   // ไม่มีค่าเฉพาะโรงพยาบาล
-  for (const [path, body] of out) assert.ok(!/11252|nhso_close_log|rep_error_code|lab_catalog_fdh/.test(path.endsWith(".sql") ? body : ""), path);
+  for (const [path, body] of out) assert.ok(!/11252|nhso_save_endpoint_log|rep_error_code|lab_catalog_fdh/.test(path.endsWith(".sql") ? body : ""), path);
 });
 
 test("SKILL.md lists every code that has a rule", () => {
