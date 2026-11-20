@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { copyable } from "@/components/copy-button/copy-button";
 import { formatCount } from "@/lib/number-format";
 import type { CloseReady } from "@/app/api/fund/close-privilege/route";
 import { closeSkipReason } from "@/app/api/fund/close-privilege/nhso";
@@ -77,7 +78,7 @@ export function ClosePrivilegeButton({ rows, reload }: { rows: VisitRow[]; reloa
                 <ul className="max-h-48 divide-y divide-line overflow-y-auto rounded-lg border border-line">
                   {plan.skipped.map((s) => (
                     <li key={s.vn} className="flex flex-wrap items-baseline justify-between gap-x-4 px-3 py-1.5">
-                      <span className="tabular-nums">VN {s.vn}</span>
+                      <span className="tabular-nums">VN {copyable(s.vn, "VN")}</span>
                       <span className="text-muted">{s.reason}</span>
                     </li>
                   ))}

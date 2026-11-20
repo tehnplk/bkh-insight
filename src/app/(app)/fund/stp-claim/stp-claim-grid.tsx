@@ -1,7 +1,9 @@
 "use client";
 
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatBaht, formatCount } from "@/lib/number-format";
@@ -293,7 +295,12 @@ export function StpClaimGrid() {
         columns={COLUMNS[type]}
         getRowId={(r) => r.ref}
         renderDetail={renderDetail}
-        detailTitle={(r) => `ประวัติสถานะ ${REF_LABEL[type]} ${r.ref}`}
+        detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+        detailTitle={(r) => (
+          <>
+            ประวัติสถานะ {REF_LABEL[type]} {copyable(r.ref, REF_LABEL[type])}
+          </>
+        )}
         renderSummary={renderSummary}
         exportPlacement="summary"
         summaryActions={

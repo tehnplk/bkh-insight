@@ -20,6 +20,8 @@ export type ClaimErrorRow = {
   hn: string | null;
   /** จาก his patient ไม่พบ = null */
   full_name: string | null;
+  /** เพศ + อายุ (OP ณ วันรับบริการจาก vn_stat, IP ณ วัน admit) เฉพาะหน้า grid ไม่มีใน Excel ; ไม่พบ = null */
+  sex_age?: string | null;
   rep_no: string;
   rep_date: string;
   service_at: string;

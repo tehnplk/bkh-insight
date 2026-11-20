@@ -20,12 +20,19 @@ export const MAX_SELECT_VNS = 5000;
 
 /** สถานะปิดสิทธิ (หลักเดียวกับ STATUS_SQL ของ fund/_lib/claim.ts ; OFC closed = มี Approval Code EDC): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
 export type ClaimStatus = "closed" | "authen_only" | "none";
+/** ปิดสิทธิสำเร็จ (prod) ผ่าน /fund/close-privilege ของระบบนี้ (nhso_save_endpoint_log ไม่ย้อนเข้า HOSxP) */
+export type AppClose = { authen_code: string | null; response_at: string | null };
 
 /** แถวจาก SQL รายการ (his) ตัวเลข DECIMAL อาจมาเป็น string */
 export type RawVisit = {
   vn: string;
   hn: string;
   patient_name: string | null;
+  /** vn_stat.sex '1' ชาย '2' หญิง ; age_* อายุ ณ วันรับบริการตามที่ HOSxP บันทึก (ไม่มีแถว vn_stat = null) */
+  sex: string | null;
+  age_y: number | null;
+  age_m: number | null;
+  age_d: number | null;
   vstdate: string | null;
   vsttime: string | null;
   dep_code: string | null;
@@ -86,6 +93,8 @@ export type VisitRow = {
   vn: string;
   hn: string;
   patient_name: string;
+  /** เพศ + อายุ ณ วันรับบริการ เช่น "ชาย 25ปี 10ด 15ว" (ไม่มีทั้งสอง = null) ; route เติมด้วย sexAgeText เพราะไฟล์นี้ import ค่าไม่ได้ */
+  sex_age?: string | null;
   vstdate: string | null;
   /** เวลามา HH:MM */
   vsttime: string | null;
@@ -110,7 +119,10 @@ export type VisitRow = {
   auth_code: string | null;
   /** เลขปิดสิทธิ (ยืนยันกับ สปสช. หรือ EP ; OFC = Approval Code EDC ล่าสุด) */
   close_code: string | null;
+  /** closed เมื่อ HOSxP ปิดแล้วหรือระบบนี้ปิดแล้ว (app_close) */
   claim_status: ClaimStatus;
+  /** ปิดสิทธิผ่านระบบนี้ (ไม่มี = ไม่ได้ปิดผ่านระบบนี้หรือโหลดไม่ได้) */
+  app_close?: AppClose;
   /** เลขที่ใบเสร็จ (rcpt_print ที่ไม่ถูกยกเลิก) หลายใบคั่นด้วย ", " ไม่มีการจ่ายเงิน = null */
   rcpt_no: string | null;
   /** AN ของ visit ที่ admit (null = ไม่ admit) */
@@ -134,6 +146,8 @@ export type VisitsPage = GridPage<VisitRow> & {
   subfund_error: boolean;
   /** โหลดสถานะเคลมไม่ได้ */
   claim_error: boolean;
+  /** โหลดการปิดสิทธิผ่านระบบนี้ (nhso_save_endpoint_log) ไม่ได้ */
+  app_close_error: boolean;
   /** จำนวนรายของปุ่ม "ยังไม่ส่ง"/"เกินกำหนด" มีเฉพาะเมื่อใช้ตัวกรอง claim (ผู้ป่วยนอกนับทั้งชุดแพงเกินไปทุกครั้ง) */
   claim_counts?: ClaimCounts;
 };
@@ -150,11 +164,14 @@ export function dischargeLabel(code: string | null, name: string | null): string
 
 const num = (v: number | string | null) => (v == null || v === "" ? null : Number(v));
 
-/** reps: undefined = ไม่ได้ดู REP ; fundOf = กองทุนของ pttype */
-export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf: (pttype: string | null) => string): VisitRow[] {
+/** reps: undefined = ไม่ได้ดู REP ; fundOf = กองทุนของ pttype ; appClose = VN ที่ปิดสิทธิผ่านระบบนี้ */
+export function buildRows(
+  raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf: (pttype: string | null) => string, appClose?: Map<string, AppClose>,
+): VisitRow[] {
   const repByVn = reps && new Map(reps.map(({ vn, ...r }) => [vn, r]));
   return raws.map((r) => {
     const fund = fundOf(r.pttype);
+    const app = appClose?.get(r.vn);
     // พบ REP แสดงทุกกองทุน ; ไม่พบ = ยังไม่มี REP เฉพาะ REP_FUND
     const rep = repByVn?.get(r.vn) ?? (repByVn && fund === REP_FUND ? null : undefined);
     return {
@@ -177,7 +194,8 @@ export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf
       uc_money: num(r.uc_money) ?? 0,
       auth_code: r.auth_code?.trim() || null,
       close_code: r.close_code?.trim() || null,
-      claim_status: r.claim_status,
+      claim_status: app ? "closed" : r.claim_status,
+      ...(app && { app_close: app }),
       // เลขที่ใบเสร็จแสดงแบบ เล่ม/เลขที่ (HOSxP เก็บ "421:123")
       rcpt_no: r.rcpt_no?.replaceAll(":", "/") || null,
       an: r.an?.trim() || null,
@@ -185,6 +203,12 @@ export function buildRows(raws: RawVisit[], reps: RawOpRep[] | undefined, fundOf
       ...(rep !== undefined && { rep }),
     };
   });
+}
+
+/** Excel คอลัมน์เลขปิดสิทธิ: เลขของ HOSxP ตามด้วยของระบบนี้พร้อมที่มา (ปิดสำเร็จแต่ สปสช. ไม่ส่งเลข = "ปิดแล้ว") */
+export function closeText(r: Pick<VisitRow, "close_code" | "app_close">): string {
+  const app = r.app_close && `${r.app_close.authen_code || "ปิดแล้ว"} (BKH Insight)`;
+  return [r.close_code, app].filter(Boolean).join(", ");
 }
 
 /** เลขบัตรประชาชน 13 หลักเป็น 1-2345-67890-12-3 ; ไม่ใช่ 13 หลักคืนค่าเดิม (trim) ; ว่าง/null คืน "" */

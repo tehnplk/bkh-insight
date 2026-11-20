@@ -30,6 +30,11 @@ export type RawAdmission = {
   an: string;
   hn: string;
   patient_name: string | null;
+  /** patient.sex '1' ชาย '2' หญิง ; age_* อายุ ณ วัน admit (ไม่มีวันเกิด = null) */
+  sex: string | null;
+  age_y: number | null;
+  age_m: number | null;
+  age_d: number | null;
   regdate: string | null;
   dchdate: string | null;
   dchstts: string | null;
@@ -66,6 +71,8 @@ export type AdmissionRow = {
   an: string;
   hn: string;
   patient_name: string;
+  /** เพศ + อายุ ณ วัน admit เช่น "ชาย 25ปี 10ด 15ว" ; route เติมด้วย sexAgeText เพราะไฟล์นี้ import ค่าไม่ได้ */
+  sex_age?: string | null;
   regdate: string | null;
   dchdate: string | null;
   /** สถานะการจำหน่าย (dchstts.name) */

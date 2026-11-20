@@ -1,6 +1,9 @@
 "use client";
 
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
+import { PatientName } from "@/components/patient-name/patient-name";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { FundVisitRow } from "@/app/api/fund/types";
 import { Money, num } from "./ui";
@@ -10,7 +13,11 @@ const col = gridColumnHelper<FundVisitRow>();
 // ตัวกรองหัวคอลัมน์จาก /api/fund/opd-fund/visits?facet=<id>
 const date = col.accessor("vstdate", { header: "วันที่", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap", filter: { format: (v) => formatThaiDate(v) || v } } });
 const hn = col.accessor("hn", { header: "HN", meta: { className: "whitespace-nowrap", filter: true } });
-const name = col.accessor("full_name", { header: "ชื่อ-นามสกุล", meta: { className: "whitespace-nowrap", filter: true } });
+const name = col.accessor("full_name", {
+  header: "ชื่อ-นามสกุล",
+  cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+  meta: { className: "whitespace-nowrap", filter: true },
+});
 const dep = col.accessor("dep_name", { header: "แผนก", meta: { filter: true } });
 const pttype = col.accessor("pttype_name", { header: "สิทธิ", meta: { filter: true } });
 const amount = col.accessor("amount", { header: "มูลค่า (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
@@ -18,7 +25,11 @@ const columns = col.columns([date, hn, name, pttype, amount]);
 const columnsWithDep = col.columns([date, hn, name, dep, pttype, amount]);
 
 const renderDetail = (row: FundVisitRow) => <VisitItems vn={row.vn} />;
-const detailTitle = (row: FundVisitRow) => `${row.full_name} · HN ${row.hn}`;
+const detailTitle = (row: FundVisitRow) => (
+  <>
+    {row.full_name} · HN {copyable(row.hn, "HN")}
+  </>
+);
 
 /** รายการ visit จาก /api/fund/opd-fund/visits (filter ส่งผ่าน params ของ DataGrid) กดแถวเปิดรายการค่าใช้จ่าย
  *  ใน modal ของกองทุนก็เปิด modal ซ้อนชั้นบน (DetailModal รองรับ dialog ซ้อน) */
@@ -31,6 +42,8 @@ export function VisitGrid({ extraParams, showDepartment }: { extraParams: Record
       columns={showDepartment ? columnsWithDep : columns}
       getRowId={(r) => r.vn}
       renderDetail={renderDetail}
+      detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+      detailInColumn="full_name"
       detailTitle={detailTitle}
       detailSize="medium"
     />

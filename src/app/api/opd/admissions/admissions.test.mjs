@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/opd/admissions/admissions.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { admitStatus, buildRows, formatCid } from "./admissions.ts";
+import { admitStatus, buildRows, closeText, formatCid } from "./admissions.ts";
 
 const fundOf = (p) => ({ "89": "UCS", O1: "OFC" })[p] ?? "UNKNOWN";
 const raw = (vn, extra = {}) => ({
@@ -73,3 +73,17 @@ test("admit: AN + OPD leftover from SQL ; status none/clear/left", () => {
   assert.deepEqual([none, clear, left, zero].map(admitStatus), ["none", "clear", "left", "left"]);
   assert.equal(admitStatus({ an: "", opd_left: null }), "none");
 });
+
+test("closed by this app: claim_status closed, app_close kept, Excel text names the source", () => {
+  const app = new Map([["9", { authen_code: "EP123", response_at: "2026-11-20 10:00:00+07" }]]);
+  const [mine, other] = buildRows([raw("9"), raw("8")], [], fundOf, app);
+  assert.equal(mine.claim_status, "closed");
+  assert.deepEqual(mine.app_close, app.get("9"));
+  assert.equal(other.claim_status, "authen_only");
+  assert.equal("app_close" in other, false);
+  assert.equal(closeText(mine), "EP123 (BKH Insight)");
+  assert.equal(closeText({ close_code: "EP9", app_close: { authen_code: null, response_at: null } }), "EP9, ปิดแล้ว (BKH Insight)");
+  assert.equal(closeText({ close_code: "EP9" }), "EP9");
+  assert.equal(closeText({ close_code: null }), "");
+});
+

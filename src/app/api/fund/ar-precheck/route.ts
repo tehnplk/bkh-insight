@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { cacheLife } from "next/cache";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
+import { sexAgeText } from "@/lib/sex-age";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { FULL_NAME_SQL, badRequest, fundOf, isAuthed, loadLookups, parseRange, pttypeName, unauthorized } from "../_lib/fund";
@@ -29,7 +30,7 @@ const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 const CHUNK = 1_000;
 
 type Num = string | null;
-type StatCols = { has_stat: number; income: Num; paid_money: Num; rcpt_money: Num; uc_money: Num };
+type StatCols = { has_stat: number; income: Num; paid_money: Num; rcpt_money: Num; uc_money: Num; sex: string | null; age_y: number | null; age_m: number | null; age_d: number | null };
 
 // opitemrece เป็น MyISAM: ห้ามเพิ่ม JOIN/ORDER BY ในคิวรีรวมยอด (ล็อกตารางนาน)
 const RX_COLS = `COUNT(*) AS n_items, SUM(sum_price) AS rx_total,
@@ -37,11 +38,14 @@ const RX_COLS = `COUNT(*) AS n_items, SUM(sum_price) AS rx_total,
 const OP_RX = `SELECT vn AS \`key\`, ${RX_COLS} FROM opitemrece FORCE INDEX (ix_vstdate) WHERE vstdate BETWEEN ? AND ? AND vn IS NOT NULL GROUP BY vn`;
 const OP_VISITS = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, o.pttype, NULLIF(o.an, '') AS an, o.finance_lock,
   vs.vn IS NOT NULL AS has_stat, vs.income, vs.paid_money, vs.rcpt_money, vs.uc_money,
-  (SELECT SUM(r.amount) FROM rcpt_debt r WHERE r.vn = o.vn AND (r.status IS NULL OR r.status <> 'ABORT')) AS debt_amount
+  (SELECT SUM(r.amount) FROM rcpt_debt r WHERE r.vn = o.vn AND (r.status IS NULL OR r.status <> 'ABORT')) AS debt_amount,
+  vs.sex, vs.age_y, vs.age_m, vs.age_d
 FROM ovst o LEFT JOIN vn_stat vs ON vs.vn = o.vn LEFT JOIN patient p ON p.hn = o.hn
 WHERE o.vstdate BETWEEN ? AND ?`;
+// ผู้ป่วยในใช้อายุ ณ วัน admit
 const IP_ADMITS = `SELECT i.an, i.hn, ${FULL_NAME_SQL} AS patient_name, i.regdate, i.dchdate, i.pttype, i.finance_lock,
-  s.an IS NOT NULL AS has_stat, s.income, s.paid_money, s.rcpt_money, s.uc_money
+  s.an IS NOT NULL AS has_stat, s.income, s.paid_money, s.rcpt_money, s.uc_money,
+  p.sex, TIMESTAMPDIFF(YEAR, p.birthday, i.regdate) AS age_y, MOD(TIMESTAMPDIFF(MONTH, p.birthday, i.regdate), 12) AS age_m, DATEDIFF(i.regdate, DATE_ADD(p.birthday, INTERVAL TIMESTAMPDIFF(MONTH, p.birthday, i.regdate) MONTH)) AS age_d
 FROM ipt i LEFT JOIN an_stat s ON s.an = i.an LEFT JOIN patient p ON p.hn = i.hn
 WHERE i.dchdate BETWEEN ? AND ?`;
 const ipRx = (n: number) =>
@@ -84,8 +88,8 @@ async function loadRows(type: PrecheckType, start: string, end: string, today: s
       ),
     ]);
     rx = items;
-    sources = visits.map(({ vn, vstdate, pttype, patient_name, ...r }) => ({
-      ...r, ...base(pttype), key: vn, vn, patient_name: patient_name ?? "", date: String(vstdate).slice(0, 10), regdate: null,
+    sources = visits.map(({ vn, vstdate, pttype, patient_name, sex, age_y, age_m, age_d, ...r }) => ({
+      ...r, ...base(pttype), key: vn, vn, patient_name: patient_name ?? "", sex_age: sexAgeText(sex, age_y, age_m, age_d), date: String(vstdate).slice(0, 10), regdate: null,
     }));
   } else {
     const admits = await hisQuery<StatCols & { an: string; hn: string; patient_name: string | null; regdate: string | null; dchdate: string; pttype: string | null; finance_lock: string | null }>(
@@ -93,8 +97,8 @@ async function loadRows(type: PrecheckType, start: string, end: string, today: s
       [start, end],
     );
     rx = await chunked(admits.map((a) => a.an), (part) => hisQuery<RxSum>(ipRx(part.length), part));
-    sources = admits.map(({ dchdate, regdate, pttype, patient_name, ...r }) => ({
-      ...r, ...base(pttype), key: r.an, vn: null, patient_name: patient_name ?? "",
+    sources = admits.map(({ dchdate, regdate, pttype, patient_name, sex, age_y, age_m, age_d, ...r }) => ({
+      ...r, ...base(pttype), key: r.an, vn: null, patient_name: patient_name ?? "", sex_age: sexAgeText(sex, age_y, age_m, age_d),
       date: String(dchdate).slice(0, 10), regdate: regdate ? String(regdate).slice(0, 10) : null, debt_amount: null,
     }));
   }
@@ -130,6 +134,7 @@ const MONEY_COLUMNS: XlsxColumn<XlsxRow>[] = [
 const PERSON: XlsxColumn<XlsxRow>[] = [
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
+  { key: "sex_age", header: "เพศ/อายุ", width: 18 },
 ];
 const RIGHTS: XlsxColumn<XlsxRow>[] = [
   { key: "pttype_name", header: "สิทธิ", width: 28 },

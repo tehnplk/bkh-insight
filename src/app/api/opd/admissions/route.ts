@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { escapeLike, hisQuery, insightQuery } from "@/lib/db";
-import { facetRows, parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
+import { facetRows, inFilterSql, parseColumnFilters, parseGridQuery, type FacetPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { formatBaht } from "@/lib/number-format";
+import { sexAgeText } from "@/lib/sex-age";
 import {
   FULL_NAME_SQL, activePttypes, badRequest, depSql, effectiveCodes, fundOf, inList, isAuthed, fundFilterDef, loadDepartments, loadLookups, parseCodes, parseRange, unauthorized,
   type Lookups,
@@ -17,7 +18,10 @@ import { loadSrmCache } from "@/app/api/opd/right-check/cache";
 import { fromCache, srmFilterLabel, srmFilterValues, srmText } from "@/app/api/opd/right-check/srm";
 import { CLAIM_LABEL, claimCounts, claimText } from "@/app/api/fdh/claim-batch/claim";
 import { loadClaims, type ClaimCand } from "@/app/api/fdh/claim-batch/load";
-import { ADMIT_LABEL, OPD_MAX_DAYS, admitStatus, buildRows, dischargeLabel, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage } from "./admissions";
+import { closedByRange } from "@/app/api/fdh/c-check/closed";
+import {
+  ADMIT_LABEL, OPD_MAX_DAYS, admitStatus, buildRows, closeText, dischargeLabel, type AppClose, type RawOpRep, type RawVisit, type VisitRow, type VisitsPage,
+} from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -40,6 +44,11 @@ const CLOSE_CODE_SQL = `IF(${IS_OFC_SQL}, ${APPROVE_CODE_SQL},
                   IF(vp.auth_code LIKE 'EP%', vp.auth_code, NULL)))`;
 const AUTH_CODE_SQL = `COALESCE(IF(vp.auth_code LIKE 'PP%', vp.auth_code, NULL), (SELECT s2.claim_code FROM nhso_smartcard_agent s2
          WHERE s2.vn = o.vn AND s2.claim_code LIKE 'PP%' ORDER BY s2.nhso_smartcard_agent_id DESC LIMIT 1))`;
+// ปิดสิทธิแล้ว = HOSxP มีเลขปิดสิทธิ หรือปิดผ่านระบบนี้ (n = จำนวน VN จาก closedByRange ส่งเป็น ? ก่อนค่าอื่นของ expr)
+const CLOSED_ANY_SQL = (n: number) => (n ? `(${CLOSE_CODE_SQL} IS NOT NULL OR ${inList("o.vn", n)})` : `${CLOSE_CODE_SQL} IS NOT NULL`);
+const CODES_SQL = (n: number) => `CONCAT(IF(${AUTH_CODE_SQL} IS NULL, 'N', 'Y'), IF(${CLOSED_ANY_SQL(n)}, 'Y', 'N'))`;
+// ปิดสิทธิผ่านระบบนี้ (insight) ของ VN ในหน้า: unique (vn, zone) WHERE ok จึงหนึ่งแถวต่อ VN (prove-query ผ่าน)
+const APP_CLOSE_SQL = "SELECT vn, authen_code, response_at FROM nhso_save_endpoint_log WHERE ok AND zone = 'prod' AND vn = ANY($1::text[])";
 const CLAIM_STATUS_SQL = `IF(${IS_OFC_SQL},
          CASE WHEN ${APPROVE_CODE_SQL} IS NOT NULL THEN 'closed' WHEN ${AUTH_CODE_SQL} IS NOT NULL THEN 'authen_only' ELSE 'none' END,
          ${STATUS_SQL})`;
@@ -68,7 +77,8 @@ const SELECT = `SELECT o.vn, o.hn, ${FULL_NAME_SQL} AS patient_name, o.vstdate, 
        ${CLOSE_CODE_SQL} AS close_code,
        ${CLAIM_STATUS_SQL} AS claim_status,
        ${RCPT_SQL} AS rcpt_no,
-       NULLIF(o.an, '') AS an, ${OPD_LEFT_SQL} AS opd_left, ${FDH_COLS}
+       NULLIF(o.an, '') AS an, ${OPD_LEFT_SQL} AS opd_left, ${FDH_COLS},
+       vs.sex, vs.age_y, vs.age_m, vs.age_d
 ${FROM}
 ${FDH_JOIN}`;
 
@@ -81,7 +91,7 @@ const CODES_LABEL: Record<string, string> = {
   NN: "ไม่พบ Authen และเลขปิดสิทธิ",
 };
 /** ตัวกรองหัวคอลัมน์ (allowlist): ค่าที่คำนวณในโค้ดต้องใช้ lookup จึงสร้างต่อ request */
-function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDefs {
+function filterDefs(lk: Lookups, statusOf: Map<string, string>, appVns: string[]): ColumnFilterDefs {
   return {
     vn: { expr: "o.vn" },
     hn: { expr: "o.hn" },
@@ -89,7 +99,19 @@ function filterDefs(lk: Lookups, statusOf: Map<string, string>): ColumnFilterDef
     fund: fundFilterDef(lk, "o.pttype"),
     pttype_name: { expr: "o.pttype", label: "t.name" },
     hospmain: { expr: "vp.hospmain" },
-    codes: { expr: `CONCAT(IF(${AUTH_CODE_SQL} IS NULL, 'N', 'Y'), IF(${CLOSE_CODE_SQL} IS NULL, 'N', 'Y'))`, labels: CODES_LABEL },
+    // เลขปิดสิทธิรวมรายที่ปิดผ่านระบบนี้ (appVns) ; facet ของ codes ทำใน GET (expr มี ? จึงใช้ loadFacet ไม่ได้)
+    codes: {
+      expr: CODES_SQL(appVns.length),
+      value: (raw) => raw ?? "",
+      labelOf: (v) => CODES_LABEL[v] ?? v,
+      where: (values, ph, start) => {
+        // CONCAT ของ Y/N ไม่มีทางว่าง ; ส่ง "" ให้ inFilterSql จะใช้ expr ซ้ำ ? ของ appVns จึงไม่ตรงกับ params
+        const real = values.filter((v) => v !== "");
+        if (!real.length) return { sql: "1 = 0", params: [] };
+        const f = inFilterSql(CODES_SQL(appVns.length), real, ph, start + appVns.length);
+        return { sql: f.sql, params: [...appVns, ...f.params] };
+      },
+    },
     vstdate: { expr: "DATE_FORMAT(o.vstdate, '%Y-%m-%d')" },
     vsttime: { expr: "TIME_FORMAT(o.vsttime, '%H:%i')" },
     dep_name: { expr: depSql("o"), label: "k.department" },
@@ -125,6 +147,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "admit_label", header: "สถานะ Admit", width: 30 },
   { key: "hn", header: "HN", width: 10 },
   { key: "patient_name", header: "ชื่อ-สกุล", width: 28 },
+  { key: "sex_age", header: "เพศ/อายุ", width: 18 },
   { key: "fund", header: "กองทุน", width: 8 },
   { key: "hospmain", header: "HCODE(HIS)", width: 10 },
   { key: "srm_right", header: "สิทธิ(SRM)", width: 28 },
@@ -132,7 +155,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "srm_status", header: "ผลตรวจสิทธิ", width: 14 },
   { key: "pttype_name", header: "สิทธิ(HIS)", width: 28 },
   { key: "auth_code", header: "Authen", width: 16 },
-  { key: "close_code", header: "ปิดสิทธิ/Approval Code", width: 16 },
+  { key: "close_code", header: "ปิดสิทธิ/Approval Code", width: 24 },
   { key: "vstdate", header: "วันที่มา", width: 12 },
   { key: "vsttime", header: "เวลา", width: 8 },
   { key: "dep_name", header: "แผนก", width: 22 },
@@ -188,15 +211,18 @@ export async function GET(request: NextRequest) {
 
   try {
     const needStatus = !!filters.ovst_status || facet === "ovst_status";
-    const [lk, deps, ovstost] = await Promise.all([
+    // VN ที่ปิดสิทธิผ่านระบบนี้ในช่วง (ปิดได้เฉพาะวันรับบริการ) ใช้กับตัวกรอง unclosed และ codes เท่านั้น
+    const needAppClosed = unclosed || !!filters.codes || facet === "codes";
+    const [lk, deps, ovstost, appVns] = await Promise.all([
       loadLookups(),
       rawDeps ? loadDepartments() : null,
       needStatus ? hisQuery<{ code: string; name: string | null; export_code: string | null }>("SELECT ovstost AS code, name, export_code FROM ovstost") : [],
+      needAppClosed ? closedByRange(start, end) : [],
     ]);
     // เลือกครบทุกค่าที่เปิดใช้ = ไม่กรอง (ชุดเดียวกับตัวเลือกของหน้า)
     const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
     const depCodes = deps && effectiveCodes(rawDeps, deps.filter((d) => d.active).map((d) => d.code));
-    const defs = filterDefs(lk, new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""])));
+    const defs = filterDefs(lk, new Map(ovstost.map((s) => [s.code, dischargeLabel(s.export_code, s.name) ?? ""])), appVns);
     const toFund = (pttype: string | null) => fundOf(lk, pttype);
     /** VN ที่สถานะ REP / กองทุนย่อย / ผลตรวจสิทธิ ตรงตัวกรองหัวคอลัมน์ rep / subfund / srm_status (null = ไม่กรอง) */
     let repVns: string[] | null = null;
@@ -226,7 +252,10 @@ export async function GET(request: NextRequest) {
         parts.push(`(o.vn LIKE ? OR o.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)`);
         args.push(like, like, like);
       }
-      if (unclosed) parts.push(`${CLOSE_CODE_SQL} IS NULL`);
+      if (unclosed) {
+        parts.push(`NOT ${CLOSED_ANY_SQL(appVns.length)}`);
+        args.push(...appVns);
+      }
       for (const [key, vns] of [["rep", repVns], ["subfund", subVns], ["srm_status", srmVns], ["claim", claimVns]] as const)
         if (vns && except !== key) {
           parts.push(vns.length ? inList("o.vn", vns.length) : "1 = 0");
@@ -285,6 +314,18 @@ export async function GET(request: NextRequest) {
         const page = await keyFilters[key]();
         if (page) return Response.json(page);
       }
+    if (facet === "codes") {
+      // ? ของ expr (appVns) มาก่อน WHERE ; GROUP BY 1 จึงไม่ต้องส่ง appVns ซ้ำ
+      const w = whereFor("codes");
+      const counts = await hisQuery<{ v: string; n: number }>(
+        `SELECT ${CODES_SQL(appVns.length)} AS v, COUNT(*) AS n ${FROM}\n${w.sql}\nGROUP BY 1`, [...appVns, ...w.params]);
+      const needle = facetQ.toLowerCase();
+      const values = counts
+        .map((r) => ({ value: r.v, label: CODES_LABEL[r.v] ?? r.v, count: Number(r.n) }))
+        .filter((v) => !needle || `${v.value} ${v.label}`.toLowerCase().includes(needle))
+        .sort((x, y) => y.count - x.count);
+      return Response.json({ values, truncated: false } satisfies FacetPage);
+    }
     if (facet) return Response.json(await loadFacet(hisQuery, defs, facet, facetQ, FROM, whereFor(facet)));
 
     const { sql: where, params: args } = whereFor(null);
@@ -307,6 +348,15 @@ export async function GET(request: NextRequest) {
         repError = true;
       }
     }
+    // ปิดสิทธิผ่านระบบนี้: อ่านไม่ได้ = แสดงเฉพาะเลขของ HOSxP พร้อมคำเตือนในแถบสรุป
+    const appClose = vns.length
+      ? await insightQuery<AppClose & { vn: string }>(APP_CLOSE_SQL, [vns])
+          .then((rs) => new Map(rs.map(({ vn, ...r }) => [vn, r])))
+          .catch((e) => {
+            console.error("opd/admissions app close", e);
+            return undefined;
+          })
+      : new Map<string, AppClose>();
     // กองทุนย่อย: อ่านไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
     const subfunds = await loadSubfunds("OP", vns, lk, { range: { start, end }, names: !xlsx }).catch((e) => {
       console.error("opd/admissions subfund", e);
@@ -317,7 +367,7 @@ export async function GET(request: NextRequest) {
       console.error("opd/admissions srm", e instanceof Error ? e.message : e);
       return undefined;
     });
-    const built = buildRows(raws, reps, toFund);
+    const built = buildRows(raws, reps, toFund, appClose);
     // สถานะเคลม: ใช้ REP ที่โหลดแล้ว ; อ่าน insight ไม่ได้ = คอลัมน์ว่าง แต่รายการยังแสดง
     const claims = await loadClaims(
       "OP", raws.map((r, i) => claimCand(r.vn, r, built[i].fund)), REP_SQL, "vn",
@@ -327,15 +377,19 @@ export async function GET(request: NextRequest) {
       console.error("opd/admissions claim", e);
       return undefined;
     });
-    const rows = built.map((r) => {
+    const rows = built.map((r, i) => {
       const c = rights?.get(r.hn);
       const his = { vn: r.vn, hn: r.hn, name: r.patient_name, fund: r.fund, pttype_name: r.pttype_name, hospmain: r.hospmain, hospsub: r.hospsub };
       const claim = claims?.get(r.vn);
-      return { ...r, subfunds: subfunds && (subfunds.get(r.vn) ?? []), ...(c && { right: fromCache(his, c) }), ...(claim && { claim }) };
+      return {
+        ...r, sex_age: sexAgeText(raws[i].sex, raws[i].age_y, raws[i].age_m, raws[i].age_d),
+        subfunds: subfunds && (subfunds.get(r.vn) ?? []), ...(c && { right: fromCache(his, c) }), ...(claim && { claim }),
+      };
     });
     if (xlsx) {
       const out: XlsxRow[] = rows.map((r) => ({
         ...r,
+        close_code: closeText(r),
         admit_label: admitText(r),
         rep_no: r.rep?.rep_no ?? "",
         rep_label: repLabel(r.rep),
@@ -346,7 +400,7 @@ export async function GET(request: NextRequest) {
       return xlsxResponse(`opd-admissions-${start}_${end}.xlsx`, XLSX_COLUMNS, out);
     }
     const body: VisitsPage = {
-      rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError, subfund_error: !subfunds, claim_error: !claims,
+      rows, total: Number(count?.[0]?.total ?? 0), rep_error: repError, subfund_error: !subfunds, claim_error: !claims, app_close_error: !appClose,
       ...(claimVals.vals && { claim_counts: claimCounts(claimVals.vals) }),
     };
     return Response.json(body);

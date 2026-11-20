@@ -1,8 +1,11 @@
 "use client";
 
 import { createContext, useContext, useState } from "react";
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
+import { PatientName } from "@/components/patient-name/patient-name";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
@@ -55,8 +58,13 @@ const money = (key: MoneyKey, header: string) =>
   col.accessor(key, { header: `${header} (บาท)`, cell: (c) => <Money value={c.getValue()} />, meta: { className: num } });
 const diff = (key: "diff_total" | "diff_debt", header: string) =>
   col.accessor(key, { header: `${header} (บาท)`, cell: (c) => <Diff value={c.getValue()} />, meta: { className: num } });
-const text = (key: "vn" | "an" | "hn" | "patient_name", header: string) =>
-  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: key === "patient_name" ? nowrap : { ...nowrap, filter: true } });
+const text = (key: "vn" | "an" | "hn", header: string) =>
+  col.accessor(key, { header, cell: (c) => c.getValue() || dash, meta: { ...nowrap, filter: true } });
+const name = col.accessor("patient_name", {
+  header: "ชื่อ-สกุล",
+  cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+  meta: nowrap,
+});
 const dateCol = (header: string) =>
   col.accessor("date", { header, cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } });
 const rights = [
@@ -122,13 +130,13 @@ const selectColumn = col.display({
 
 const COLUMNS = {
   opd: col.columns([
-    dateCol("วันที่รับบริการ"), text("vn", "VN"), text("hn", "HN"), text("patient_name", "ชื่อ-สกุล"),
+    dateCol("วันที่รับบริการ"), text("vn", "VN"), text("hn", "HN"), name,
     // id admit = ตัวกรอง "admit แล้ว/ไม่ admit" ส่วนค่าที่แสดงคือ AN
     col.accessor("an", { id: "admit", header: "AN", cell: (c) => c.getValue() || dash, meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
     ...rights, ...amounts,
   ]),
   ipd: col.columns([
-    dateCol("วันจำหน่าย"), text("an", "AN"), text("hn", "HN"), text("patient_name", "ชื่อ-สกุล"),
+    dateCol("วันจำหน่าย"), text("an", "AN"), text("hn", "HN"), name,
     col.accessor("regdate", { header: "วันรับไว้", cell: (c) => formatThaiDate(c.getValue() ?? "") || dash, meta: { className: "whitespace-nowrap tabular-nums" } }),
     ...rights, ...amounts,
   ]),
@@ -167,7 +175,7 @@ const renderDetail = (r: PrecheckRow) => {
 };
 const detailTitle = (r: PrecheckRow) => (
   <>
-    {r.patient_name} <span className="font-normal text-muted tabular-nums">{r.vn ? `VN ${r.vn}` : `AN ${r.an}`}</span>
+    {r.patient_name} <span className="font-normal text-muted tabular-nums">{r.vn ? <>VN {copyable(r.vn, "VN")}</> : <>AN {copyable(r.an, "AN")}</>}</span>
   </>
 );
 
@@ -302,10 +310,12 @@ function PickRows({ type, start, end, pick }: { type: PrecheckType; start: strin
       columns={COLUMNS[type]}
       getRowId={(r) => r.key}
       renderDetail={renderDetail}
+      detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+      detailInColumn="patient_name"
       detailTitle={detailTitle}
       detailSize="medium"
       fitScreen
-      pinColumns={3}
+      pinColumns={4}
     />
   );
 }
@@ -454,6 +464,8 @@ export function PrecheckGrid() {
         columns={MAIN_COLUMNS[type]}
         getRowId={(r) => r.key}
         renderDetail={renderDetail}
+        detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
+        detailInColumn="patient_name"
         detailTitle={detailTitle}
         detailSize="medium"
         renderSummary={(data) => <Summary data={data} onOpen={setPick} />}
@@ -479,7 +491,7 @@ export function PrecheckGrid() {
           )
         }
         fitScreen
-        pinColumns={type === "opd" ? 4 : 3}
+        pinColumns={type === "opd" ? 5 : 4}
         reorderable
         hideable
       />

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ClipboardPlus } from "lucide-react";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
+import { PatientName } from "@/components/patient-name/patient-name";
 import { MultiSelect } from "@/components/multi-select/multi-select";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate, todayIso } from "@/lib/thai-date";
@@ -39,7 +42,12 @@ const COLUMNS = col.columns([
   col.accessor("key", { header: "VN/AN", meta: filterable }),
   col.accessor("hn", { header: "HN", cell: (c) => c.getValue() || dash, meta: filterable }),
   // ชื่ออยู่ his คนละฐานกับคิว (insight) จึง sort ไม่ได้
-  col.accessor("full_name", { header: "ชื่อ-สกุล", enableSorting: false, cell: (c) => c.getValue() || dash, meta: nowrap }),
+  col.accessor("full_name", {
+    header: "ชื่อ-สกุล",
+    enableSorting: false,
+    cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+    meta: nowrap,
+  }),
   col.accessor("service_at", {
     header: "วันรับบริการ/จำหน่าย",
     cell: (c) => serviceDate(c.row.original),
@@ -60,8 +68,8 @@ const COLUMNS = col.columns([
 
 const detailTitle = (r: ClaimErrorRow) => (
   <>
-    {r.type === "IP" ? "AN" : "VN"} {r.key}
-    {r.hn && <span className="font-normal text-muted tabular-nums"> HN {r.hn}</span>}
+    {r.type === "IP" ? "AN" : "VN"} {copyable(r.key, r.type === "IP" ? "AN" : "VN")}
+    {r.hn && <span className="font-normal text-muted tabular-nums"> HN {copyable(r.hn, "HN")}</span>}
   </>
 );
 const renderDetail = (r: ClaimErrorRow) => <ClaimErrorDetail row={r} />;
@@ -271,7 +279,9 @@ export function ClaimErrors() {
           columns={COLUMNS}
           getRowId={(r) => `${r.type}:${r.key}`}
           renderDetail={renderDetail}
+          detailIcon={<ClipboardPlus aria-hidden className="size-4" />}
           detailMode="modal"
+          detailInColumn="full_name"
           detailTitle={detailTitle}
           detailSize="medium"
           renderSummary={(d) => (

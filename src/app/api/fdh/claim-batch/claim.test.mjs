@@ -16,8 +16,9 @@ test("evidence order: STM > REP > FDH sent > export (unconfirmed) > unclaimed/fa
   assert.deepEqual(classifyClaim(op(all), TODAY), { status: "paid", at: "2026-11-15", amount: 120.5 });
   assert.deepEqual(classifyClaim(op({ ...all, stm: { paid: "0", paid_at: null } }), TODAY), { status: "rep_c", at: "2026-11-12", detail: "690000001" });
   assert.equal(classifyClaim(op({ ...all, stm: null, rep: null }), TODAY).status, "nhso");
-  assert.deepEqual(classifyClaim(op({ batch: all.batch }), TODAY), { status: "exported", at: "2026-11-11", detail: "ส่งออก e-Claim TEXT" });
-  assert.deepEqual(classifyClaim(op({ batch: { ...all.batch, id: "12" } }), TODAY), { status: "exported", at: "2026-11-11", detail: "ส่งออก e-Claim TEXT", batch: "12" });
+  assert.deepEqual(classifyClaim(op({ batch: all.batch }), TODAY), { status: "exported", at: "2026-11-11", detail: "ส่งออก e-Claim TEXT", channel: "eclaim_txt" });
+  assert.deepEqual(classifyClaim(op({ batch: { ...all.batch, id: "12" } }), TODAY), { status: "exported", at: "2026-11-11", detail: "ส่งออก e-Claim TEXT", batch: "12", channel: "eclaim_txt" });
+  assert.equal(classifyClaim(op({ batch: { ...all.batch, created_by: "นาย ข" } }), TODAY).by, "นาย ข");
   // จองส่งไม่สำเร็จแต่ส่งออกจากระบบนี้ภายหลัง = ส่งออกแล้ว
   assert.equal(classifyClaim(op({ batch: all.batch, fdh: { resv: "N", resv_at: "2026-11-10", msg: null, msg_at: null } }), TODAY).status, "exported");
 });
@@ -88,7 +89,7 @@ test("parseBatch validates the browser payload", () => {
 
 test("confirmed batch: below REP and FDH positive message, above FDH reservation Y and unconfirmed export", () => {
   const confirmed = { id: "7", at: "2026-11-11 09:00:00+07", channel: "fdh", confirmed_at: "2026-11-12 10:00:00+07", confirmed_by: "นางสาว ก", submitted_on: "2026-11-11" };
-  const sent = { status: "submitted", at: "2026-11-11", detail: "ยืนยันโดย นางสาว ก", batch: "7" };
+  const sent = { status: "submitted", at: "2026-11-11", detail: "ยืนยันโดย นางสาว ก", batch: "7", channel: "fdh", by: "นางสาว ก", exported_at: "2026-11-11" };
   assert.deepEqual(classifyClaim(op({ batch: confirmed }), TODAY), sent);
   // จองส่ง Y แพ้ชุดที่ยืนยันแล้ว แต่ชนะชุดที่ยังไม่ยืนยัน
   const resv = { fdh: { resv: "Y", resv_at: "2026-11-10 16:00:00", msg: null, msg_at: null } };

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type GridPage, type RowGetters } from "@/lib/grid-query";
+import { sexAgeText } from "@/lib/sex-age";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
 import { badRequest, inList, isAuthed, loadLookups, parseRange, unauthorized } from "../_lib/fund";
 import {
@@ -29,13 +30,17 @@ const FILTER_GET = {
 type FilterKey = keyof typeof FILTER_GET;
 const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 
-type Person = { hn: string; pname: string | null; fname: string | null; lname: string | null; pttype_name: string | null };
+type Person = {
+  hn: string; pname: string | null; fname: string | null; lname: string | null; pttype_name: string | null;
+  sex: string | null; age_y: number | null; age_m: number | null; age_d: number | null;
+};
 const fullName = (p: Person) => `${p.pname ?? ""}${p.fname ?? ""} ${p.lname ?? ""}`.trim();
 const num = (v: string | number | null) => (v == null ? null : Number(v));
 
 async function loadOpd(start: string, end: string, codes: string[]): Promise<HisDebtor[]> {
   const rows = await hisQuery<Person & { vn: string; vstdate: string; uc_money: string; debt_amount: string | null }>(
-    `SELECT s.vn, s.hn, s.vstdate, s.pttype, t.name AS pttype_name, s.income, s.uc_money, d.debt_amount, p.pname, p.fname, p.lname
+    `SELECT s.vn, s.hn, s.vstdate, s.pttype, t.name AS pttype_name, s.income, s.uc_money, d.debt_amount, p.pname, p.fname, p.lname,
+       s.sex, s.age_y, s.age_m, s.age_d
      FROM vn_stat s
      JOIN patient p ON p.hn = s.hn
      LEFT JOIN pttype t ON t.pttype = s.pttype
@@ -54,21 +59,23 @@ async function loadOpd(start: string, end: string, codes: string[]): Promise<His
     [start, end, start, end, ...codes],
   );
   return rows.map((r) => ({
-    key: r.vn, vn: r.vn, an: null, hn: r.hn, date: String(r.vstdate).slice(0, 10), full_name: fullName(r),
+    key: r.vn, vn: r.vn, an: null, hn: r.hn, date: String(r.vstdate).slice(0, 10), full_name: fullName(r), sex_age: sexAgeText(r.sex, r.age_y, r.age_m, r.age_d),
     pttype_name: r.pttype_name ?? "", drg: null, adjrw: null, debtor: Number(r.uc_money), debt_amount: num(r.debt_amount),
   }));
 }
 
+// อายุ ณ วัน admit
 async function loadIpd(start: string, end: string, codes: string[]): Promise<HisDebtor[]> {
   const rows = await hisQuery<Person & { an: string; vn: string | null; dchdate: string; uc_money: string; drg: string | null; adjrw: string | null }>(
-    `SELECT i.an, i.vn, i.hn, i.regdate, i.dchdate, i.pttype, t.name AS pttype_name, a.income, a.uc_money, i.drg, i.adjrw, p.pname, p.fname, p.lname
+    `SELECT i.an, i.vn, i.hn, i.regdate, i.dchdate, i.pttype, t.name AS pttype_name, a.income, a.uc_money, i.drg, i.adjrw, p.pname, p.fname, p.lname,
+       p.sex, TIMESTAMPDIFF(YEAR, p.birthday, i.regdate) AS age_y, MOD(TIMESTAMPDIFF(MONTH, p.birthday, i.regdate), 12) AS age_m, DATEDIFF(i.regdate, DATE_ADD(p.birthday, INTERVAL TIMESTAMPDIFF(MONTH, p.birthday, i.regdate) MONTH)) AS age_d
      FROM ipt i JOIN an_stat a ON a.an = i.an JOIN patient p ON p.hn = i.hn LEFT JOIN pttype t ON t.pttype = i.pttype
      WHERE i.dchdate BETWEEN ? AND ? AND ${inList("i.pttype", codes.length)} AND a.uc_money > 0
      ORDER BY i.dchdate, i.an`,
     [start, end, ...codes],
   );
   return rows.map((r) => ({
-    key: r.an, vn: r.vn, an: r.an, hn: r.hn, date: String(r.dchdate).slice(0, 10), full_name: fullName(r),
+    key: r.an, vn: r.vn, an: r.an, hn: r.hn, date: String(r.dchdate).slice(0, 10), full_name: fullName(r), sex_age: sexAgeText(r.sex, r.age_y, r.age_m, r.age_d),
     pttype_name: r.pttype_name ?? "", drg: r.drg || null, adjrw: num(r.adjrw), debtor: Number(r.uc_money), debt_amount: null,
   }));
 }
@@ -95,6 +102,7 @@ const XLSX_COLUMNS: Record<DebtorType, XlsxColumn<UcDebtorRow & { status_label: 
     { key: "vn", header: "VN", width: 14 },
     { key: "hn", header: "HN", width: 10 },
     { key: "full_name", header: "ชื่อ-สกุล", width: 28 },
+    { key: "sex_age", header: "เพศ/อายุ", width: 18 },
     { key: "pttype_name", header: "สิทธิ", width: 28 },
     { key: "debtor", header: "ลูกหนี้ (บาท)", width: 14, type: "money" },
     { key: "debt_amount", header: "ใบลูกหนี้ (บาท)", width: 14, type: "money" },
@@ -109,6 +117,7 @@ const XLSX_COLUMNS: Record<DebtorType, XlsxColumn<UcDebtorRow & { status_label: 
     { key: "an", header: "AN", width: 12 },
     { key: "hn", header: "HN", width: 10 },
     { key: "full_name", header: "ชื่อ-สกุล", width: 28 },
+    { key: "sex_age", header: "เพศ/อายุ", width: 18 },
     { key: "pttype_name", header: "สิทธิ", width: 28 },
     { key: "drg", header: "DRG", width: 8 },
     { key: "adjrw", header: "AdjRW", width: 10 },

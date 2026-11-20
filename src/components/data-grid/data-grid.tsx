@@ -83,6 +83,8 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   searchSize?: "default" | "compact";
   /** ไอคอนของปุ่มเปิดรายละเอียดหน้าแถว (detailMode="modal") ไม่ส่ง = ไอคอนเปิดหน้าต่าง */
   detailIcon?: ReactNode;
+  /** id คอลัมน์ที่ปุ่มรายละเอียด (detailMode="modal") ไปอยู่หน้าเนื้อหาแทนคอลัมน์ปุ่มแยก ผู้ใช้ซ่อนคอลัมน์นั้น = กลับไปคอลัมน์ปุ่มแยก */
+  detailInColumn?: string;
   /** ผู้ใช้ลากหัวคอลัมน์ (หรือ Alt+←/→ บนหัวคอลัมน์) เพื่อย้ายลำดับได้ จำไว้ใน localStorage ต่อหน้า */
   reorderable?: boolean;
   /** ปุ่ม "คอลัมน์" ให้ผู้ใช้เลือกซ่อนคอลัมน์ (คอลัมน์ที่ header เป็นข้อความ) จำต่อผู้ใช้ต่อหน้าใน localStorage */
@@ -189,6 +191,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   renderFooter,
   searchSize = "default",
   detailIcon,
+  detailInColumn,
   reorderable = false,
   hideable = false,
   fitScreen = false,
@@ -411,7 +414,10 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   const headRowRef = useRef<HTMLTableRowElement>(null);
   const [pinLefts, setPinLefts] = useState<number[]>([]);
   const [tableWidth, setTableWidth] = useState(0);
-  const pinCount = fitScreen && pinColumns > 0 ? pinColumns + (renderDetail ? 1 : 0) : 0;
+  // ปุ่มรายละเอียดในเซลล์ของ detailInColumn เมื่อคอลัมน์นั้นแสดงอยู่ ไม่งั้นเป็นคอลัมน์ปุ่มแยกหน้าสุด
+  const inColumn = detailMode === "modal" && detailInColumn && visibleColumns.some((c) => columnId(c) === detailInColumn) ? detailInColumn : null;
+  const hasDetail = !!renderDetail && !inColumn;
+  const pinCount = fitScreen && pinColumns > 0 ? pinColumns + (hasDetail ? 1 : 0) : 0;
   useEffect(() => {
     if (!fitScreen) return;
     const box = scrollRef.current;
@@ -467,7 +473,6 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
 
   const pageCount = Math.max(1, table.getPageCount());
   const rows = table.getRowModel().rows;
-  const hasDetail = !!renderDetail;
   const colSpan = table.getAllLeafColumns().length + (hasDetail ? 1 : 0);
   const from = total ? (page - 1) * pageSize + 1 : 0;
   const to = Math.min(page * pageSize, total);
@@ -532,32 +537,44 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   } else {
     body = rows.map((row) => {
       const isOpen = row.getIsExpanded();
+      const detailButton = (
+        <button
+          type="button"
+          aria-label="รายละเอียด"
+          aria-expanded={detailMode === "expand" ? isOpen : undefined}
+          aria-haspopup={detailMode === "modal" ? "dialog" : undefined}
+          onClick={detailMode === "expand" ? row.getToggleExpandedHandler() : () => setSelected(row.original)}
+          className={`grid size-7 shrink-0 place-items-center rounded-md hover:bg-hover hover:text-foreground ${isOpen ? "" : "text-muted"} ${focusRing}`}
+        >
+          {detailMode === "expand" ? (
+            <Icon d="M8 5l5 5-5 5" className={`size-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
+          ) : (
+            (detailIcon ?? <Icon d="M11 4h5v5M16 4l-7 7M14 12v3a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h3" />)
+          )}
+        </button>
+      );
       return (
         <Fragment key={row.id}>
           <tr className={`border-t border-line ${isOpen ? "bg-accent-soft text-accent-text" : "bg-surface hover:bg-surface-sunken"}`}>
             {hasDetail && (
               <td style={pin(0).style} className={`w-0 py-1 pr-0 pl-2 ${pin(0).className}`}>
-                <button
-                  type="button"
-                  aria-label="รายละเอียด"
-                  aria-expanded={detailMode === "expand" ? isOpen : undefined}
-                  aria-haspopup={detailMode === "modal" ? "dialog" : undefined}
-                  onClick={detailMode === "expand" ? row.getToggleExpandedHandler() : () => setSelected(row.original)}
-                  className={`grid size-7 place-items-center rounded-md hover:bg-hover hover:text-foreground ${isOpen ? "" : "text-muted"} ${focusRing}`}
-                >
-                  {detailMode === "expand" ? (
-                    <Icon d="M8 5l5 5-5 5" className={`size-4 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
-                  ) : (
-                    (detailIcon ?? <Icon d="M11 4h5v5M16 4l-7 7M14 12v3a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h3" />)
-                  )}
-                </button>
+                {detailButton}
               </td>
             )}
             {row.getAllCells().map((cell, ci) => {
               const p = pin(ci + (hasDetail ? 1 : 0));
               return (
                 <td key={cell.id} style={p.style} className={`px-3 py-2 text-grid-cell ${cell.column.columnDef.meta?.className ?? ""} ${p.className}`}>
-                  <table.FlexRender cell={cell} />
+                  {cell.column.id === inColumn ? (
+                    <div className="-my-1 -ml-2 flex items-center gap-1">
+                      {detailButton}
+                      <div className="min-w-0">
+                        <table.FlexRender cell={cell} />
+                      </div>
+                    </div>
+                  ) : (
+                    <table.FlexRender cell={cell} />
+                  )}
                 </td>
               );
             })}
@@ -631,7 +648,8 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
       <div
         ref={scrollRef}
         onScroll={fitScreen ? () => syncScroll(scrollRef.current, topBarRef.current) : undefined}
-        className={`rounded-lg border border-line ${fitScreen ? "overflow-auto overscroll-contain" : "overflow-x-auto"}`}
+        // relative: sr-only (absolute) ในเซลล์ต้องถูก clip ที่กล่องนี้ ไม่งั้นอ้าง <main> แล้วยืดหน้าทั้งแนวนอน/แนวตั้ง
+        className={`relative rounded-lg border border-line ${fitScreen ? "overflow-auto overscroll-contain" : "overflow-x-auto"}`}
       >
         <table ref={tableRef} aria-busy={loading} className="w-full border-collapse tabular-nums">
           <thead className={`bg-surface text-left text-grid-head text-muted ${fitScreen ? "sticky top-0 z-20 shadow-[inset_0_-1px_0_var(--line)]" : ""}`}>

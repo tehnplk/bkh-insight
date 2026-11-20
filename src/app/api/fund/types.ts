@@ -43,6 +43,8 @@ export type FundVisitRow = {
   vstdate: string;
   hn: string;
   full_name: string;
+  /** เพศ + อายุ ณ วันรับบริการ (vn_stat) เช่น "ชาย 25ปี 10ด 15ว" ไม่มีแถว vn_stat = null */
+  sex_age: string | null;
   pttype: string;
   pttype_name: string;
   fund_code: FundCode;

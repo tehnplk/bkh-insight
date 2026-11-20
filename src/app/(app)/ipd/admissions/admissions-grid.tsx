@@ -3,6 +3,8 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { ChevronRight, ReceiptText } from "lucide-react";
 import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
+import { PatientName } from "@/components/patient-name/patient-name";
 import {
   DateRangeFilter,
   useDateRange,
@@ -196,7 +198,6 @@ const text = (
   key:
     | "an"
     | "hn"
-    | "patient_name"
     | "drg"
     | "pttype_name"
     | "dchstts_name",
@@ -286,7 +287,12 @@ const columns = col.columns([
   }),
   text("an", "AN"),
   text("hn", "HN"),
-  text("patient_name", "ชื่อ-สกุล", false),
+  col.accessor("patient_name", {
+    header: "ชื่อ-สกุล",
+    cell: (c) => <PatientName name={c.getValue()} sexAge={c.row.original.sex_age} />,
+    meta: filterable,
+    enableSorting: false,
+  }),
   col.accessor("ward_name", {
     header: "Ward",
     cell: (c) => <span title={c.row.original.ward ?? undefined}>{c.getValue() || dash}</span>,
@@ -516,7 +522,7 @@ function CodingDetail({ an }: { an: string }) {
 const renderDetail = (r: AdmissionRow) => (
   <div className="text-sm">
     <Facts>
-      <Fact label="HN">{r.hn}</Fact>
+      <Fact label="HN">{copyable(r.hn, "HN")}</Fact>
       <Fact label="สิทธิ">
         {r.pttype_name ? `${r.pttype_name} (${r.fund})` : r.fund}
       </Fact>
@@ -547,7 +553,7 @@ const renderDetail = (r: AdmissionRow) => (
 const detailTitle = (r: AdmissionRow) => (
   <>
     {r.patient_name || "–"}{" "}
-    <span className="font-normal text-muted tabular-nums">AN {r.an}</span>
+    <span className="font-normal text-muted tabular-nums">AN {copyable(r.an, "AN")}</span>
   </>
 );
 
@@ -935,6 +941,7 @@ export function AdmissionsGrid({
         renderFooter={renderFooter}
         searchSize="compact"
         detailIcon={<ReceiptText aria-hidden className="size-4" />}
+        detailInColumn="patient_name"
         reorderable
         hideable
         fitScreen

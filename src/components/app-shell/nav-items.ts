@@ -70,6 +70,7 @@ export const navItems: NavItem[] = [
       { label: "ภาพรวมลูกหนี้ UC", href: "/fund/uc-dashboard" },
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
+      { label: "ตัดลูกหนี้", href: "/fund/ar-settle" },
     ],
   },
   {

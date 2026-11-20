@@ -5,7 +5,6 @@ import {
   LEDGER_START, accountFor, addDays, chunkRange, dailyWindows, monthRange, planCancels, planIpd, planOpd,
   type AccountMap, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RefState, type Source, type SyncCase,
 } from "./ledger";
-import { debtKey, planSettle, type DebtState, type SettleEntry, type StmLine } from "./settle";
 
 // SQL ฝั่ง his ผ่าน prove-query แล้ว (A/B/C) ห้ามเปลี่ยน logic ถ้าไม่ได้ prove ใหม่
 // A ตั้งหนี้ OPD: key = debt_id (1 vn มีหลาย debt_id ได้) แถว ABORT ถูกตั้ง amount = 0 จึงกรองออก ส่วนการลดยอดใช้ B
@@ -60,28 +59,6 @@ CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance, bool_or(x.kind = 'cancel') 
 WHERE s.source = $1 AND s.kind = 'set' AND (s.ref = ANY($2::text[]) OR s.ref_date BETWEEN $3::date AND $4::date)`;
 // ชุดเขียนลง ledger ทีละชุด: ถือ lock นี้ตลอด transaction ให้การกดพร้อมกันเรียงคิว ไม่ตั้งหรือปรับซ้ำ
 const LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('ar_ledger'))";
-// ตัดหนี้ด้วย STM: แถว STM ที่จ่าย ≠ 0 และยังไม่เคยลง ledger ; vn/an จาก stm_row หรือ rep_row (tran_id) สำหรับไฟล์ UC ยุคแรกที่ไม่มี seq_no
-const STM_LINES_SQL = `SELECT r.id::text AS id, f.patient_type, COALESCE(NULLIF(r.seq_no, ''), rr.seq_no) AS vn, COALESCE(NULLIF(r.an, ''), rr.an) AS an,
-  r.paid_total, f.transfer_date::text AS transfer_date
-FROM stm_row r JOIN stm_file f ON f.id = r.stm_file_id
-LEFT JOIN rep_row rr ON rr.tran_id = r.tran_id
-WHERE r.paid_total <> 0 AND NOT EXISTS (SELECT 1 FROM ar_ledger l WHERE l.stm_row_id = r.id)
-ORDER BY f.transfer_date, r.id`;
-// หนี้ของบัญชีที่ตัดด้วย STM ได้ ยอดคงเหลือรวม HOSxP + stm + manual ของหนี้เดียวกัน (patient_type, ref)
-const SETTLE_DEBTS_SQL = `SELECT s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date::text AS ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart,
-  s.account_code, b.balance
-FROM ar_ledger s
-JOIN ar_account a ON a.code = s.account_code AND a.settles_by_stm
-CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
-  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual')) b
-WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt')
-  AND ((s.patient_type = 'OP' AND s.vn = ANY($1::text[])) OR (s.patient_type = 'IP' AND s.an = ANY($2::text[])))`;
-const SETTLE_COLS = `${COLS}, stm_row_id`;
-const SETTLE_INSERT_SQL = `INSERT INTO ar_ledger (${SETTLE_COLS}, sync_id)
-SELECT ${SETTLE_COLS}, $2 FROM jsonb_to_recordset($1::jsonb) AS x(source text, kind text, ref text, vn varchar, an varchar, patient_type text,
-  ref_date date, entry_date date, pttype text, hipdata_code text, hospmain text, hospmain_chwpart text, account_code text, amount numeric, note text, stm_row_id bigint)
-ON CONFLICT (stm_row_id, ref, kind) WHERE stm_row_id IS NOT NULL DO NOTHING
-RETURNING kind`;
 const CHUNK = 2000;
 /** คอลัมน์ของ SyncLog เวลาเป็น "YYYY-MM-DD HH24:MI" เวลาไทย (session timezone) */
 export const LOG_COLS = `id, mode, range_start, range_end, counts, requested_by, to_char(started_at, 'YYYY-MM-DD HH24:MI') AS started_at,
@@ -126,7 +103,8 @@ async function insert(tx: InsightTx, entries: Entry[], syncId: string, counts: S
 }
 
 const bump = (c: SyncCounts, k: string, n = 1) => (c[k] = (c[k] ?? 0) + n);
-const locked = <T>(fn: (tx: InsightTx) => Promise<T>) => insightTransaction(async (tx) => (await tx(LOCK_SQL), fn(tx)));
+/** ถือ advisory lock ของ ar_ledger ตลอด transaction (ar-sync และตัดลูกหนี้ /fund/ar-settle) */
+export const locked = <T>(fn: (tx: InsightTx) => Promise<T>) => insightTransaction(async (tx) => (await tx(LOCK_SQL), fn(tx)));
 
 async function syncOpd(w: { from: string; to: string }, rules: AccountRules, today: string, syncId: string, counts: SyncCounts) {
   const debts = await hisQuery<HisDebt>(OPD_DEBT_SQL(BY_RANGE.opd), [w.from, w.to]);
@@ -161,33 +139,13 @@ async function syncIpd(w: { from: string; to: string }, mode: "daily" | "backfil
   }
 }
 
-async function syncSettle(syncId: string, counts: SyncCounts) {
-  await locked(async (tx) => {
-    const lines = await tx<StmLine>(STM_LINES_SQL);
-    bump(counts, "stm_rows", lines.length);
-    if (!lines.length) return;
-    const vns = [...new Set(lines.filter((l) => l.patient_type === "OP" && l.vn).map((l) => l.vn!))];
-    const ans = [...new Set(lines.filter((l) => l.patient_type === "IP" && l.an).map((l) => l.an!))];
-    const debts = new Map<string, DebtState[]>();
-    for (const r of await tx<Omit<DebtState, "balance" | "cancelled"> & { balance: string }>(SETTLE_DEBTS_SQL, [vns, ans])) {
-      const key = debtKey(r.patient_type, (r.patient_type === "OP" ? r.vn : r.an) ?? "");
-      debts.set(key, [...(debts.get(key) ?? []), { ...r, balance: Math.round(Number(r.balance) * 100), cancelled: false }]);
-    }
-    const { entries, unmatched } = planSettle(lines, debts);
-    bump(counts, "stm_unmatched", unmatched);
-    for (let i = 0; i < entries.length; i += CHUNK) {
-      const rows = await tx<{ kind: SettleEntry["kind"] }>(SETTLE_INSERT_SQL, [JSON.stringify(entries.slice(i, i + CHUNK)), syncId]);
-      for (const r of rows) bump(counts, `stm_${r.kind}`);
-    }
-  });
-}
-
 /**
  * ดึงยอดลง ledger หนึ่งครั้ง (หนึ่งแถวใน ar_sync_log) เขียนทีละชุด ≤31 วันใน transaction ของตัวเอง กดซ้ำได้ไม่ตั้งซ้ำ
  * - daily: OPD ย้อน 14 วัน, ยกเลิกหนี้ตั้งแต่ sync รายวันที่สำเร็จล่าสุด −1 วัน, IPD ย้อน 120 วัน (วันตั้งหนี้ = วันนี้)
  * - backfill: หนึ่งเดือน (YYYY-MM) IPD ใช้ dchdate เป็นวันตั้งหนี้
  * error กลางทาง: ชุดที่ commit แล้วคงอยู่ (กดใหม่ได้เพราะ idempotent) และบันทึก error ลง log
  * daily รันอัตโนมัติทุก 01:00 ผ่าน scripts/ar-sync-daily.mjs (systemd timer ใน deploy/)
+ * ไม่ตัดหนี้ด้วย STM (ผู้ใช้เลือก 20 พ.ย. 2569 ให้ตัดเองที่ /fund/ar-settle) แถว stm ที่ตัดอัตโนมัติไปแล้วคงไว้
  */
 export async function runSync(
   input: { mode: "daily" } | { mode: "backfill"; month: string },
@@ -218,8 +176,6 @@ export async function runSync(
     await syncOpd(windows.opd, rules, today, id, counts);
     await syncCancels(windows.cancel, id, counts);
     await syncIpd(windows.ipd, input.mode, rules, today, id, counts);
-    // ตัดหนี้หลังตั้งหนี้ครบ (STM ทุกงวดที่ยังไม่ตัด ไม่ขึ้นกับช่วงวันที่ของรอบนี้)
-    await syncSettle(id, counts);
   } catch (e) {
     console.error("ar-sync", id, (e as Error).message);
     error = (e as Error).message.slice(0, 500);
@@ -232,7 +188,7 @@ RETURNING ${LOG_COLS}`,
   return log;
 }
 
-// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = ตัดด้วย STM แล้ว (planSettle ปิดทุกหนี้ของ VN/AN ให้เหลือ 0 เสมอ)
+// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวตัดด้วย STM แล้ว (รวมรับบางส่วน)
 //   booked = ยอดของ source HOSxP (เท่าคอลัมน์ "ลงสมุดแล้ว"), balance = คงเหลือทางบัญชีทุก source
 const CASE_SQL = `SELECT COALESCE(bool_or(x.source = 'stm'), false) AS settled,
   count(DISTINCT s.ref)::int AS debts,
@@ -250,7 +206,7 @@ export type CaseSyncResult = { sync_id: string; counts: SyncCounts; entries: num
 
 /**
  * ดึงใหม่รายราย: อ่าน HOSxP ของ VN/AN เดียว แล้วลงส่วนต่างด้วย plan* เดียวกับรายวัน ใน transaction เดียวที่ถือ lock เดียวกัน กดซ้ำไม่ลงซ้ำ
- * ไม่พบทั้งใน HOSxP และ ledger = null ; ไม่ตัดหนี้ STM ต่อ (รายวันตัดให้)
+ * ไม่พบทั้งใน HOSxP และ ledger = null ; ไม่ตัดหนี้ด้วย STM (ตัดเองที่ /fund/ar-settle)
  */
 export async function runCaseSync(c: SyncCase, requestedBy: string | null): Promise<CaseSyncResult | null> {
   const today = todayIso();

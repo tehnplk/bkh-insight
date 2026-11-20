@@ -4,12 +4,13 @@ import { parseColumnFilters, parseGridQuery } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
+import { sexAgeText } from "@/lib/sex-age";
 import { FULL_NAME_SQL, UNKNOWN_FUND, UNKNOWN_NAME, badRequest, inList, isAuthed, loadLookups, unauthorized } from "../_lib/fund";
 import { chunks } from "../rep-import/detail/file-detail";
 import { fiscalYearOf } from "../uc-dashboard/dashboard";
 import {
   STATUS_LABEL, fillBuckets, parseFilters,
-  type ClaimErrorRow, type ClaimErrorsResponse, type CodeSummary,
+  type ClaimErrorRow, type ClaimErrorsResponse, type ClaimType, type CodeSummary,
 } from "./claim-errors";
 
 // รายการที่ REP ล่าสุด (tran_id มากสุด) ยังติด C หรือ Deny ต่อ VN (seq_no) / AN; แถวไม่มีทั้งสองใช้ (hn, admit_at) แทนและไม่อยู่ใน rows
@@ -123,6 +124,32 @@ async function loadNames(hns: (string | null)[]): Promise<Map<string, string>> {
   return out;
 }
 
+/** เพศ/อายุจาก his: OP ตาม VN (vn_stat), IP อายุ ณ วัน admit ตาม AN */
+const SEX_AGE_SQL: Record<ClaimType, (count: number) => string> = {
+  OP: (count) => `SELECT vn AS k, sex, age_y, age_m, age_d FROM vn_stat WHERE ${inList("vn", count)}`,
+  IP: (count) => `SELECT i.an AS k, p.sex,
+  TIMESTAMPDIFF(YEAR, p.birthday, i.regdate) AS age_y,
+  MOD(TIMESTAMPDIFF(MONTH, p.birthday, i.regdate), 12) AS age_m,
+  DATEDIFF(i.regdate, DATE_ADD(p.birthday, INTERVAL TIMESTAMPDIFF(MONTH, p.birthday, i.regdate) MONTH)) AS age_d
+FROM ipt i JOIN patient p ON p.hn = i.hn
+WHERE ${inList("i.an", count)}`,
+};
+
+/** เพศ/อายุของแถว key `${type}:${key}` ทีละชุด ไม่ขนาน ; ไม่พบไม่อยู่ใน Map */
+async function loadSexAge(rows: DbRow[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const type of ["OP", "IP"] as const) {
+    for (const batch of chunks([...new Set(rows.filter((r) => r.type === type).map((r) => r.key))], NAME_BATCH)) {
+      const found = await hisQuery<{ k: string; sex: string | null; age_y: number | null; age_m: number | null; age_d: number | null }>(SEX_AGE_SQL[type](batch.length), batch);
+      for (const r of found) {
+        const text = sexAgeText(r.sex, r.age_y, r.age_m, r.age_d);
+        if (text) out.set(`${type}:${r.k}`, text);
+      }
+    }
+  }
+  return out;
+}
+
 const n = (v: Num) => Number(v ?? 0);
 
 const XLSX_COLUMNS: XlsxColumn<ClaimErrorRow & { status_label: string; codes_text: string; fund_label: string }>[] = [
@@ -181,15 +208,20 @@ ORDER BY ${order} NULLS LAST, key
 LIMIT $${base.length + 1}::int OFFSET $${base.length + 2}::int`;
   const list = insightQuery<DbRow>(listSql, [...base, xlsx ? XLSX_LIMIT : pageSize, xlsx ? 0 : (page - 1) * pageSize]);
   // ชื่อรอแค่ rows ของ Query A ไม่รอ query สรุป; ต่อ his ไม่ได้ก็ยังแสดงคิวได้ (ชื่อเป็น –)
-  const named = list.then(async (rows) => ({ rows, names: await loadNames(rows.map((r) => r.hn)).catch(() => new Map<string, string>()) }));
-  const toRow = (name: (c: string) => string, names: Map<string, string>) => (r: DbRow): ClaimErrorRow => ({
-    ...r, fy: r.fy + 543, fund_name: name(r.fund), full_name: (r.hn && names.get(r.hn)) || null,
+  // เพศ/อายุเฉพาะหน้า grid: Excel ได้ถึง XLSX_LIMIT แถว (~100 ชุด his) จึงไม่ใส่
+  const named = list.then(async (rows) => ({
+    rows,
+    names: await loadNames(rows.map((r) => r.hn)).catch(() => new Map<string, string>()),
+    ages: xlsx ? new Map<string, string>() : await loadSexAge(rows).catch(() => new Map<string, string>()),
+  }));
+  const toRow = (name: (c: string) => string, names: Map<string, string>, ages: Map<string, string>) => (r: DbRow): ClaimErrorRow => ({
+    ...r, fy: r.fy + 543, fund_name: name(r.fund), full_name: (r.hn && names.get(r.hn)) || null, sex_age: ages.get(`${r.type}:${r.key}`) ?? null,
     claim_total: r.claim_total == null ? null : Number(r.claim_total),
   });
 
   if (xlsx) {
     const [{ rows, names }, name] = await Promise.all([named, fundName()]);
-    const out = rows.map(toRow(name, names)).map((r) => ({
+    const out = rows.map(toRow(name, names, new Map())).map((r) => ({
       ...r,
       status_label: STATUS_LABEL[r.status],
       codes_text: r.codes.join(", "),
@@ -198,7 +230,7 @@ LIMIT $${base.length + 1}::int OFFSET $${base.length + 2}::int`;
     return xlsxResponse(`claim-errors-${today}.xlsx`, XLSX_COLUMNS, out);
   }
 
-  const [{ rows, names }, codes, buckets, [t], funds, [o], name] = await Promise.all([
+  const [{ rows, names, ages }, codes, buckets, [t], funds, [o], name] = await Promise.all([
     named,
     insightQuery<Omit<CodeSummary, "n" | "amount" | "avg_age" | "max_age"> & Record<"n" | "amount" | "avg_age" | "max_age", Num>>(SQL_CODES(cfSql), base),
     insightQuery<{ bucket: number; n: Num; amount: Num }>(SQL_BUCKETS(cfSql), base),
@@ -209,7 +241,7 @@ LIMIT $${base.length + 1}::int OFFSET $${base.length + 2}::int`;
     fundName(),
   ]);
   const body: ClaimErrorsResponse = {
-    rows: rows.map(toRow(name, names)),
+    rows: rows.map(toRow(name, names, ages)),
     total: n(t.total),
     totals: { n: n(t.total), amount: n(t.amount), c: n(t.c_count), deny: n(t.deny_count), op: n(t.op_count), ip: n(t.ip_count) },
     buckets: fillBuckets(buckets),
