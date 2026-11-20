@@ -1,7 +1,7 @@
 // ตรวจรายการค่าใช้จ่าย OPD สิทธิ STP (HOSxP opitemrece) กับรายการเบิกกองทุน STP (insight fund_claim_item)
 // pure ไม่มี import จึงรันทดสอบด้วย node ได้ตรง (check.test.mjs)
 
-/** แถวจาก opitemrece + รหัสของรายการ (ค่า decimal จาก mysql เป็น string) */
+/** แถวจาก opitemrece + รหัสของรายการ (ค่า decimal จาก mysql เป็น string) ; kind/adp_code/adp_type = ค่าที่แฟ้ม DRU/ADP ส่งออก */
 export type HisItem = {
   hos_guid: string;
   vn: string;
@@ -13,6 +13,12 @@ export type HisItem = {
   unitprice: string | number;
   sum_price: string | number;
   paidst: string | null;
+  /** DRU = หมวดค่ารักษา (income.drg_chrgitem_id) 3/4 */
+  kind: "DRU" | "ADP";
+  /** ADP.CODE = COALESCE(nhso_adp_code, billcode, icode) ; ยาเป็น null */
+  adp_code: string | null;
+  /** ADP.TYPE ตามหมวดค่ารักษา แล้ว nhso_adp_type_id ; ยาเป็น null */
+  adp_type: string | number | null;
   nhso_adp_code: string | null;
   nhso_adp_type_id: string | number | null;
   tpu_code_list: string | null;
@@ -35,9 +41,10 @@ export type StpCatalog = { drug: Map<string, StpEntry>; nondrug: Map<string, Stp
 export type TmtMaps = { gpuOfTpu: Map<string, string[]>; tpuOfTp: Map<string, string[]> };
 
 // เรียงตามความรุนแรง (ลำดับในแถบสรุป)
-export const CHECK_RESULTS = ["not_in_stp", "no_opd", "no_code", "adp_type", "over_rate", "manual", "ok", "not_fund"] as const;
+export const CHECK_RESULTS = ["bad_amount", "not_in_stp", "no_opd", "no_code", "adp_type", "over_rate", "manual", "ok", "not_fund"] as const;
 export type CheckResult = (typeof CHECK_RESULTS)[number];
 export const RESULT_LABEL: Record<CheckResult, string> = {
+  bad_amount: "จำนวน/ราคาเป็น 0",
   not_in_stp: "ไม่อยู่ในรายการเบิก STP",
   no_opd: "เบิก OPD ไม่ได้",
   no_code: "ไม่มีรหัสเบิก",
@@ -48,6 +55,7 @@ export const RESULT_LABEL: Record<CheckResult, string> = {
   not_fund: "ไม่เบิกกองทุน",
 };
 export const RESULT_TONE: Record<CheckResult, "danger" | "warning" | "success" | "muted"> = {
+  bad_amount: "danger",
   not_in_stp: "danger",
   no_opd: "danger",
   no_code: "danger",
@@ -80,6 +88,8 @@ export type StpCheckRow = {
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+// ปัดแบบ ROUND ของ MySQL (decimal ครึ่งขึ้น) ; + 1e-9 กัน 0.005 * 100 = 0.4999...
+const roundTo = (n: number, d: number) => Math.round(n * 10 ** d + 1e-9) / 10 ** d;
 const clean = (s: string | null | undefined) => s?.trim() || null;
 const adpCode = (s: string | null) => {
   const c = clean(s)?.toUpperCase();
@@ -96,8 +106,7 @@ export function gpusOf(item: Pick<HisItem, "tpu_code_list" | "tmt_tp_code">, tmt
 }
 
 export function checkItem(item: HisItem, stp: StpCatalog, tmt: TmtMaps): StpCheckRow {
-  // icode ยาใน HOSxP ขึ้นต้นด้วย 1 ทุกตัว (drugitems) ส่วน nondrugitems ไม่มีตัวไหนขึ้นต้นด้วย 1
-  const is_drug = item.icode.startsWith("1");
+  const is_drug = item.kind === "DRU";
   const qty = Number(item.qty);
   const unitprice = Number(item.unitprice);
   const base = {
@@ -109,6 +118,10 @@ export function checkItem(item: HisItem, stp: StpCatalog, tmt: TmtMaps): StpChec
   });
 
   if (item.paidst !== "02") return row("not_fund", "");
+  // STP-R108 กับค่าที่ส่งออก: จำนวน ADP 2 ตำแหน่ง ยา 0 ตำแหน่ง ราคา/รวม 2 ตำแหน่ง
+  if (![roundTo(qty, is_drug ? 0 : 2), roundTo(unitprice, 2), roundTo(Number(item.sum_price), 2)].every((v) => v > 0)) {
+    return row("bad_amount", "ตรวจจำนวนและราคาในรายการ");
+  }
 
   let code: string | null;
   let entry: StpEntry | undefined;
@@ -122,7 +135,7 @@ export function checkItem(item: HisItem, stp: StpCatalog, tmt: TmtMaps): StpChec
     code = entry?.code ?? gpus.join(", ");
     if (!entry) return row("not_in_stp", "ตรวจรหัส TMT ของยา หรือเรียกเก็บนอกกองทุน STP", code);
   } else {
-    code = adpCode(item.nhso_adp_code);
+    code = adpCode(item.adp_code);
     if (!code) return row("no_code", "ผูกรหัส ADP ในรายการค่าบริการ");
     entry = stp.nondrug.get(code);
     if (!entry) return row("not_in_stp", "ตรวจรหัส ADP หรือเรียกเก็บนอกกองทุน STP", code);
@@ -131,8 +144,10 @@ export function checkItem(item: HisItem, stp: StpCatalog, tmt: TmtMaps): StpChec
   if (!entry.opd) return row("no_opd", entry.ipd ? "รหัสนี้เบิกได้เฉพาะผู้ป่วยใน" : "รหัสนี้ไม่เปิดให้เบิกผู้ป่วยนอก", code, entry);
   // adp_type ของ STP เป็นข้อความ ('15', 'DRU', '-', ว่าง) เทียบเฉพาะที่เป็นตัวเลข
   const adpType = clean(entry.adp_type);
-  if (!is_drug && adpType && /^\d+$/.test(adpType) && String(item.nhso_adp_type_id ?? "").trim() !== adpType) {
-    return row("adp_type", `ตั้งประเภท ADP เป็น ${adpType}`, code, entry);
+  // TYPE ที่ส่งออกมาจากหมวดค่ารักษาของ income ก่อน แล้วจึง nhso_adp_type_id
+  const sentType = String(item.adp_type ?? "").trim();
+  if (!is_drug && adpType && /^\d+$/.test(adpType) && sentType !== adpType) {
+    return row("adp_type", `ส่งออกเป็นประเภท ${sentType || "–"} แต่ STP กำหนด ${adpType} ตรวจหมวดค่ารักษา (income) หรือประเภท ADP ของรายการ`, code, entry);
   }
   const rate = rateOf(entry);
   if (rate != null && unitprice > rate) {

@@ -5,7 +5,8 @@ import { AuthNotice } from "@/components/auth-card/auth-card";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import type { ClosePage, CloseResult } from "@/app/api/fund/close-privilege/route";
+import type { ClosePage, CloseResult, CloseRow } from "@/app/api/fund/close-privilege/route";
+import { DISPENSE_LABEL, type DispenseStatus } from "@/app/api/fund/close-privilege/dispense";
 import { msUntilMidnight } from "@/app/api/fund/close-privilege/nhso";
 import { Money, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 
@@ -23,6 +24,32 @@ const subscribe = (cb: () => void) => {
   return () => clearInterval(id);
 };
 const useNowTick = () => useSyncExternalStore(subscribe, () => Math.floor(Date.now() / TICK_MS) * TICK_MS, () => null);
+
+const BADGE = "rounded border px-1.5 py-0.5 text-sm whitespace-nowrap";
+const DISPENSE_TONE: Record<Exclude<DispenseStatus, "none">, string> = {
+  dispensed: "border-success-line bg-success-soft text-success",
+  er: "border-line text-muted",
+  self: "border-line text-muted",
+  pending: "border-warning-line bg-warning-soft text-warning",
+};
+
+// แสดงอย่างเดียว ไม่กันการปิดสิทธิ
+function Dispense({ row }: { row: CloseRow }) {
+  if (row.dispense === "none")
+    return (
+      <span className="text-muted" title={DISPENSE_LABEL.none} aria-label={DISPENSE_LABEL.none}>
+        –
+      </span>
+    );
+  const at = row.dispensed_at;
+  const title =
+    row.dispense === "dispensed" ? (at ? `จ่ายยา ${formatThaiDate(at)} ${at.slice(11, 16)}` : undefined) : row.dispense === "pending" ? undefined : "ไม่มีบันทึกจ่ายยาที่ห้องยา";
+  return (
+    <span className={`${BADGE} ${DISPENSE_TONE[row.dispense]}`} title={title}>
+      {DISPENSE_LABEL[row.dispense]}
+    </span>
+  );
+}
 
 type Item = { vn: string; state: "wait" | "sending" | "done"; result?: CloseResult };
 
@@ -166,6 +193,7 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
                 <th className={TH}>สิทธิ</th>
                 <th className={TH}>แผนกหลัก</th>
                 <th className={TH}>สถานะ/แผนกปัจจุบัน</th>
+                <th className={TH}>รับยา</th>
                 <th className={TH}>รหัส Authen</th>
                 <th className={`${TH} ${num}`}>ยอดลูกหนี้สิทธิ (บาท)</th>
               </tr>
@@ -173,13 +201,13 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
             <tbody>
               {!data ? (
                 <tr className="border-t border-line">
-                  <td colSpan={9} className="px-3 py-6 text-center text-muted">
+                  <td colSpan={10} className="px-3 py-6 text-center text-muted">
                     กำลังโหลด…
                   </td>
                 </tr>
               ) : !rows.length ? (
                 <tr className="border-t border-line">
-                  <td colSpan={9} className="px-3 py-6 text-center text-muted">
+                  <td colSpan={10} className="px-3 py-6 text-center text-muted">
                     ไม่มี visit ที่จบบริการแล้วและยังไม่ปิดสิทธิ
                   </td>
                 </tr>
@@ -204,6 +232,9 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
                       <td className="min-w-40 px-3 py-1.5">{r.pttype_name}</td>
                       <td className="min-w-36 px-3 py-1.5">{r.main_dep}</td>
                       <td className="min-w-36 px-3 py-1.5">{r.cur_dep}</td>
+                      <td className={TD}>
+                        <Dispense row={r} />
+                      </td>
                       <td className={TD}>{r.auth_code ?? <span className="text-muted">–</span>}</td>
                       <td className={`px-3 py-1.5 ${num}`}>
                         <Money value={r.privilege_amount} />
@@ -250,7 +281,12 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
                   <span className="tabular-nums">VN {i.vn}</span>
                   {i.state === "wait" && <span className="text-muted">รอส่ง</span>}
                   {i.state === "sending" && <span className="text-muted">กำลังส่ง…</span>}
-                  {i.result?.ok && <span className="font-medium text-success">สำเร็จ {i.result.authenCode}</span>}
+                  {i.result?.ok && (
+                    <span className="font-medium text-success">
+                      สำเร็จ {i.result.authenCode}
+                      {i.result.dataError && <span className="ml-2 font-normal text-warning">{i.result.dataError}</span>}
+                    </span>
+                  )}
                   {i.result && !i.result.ok && <span className="text-danger">ไม่สำเร็จ: {i.result.error}</span>}
                 </li>
               ))}

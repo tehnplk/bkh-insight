@@ -34,9 +34,9 @@ const ecItemClinic = (s: string) => `CONCAT(CASE WHEN op.an IS NOT NULL AND op.a
 const ITEM_CLINIC = "CONCAT(CASE WHEN op.an IS NOT NULL AND op.an <> '' THEN '1' ELSE '0' END, LPAD(COALESCE(sp.nhso_code, '01'), 2, '0'), '00')";
 // ยา = หมวดค่ารักษา 3/4 (income.drg_chrgitem_id) ไม่ใช่รหัส income ; DRU + ADP ครอบทุกรายการของ visit/AN ไม่ซ้อนกัน
 const DRUG_INC = "INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4)";
-const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
-// ADP.TYPE ตามหมวดค่ารักษา ไม่เข้าหมวดใช้ nhso_adp_type_id ; checks.ts ใช้สูตรเดียวกัน (fdh.test.mjs ตรวจ)
-const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+export const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
+// ADP.TYPE ตามหมวดค่ารักษา ไม่เข้าหมวดใช้ nhso_adp_type_id ; checks.ts ใช้สูตรเดียวกัน (fdh.test.mjs ตรวจ) ; fund/stp-check import ไปใช้
+export const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
 const TOTCOPAY = "ROUND(CASE WHEN op.paidst = '03' THEN op.sum_price ELSE 0 END, 2) AS `TOTCOPAY`";
 const CHA = `op.hn AS \`HN\`, COALESCE(op.an, '') AS \`AN\`, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS \`DATE\`, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS \`CHRGITEM\`, ROUND(SUM(op.sum_price), 2) AS \`AMOUNT\`, pt.cid AS \`PERSON_ID\`, COALESCE(op.vn, '') AS \`SEQ\`, ROUND(SUM(CASE WHEN op.paidst = '02' THEN op.sum_price ELSE 0 END), 2) AS claim_amount`;
 // claim_amount (ไม่มี backtick จึงไม่อยู่ใน fileColumns/แฟ้ม FDH) = ยอดเบิกได้ (paidst 02) ไว้แยก CHRGITEM x1/x2 ของแฟ้ม e-Claim (eclaim.ts)

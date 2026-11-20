@@ -87,7 +87,8 @@ export function buildClaimBody(i: ClaimInput) {
 }
 export type ClaimBody = ReturnType<typeof buildClaimBody>;
 
-export type ClaimResult = { ok: true; seq: string; authenCode: string } | { ok: false; error: string };
+// dataError = ข้อความ dataError ที่ สปสช. ตอบ (ปิดเลข 13 หลัก) มีได้ทั้งตอนสำเร็จและไม่สำเร็จ
+export type ClaimResult = { ok: true; seq: string; authenCode: string; dataError: string | null } | { ok: false; error: string; dataError: string | null };
 
 // ข้อความ error เก็บลง log: ปิดเลข 13 หลัก (สปสช. อาจสะท้อนเลขบัตรกลับมา) และตัดความยาว
 const clean = (s: string) => s.replace(/\d{13}/g, "*************").slice(0, 500);
@@ -104,12 +105,14 @@ export function parseResponse(status: number, raw: string): ClaimResult {
   } catch {}
   const o = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
   const ok2xx = status >= 200 && status < 300;
+  const de = o && text(o.dataError);
+  const dataError = de ? clean(de) : null;
   if (ok2xx && o && typeof o.authenCode === "string" && o.authenCode && o.seq != null && o.seq !== "") {
-    return { ok: true, seq: String(o.seq), authenCode: o.authenCode };
+    return { ok: true, seq: String(o.seq), authenCode: o.authenCode, dataError };
   }
-  const detail = (o && (text(o.dataError) ?? text(o.message) ?? text(o.error) ?? text(o.errors))) || raw.trim() || null;
-  if (ok2xx) return { ok: false, error: clean(detail ? `ผลตอบกลับไม่มีรหัส authenCode: ${detail}` : "ผลตอบกลับไม่มีรหัส authenCode") };
-  return { ok: false, error: clean(`HTTP ${status}${detail ? `: ${detail}` : ""}`) };
+  const detail = (o && (de ?? text(o.message) ?? text(o.error) ?? text(o.errors))) || raw.trim() || null;
+  if (ok2xx) return { ok: false, error: clean(detail ? `ผลตอบกลับไม่มีรหัส authenCode: ${detail}` : "ผลตอบกลับไม่มีรหัส authenCode"), dataError };
+  return { ok: false, error: clean(`HTTP ${status}${detail ? `: ${detail}` : ""}`), dataError };
 }
 
 /** POST หนึ่งราย มี timeout ; fetch ส่งเข้ามา (ทดสอบด้วย mock) */
@@ -136,6 +139,6 @@ export async function postClaim(
       err.name === "TimeoutError" || err.name === "AbortError"
         ? `ไม่ได้รับผลภายใน ${timeoutMs / 1000} วินาที (อาจปิดสำเร็จแล้ว ตรวจสอบก่อนกดซ้ำ)`
         : clean(`เชื่อมต่อ สปสช. ไม่สำเร็จ: ${err.message}`);
-    return { ok: false, error, httpStatus: null };
+    return { ok: false, error, dataError: null, httpStatus: null };
   }
 }

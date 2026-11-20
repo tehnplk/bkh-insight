@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { hisQuery, insightQuery, insightTransaction } from "@/lib/db";
 import { badRequest, inList, loadDepartments, loadLookups, pttypeName, unauthorized } from "../_lib/fund";
+import { dispenseStatus, type DispenseStatus } from "./dispense";
 import { PID, VN, buildClaimBody, isClosableNow, postClaim, readConfig, thaiDate, type Zone } from "./nhso";
 
 // ปิดสิทธิผ่าน NHSO ENDPOINT ทีละราย (เจ้าหน้าที่เลือกเอง ไม่มีการปิดอัตโนมัติ) ผลไม่ย้อนเข้า HOSxP จึงบันทึกที่ nhso_close_log
@@ -16,6 +17,10 @@ export type CloseRow = {
   cur_dep: string;
   auth_code: string | null;
   privilege_amount: number;
+  /** รับยา (แสดงอย่างเดียว ไม่กันการปิดสิทธิ) */
+  dispense: DispenseStatus;
+  /** เวลาจ่ายยา (เวลาไทย YYYY-MM-DD HH:MM:SS) เมื่อ dispense = dispensed */
+  dispensed_at: string | null;
 };
 export type ClosePage = {
   date: string;
@@ -26,7 +31,7 @@ export type ClosePage = {
   recorderError: string | null;
   rows: CloseRow[];
 };
-export type CloseResult = { vn: string; ok: boolean; authenCode?: string; error?: string };
+export type CloseResult = { vn: string; ok: boolean; authenCode?: string; error?: string; dataError?: string | null };
 
 const MAX_VNS = 100;
 
@@ -40,6 +45,36 @@ WHERE o.vstdate = ? AND ${inList("o.pttype", n)} AND (o.an IS NULL OR o.an = '')
   AND (o.cur_dep = '999' OR o.ovstost = '99')
   AND NOT EXISTS (SELECT 1 FROM nhso_confirm_privilege c WHERE c.vn = o.vn AND c.nhso_status = 'Y')
 ORDER BY o.vsttime`;
+
+// รับยาต่อ visit (prove-query ผ่าน) params: vn… ; rx_dispenser_type_id 4 = ผู้จ่ายยา (1–3 บันทึก/จัด/ตรวจ ไม่นับ)
+const DISPENSE_SQL = (n: number) => `SELECT t.vn, t.has_drug,
+       (t.has_drug = 1 AND (t.rx_ok = 'Y' OR t.rx_t4_at IS NOT NULL)) AS dispensed,
+       CASE WHEN t.has_drug = 1
+            THEN COALESCE(t.rx_t4_at, CASE WHEN t.rx_ok = 'Y' THEN t.last_check_datetime END)
+       END AS dispensed_at
+FROM (
+  SELECT o.vn,
+         EXISTS(SELECT 1 FROM opitemrece r FORCE INDEX (ix_vn)
+                JOIN drugitems di ON di.icode = r.icode
+                WHERE r.vn = o.vn) AS has_drug,
+         s.rx_ok, s.last_check_datetime,
+         (SELECT MAX(x.rx_dispenser_datetime) FROM rx_dispenser_detail x
+          WHERE x.vn = o.vn AND x.rx_dispenser_type_id = 4) AS rx_t4_at
+  FROM ovst o
+  LEFT JOIN ovst_seq s ON s.vn = o.vn
+  WHERE ${inList("o.vn", n)}
+) t`;
+const DISPENSE_CHUNK = 1000;
+type DispenseRow = { vn: string; has_drug: number; dispensed: number | null; dispensed_at: string | null };
+
+async function loadDispense(vns: string[]): Promise<Map<string, DispenseRow>> {
+  const out = new Map<string, DispenseRow>();
+  for (let i = 0; i < vns.length; i += DISPENSE_CHUNK) {
+    const part = vns.slice(i, i + DISPENSE_CHUNK);
+    for (const r of await hisQuery<DispenseRow>(DISPENSE_SQL(part.length), part)) out.set(r.vn, r);
+  }
+  return out;
+}
 
 // ข้อมูลสร้างคำขอต่อ visit (prove-query ผ่าน) params: vn… สองรอบ ; closed_status 'Y' = HOSxP ปิดแล้ว
 const VISIT_SQL = (n: number) => `SELECT o.vn, o.vstdate, o.vsttime, o.pttype, t.hipdata_code AS main_inscl, p.cid AS person_id,
@@ -95,13 +130,14 @@ export async function GET(request: NextRequest) {
     LIST_SQL(codes.length),
     [date, date, ...codes],
   );
-  const done = list.length
-    ? new Set(
-        (await insightQuery<{ vn: string }>("SELECT vn FROM nhso_close_log WHERE ok AND zone = $1 AND vn = ANY($2::text[])", [config.zone, list.map((r) => r.vn)])).map(
-          (r) => r.vn,
+  const [done, rx] = list.length
+    ? await Promise.all([
+        insightQuery<{ vn: string }>("SELECT vn FROM nhso_close_log WHERE ok AND zone = $1 AND vn = ANY($2::text[])", [config.zone, list.map((r) => r.vn)]).then(
+          (rows) => new Set(rows.map((r) => r.vn)),
         ),
-      )
-    : new Set<string>();
+        loadDispense(list.map((r) => r.vn)),
+      ])
+    : [new Set<string>(), new Map<string, DispenseRow>()];
   const depName = new Map(deps.map((d) => [d.code, d.name]));
   const dep = (c: string | null) => (c ? (depName.get(c) ?? c) : "–");
 
@@ -121,6 +157,8 @@ export async function GET(request: NextRequest) {
         cur_dep: dep(r.cur_dep),
         auth_code: r.auth_code || null,
         privilege_amount: Number(r.privilege_amount),
+        dispense: dispenseStatus({ has_drug: rx.get(r.vn)?.has_drug, dispensed: rx.get(r.vn)?.dispensed, main_dep: r.main_dep }),
+        dispensed_at: rx.get(r.vn)?.dispensed_at ?? null,
       })),
   };
   return Response.json(body);
@@ -178,13 +216,13 @@ async function closeOne(
     if (!isClosableNow(v.vstdate, nowMs)) return fail("ปิดสิทธิได้เฉพาะ visit ของวันนี้ก่อน 24.00 น.");
 
     const amounts = { total: Number(v.total_amount), privilege: Number(v.privilege_amount), cash: Number(v.cash_amount) };
-    const log = async (r: { ok: boolean; httpStatus: number | null; seq?: string; authenCode?: string; error?: string }, requestAt: Date) => {
+    const log = async (r: { ok: boolean; httpStatus: number | null; seq?: string; authenCode?: string; error?: string; dataError?: string | null }, requestAt: Date) => {
       await tx(
         `INSERT INTO nhso_close_log (vn, transaction_id, zone, request_at, response_at, ok, http_status, seq, authen_code, error,
-           requested_by, user_id, doctor_code, total_amount, privilege_amount, cash_amount)
-         VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+           requested_by, user_id, doctor_code, total_amount, privilege_amount, cash_amount, data_error)
+         VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [vn, `${hcode}${vn}`, config.zone, requestAt, r.ok, r.httpStatus, r.seq ?? null, r.authenCode ?? null, r.error ?? null,
-          requestedBy, recorder.userId, recorder.doctorCode, amounts.total, amounts.privilege, amounts.cash],
+          requestedBy, recorder.userId, recorder.doctorCode, amounts.total, amounts.privilege, amounts.cash, r.dataError ?? null],
       );
     };
 
@@ -200,6 +238,7 @@ async function closeOne(
     });
     const r = await postClaim(fetch, config.endpoint, config.token, body);
     await log(r, new Date(nowMs));
-    return r.ok ? { vn, ok: true, authenCode: r.authenCode } : fail(r.error);
+    // ไม่สำเร็จ: dataError อยู่ใน error แล้ว (parseResponse ใช้เป็นข้อความแรก)
+    return r.ok ? { vn, ok: true, authenCode: r.authenCode, dataError: r.dataError } : fail(r.error);
   });
 }
