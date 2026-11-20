@@ -5,16 +5,15 @@ import { AuthNotice } from "@/components/auth-card/auth-card";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
-import type { ClosePage, CloseResult, CloseRow } from "@/app/api/fund/close-privilege/route";
+import type { ClosePage, CloseRow } from "@/app/api/fund/close-privilege/route";
 import { DISPENSE_LABEL, type DispenseStatus } from "@/app/api/fund/close-privilege/dispense";
 import { msUntilMidnight } from "@/app/api/fund/close-privilege/nhso";
 import { Money, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
+import { CloseConfirm, CloseResults, ZONE_LABEL, blockedReasons, primary, runClose, tally, type CloseItem } from "./close-run";
 
 const SELECT_CLASS = `h-9 rounded-md border border-line bg-surface pr-8 pl-3 font-medium ${focusRing}`;
-const primary = `inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-accent-fg hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 const TH = "px-3 py-2.5 font-medium whitespace-nowrap";
 const TD = "px-3 py-1.5 whitespace-nowrap";
-const ZONE_LABEL = { test: "Test Zone", prod: "Production" } as const;
 const WARN_BEFORE_MS = 2 * 3_600_000; // เตือนตั้งแต่ 22.00 น.
 
 // นาทีปัจจุบัน (ปัดลง 30 วินาที) ฝั่ง server คืน null จึงไม่ต้องกลัว hydration ไม่ตรง
@@ -51,8 +50,6 @@ function Dispense({ row }: { row: CloseRow }) {
   );
 }
 
-type Item = { vn: string; state: "wait" | "sending" | "done"; result?: CloseResult };
-
 function timeLeft(ms: number) {
   const m = Math.max(0, Math.floor(ms / 60_000));
   return m >= 60 ? `${Math.floor(m / 60)} ชม. ${m % 60} นาที` : `${m} นาที`;
@@ -64,13 +61,13 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
   const { data, error, loading, retry } = useJson<ClosePage>(`/api/fund/close-privilege?fund=${encodeURIComponent(fund)}`);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
-  const [run, setRun] = useState<Item[] | null>(null);
+  const [run, setRun] = useState<CloseItem[] | null>(null);
   const now = useNowTick();
 
   const rows = data?.rows ?? [];
   const chosen = rows.filter((r) => selected.has(r.vn));
   const sending = run?.some((i) => i.state !== "done") ?? false;
-  const blocked = data ? [...(data.missing.length ? [`ยังไม่ได้ตั้งค่า ${data.missing.join(", ")}`] : []), ...(data.recorderError ? [data.recorderError] : [])] : [];
+  const blocked = data ? blockedReasons(data) : [];
   const left = now === null ? null : msUntilMidnight(now);
   const allOn = rows.length > 0 && chosen.length === rows.length;
 
@@ -83,39 +80,13 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
     });
   }
 
-  // ทีละรายตามลำดับ หนึ่ง POST ต่อราย ให้เห็นผลรายต่อราย ; error ทั้งคำขอ (เช่น ยังไม่ตั้งค่า) หยุดรายที่เหลือ
   async function send() {
-    const vns = chosen.map((r) => r.vn);
-    const items: Item[] = vns.map((vn) => ({ vn, state: "wait" }));
-    const update = (i: number, patch: Partial<Item>) => {
-      items[i] = { ...items[i], ...patch };
-      setRun([...items]);
-    };
-    setRun([...items]);
-    for (let i = 0; i < vns.length; i++) {
-      update(i, { state: "sending" });
-      const res = await fetch("/api/fund/close-privilege", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vns: [vns[i]] }),
-      }).catch(() => null);
-      const body = await res?.json().catch(() => null);
-      const result: CloseResult | undefined = res?.ok ? body?.results?.[0] : undefined;
-      if (result) {
-        update(i, { state: "done", result });
-        continue;
-      }
-      const msg = body?.error ?? (res ? `ส่งไม่สำเร็จ (HTTP ${res.status})` : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
-      update(i, { state: "done", result: { vn: vns[i], ok: false, error: msg } });
-      for (let j = i + 1; j < vns.length; j++) update(j, { state: "done", result: { vn: vns[j], ok: false, error: "ไม่ได้ส่ง" } });
-      break;
-    }
+    await runClose(chosen.map((r) => r.vn), setRun);
     setSelected(new Set());
     retry();
   }
 
-  const okCount = run?.filter((i) => i.result?.ok).length ?? 0;
-  const failCount = run?.filter((i) => i.result && !i.result.ok).length ?? 0;
+  const { ok: okCount, fail: failCount } = tally(run);
 
   return (
     <div className="space-y-3">
@@ -254,55 +225,8 @@ export function ClosePrivilege({ funds }: { funds: { code: string; name: string 
       )}
 
       <DetailModal open={open} onClose={() => setOpen(false)} title={run ? "ผลการปิดสิทธิ" : `ปิดสิทธิ ${formatCount(chosen.length)} ราย`}>
-        {data && !run && (
-          <div className="space-y-4 text-base">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-              <dt className="text-muted">จำนวน</dt>
-              <dd className="font-medium">{formatCount(chosen.length)} ราย</dd>
-              <dt className="text-muted">ส่งไปที่</dt>
-              <dd className="font-medium">{ZONE_LABEL[data.zone]}</dd>
-            </dl>
-            <AuthNotice tone="warning">ผลการปิดจากหน้านี้ไม่แสดงใน HOSxP ห้ามกดปิดสิทธิรายเดียวกันซ้ำใน HOSxP</AuthNotice>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setOpen(false)} className={btn}>
-                ยกเลิก
-              </button>
-              <button type="button" onClick={send} disabled={!chosen.length} className={primary}>
-                ยืนยันปิดสิทธิ {formatCount(chosen.length)} ราย
-              </button>
-            </div>
-          </div>
-        )}
-        {run && (
-          <div className="space-y-3 text-base">
-            <ol aria-live="polite" className="divide-y divide-line rounded-lg border border-line">
-              {run.map((i) => (
-                <li key={i.vn} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2">
-                  <span className="tabular-nums">VN {i.vn}</span>
-                  {i.state === "wait" && <span className="text-muted">รอส่ง</span>}
-                  {i.state === "sending" && <span className="text-muted">กำลังส่ง…</span>}
-                  {i.result?.ok && (
-                    <span className="font-medium text-success">
-                      สำเร็จ {i.result.authenCode}
-                      {i.result.dataError && <span className="ml-2 font-normal text-warning">{i.result.dataError}</span>}
-                    </span>
-                  )}
-                  {i.result && !i.result.ok && <span className="text-danger">ไม่สำเร็จ: {i.result.error}</span>}
-                </li>
-              ))}
-            </ol>
-            {!sending && (
-              <div className="flex items-center justify-between gap-3">
-                <p role="status" className="font-medium">
-                  สำเร็จ {formatCount(okCount)} ราย · ไม่สำเร็จ {formatCount(failCount)} ราย
-                </p>
-                <button type="button" onClick={() => setOpen(false)} className={btn}>
-                  ปิด
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {data && !run && <CloseConfirm zone={data.zone} count={chosen.length} unit="ราย" onCancel={() => setOpen(false)} onConfirm={send} />}
+        {run && <CloseResults run={run} onClose={() => setOpen(false)} />}
       </DetailModal>
     </div>
   );

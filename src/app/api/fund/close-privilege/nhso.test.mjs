@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/close-privilege/nhso.test.mjs (mock fetch ไม่ยิง สปสช. จริง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TEST_URL, buildClaimBody, isClosableNow, msUntilMidnight, parseResponse, postClaim, readConfig, thaiDate } from "./nhso.ts";
+import { TEST_URL, buildClaimBody, closeSkipReason, isClosableNow, msUntilMidnight, parseResponse, postClaim, readConfig, thaiDate } from "./nhso.ts";
 
 const full = { NHSO_ENDPOINT_TOKEN: "t", NHSO_ENDPOINT_CLAIM_PATH: "/api/claim", NHSO_ENDPOINT_SOURCE_ID: "SRC" };
 
@@ -77,4 +77,14 @@ test("postClaim: sends Bearer JSON, handles network error and timeout", async ()
   assert.equal(slow.ok, false);
   assert.match(slow.error, /ไม่ได้รับผลภายใน/);
   assert.equal(slow.dataError, null);
+});
+
+test("closeSkipReason: admitted, already closed, not today, eligible", () => {
+  const now = Date.parse("2026-11-14T10:00:00+07:00");
+  const v = { vstdate: "2026-11-14", an: null, closed: false };
+  assert.equal(closeSkipReason(v, now), null);
+  assert.equal(closeSkipReason({ ...v, an: "690001234" }, now), "Admit แล้ว");
+  assert.equal(closeSkipReason({ ...v, closed: true }, now), "ปิดสิทธิแล้ว");
+  assert.equal(closeSkipReason({ ...v, vstdate: "2026-11-13" }, now), "ไม่ใช่ visit ของวันนี้");
+  assert.equal(closeSkipReason({ ...v, vstdate: null }, now), "ไม่ใช่ visit ของวันนี้");
 });

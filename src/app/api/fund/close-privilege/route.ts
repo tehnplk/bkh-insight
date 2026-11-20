@@ -22,15 +22,15 @@ export type CloseRow = {
   /** เวลาจ่ายยา (เวลาไทย YYYY-MM-DD HH:MM:SS) เมื่อ dispense = dispensed */
   dispensed_at: string | null;
 };
-export type ClosePage = {
-  date: string;
+/** ความพร้อมกดปิดสิทธิ (GET ?ready=1 คืนแค่ส่วนนี้ ให้ปุ่มของหน้าอื่นโดยไม่ query รายการ) */
+export type CloseReady = {
   zone: Zone;
   /** ชื่อ env ที่ยังไม่ตั้ง (ว่าง = พร้อม) */
   missing: string[];
   /** null = ผู้ใช้นี้กดปิดได้ ; ข้อความ = เหตุที่กดไม่ได้ */
   recorderError: string | null;
-  rows: CloseRow[];
 };
+export type ClosePage = CloseReady & { date: string; rows: CloseRow[] };
 export type CloseResult = { vn: string; ok: boolean; authenCode?: string; error?: string; dataError?: string | null };
 
 const MAX_VNS = 100;
@@ -117,9 +117,13 @@ async function loadRecorder(userId: string | undefined): Promise<Recorder> {
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session) return unauthorized();
+  const config = readConfig(process.env);
+  if (request.nextUrl.searchParams.has("ready")) {
+    const recorder = await loadRecorder(session.user.userId);
+    return Response.json({ zone: config.zone, missing: config.missing, recorderError: recorder.ok ? null : recorder.error } satisfies CloseReady);
+  }
   const fund = request.nextUrl.searchParams.get("fund") || "UCS";
   const date = thaiDate(Date.now());
-  const config = readConfig(process.env);
 
   const [lk, deps, recorder] = await Promise.all([loadLookups(), loadDepartments(), loadRecorder(session.user.userId)]);
   // fund ใช้เลือก pttype ในโค้ดเท่านั้น ไม่เข้า SQL ; ไม่มี pttype ของกองทุนนี้ = ค่าไม่ถูกต้อง (และกัน IN ว่าง)
