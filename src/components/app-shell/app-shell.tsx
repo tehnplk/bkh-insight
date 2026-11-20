@@ -173,7 +173,8 @@ export function AppShell({ children, account }: { children: ReactNode; account?:
             </div>
           </header>
 
-          <main id="main" tabIndex={-1} className="flex-1 overflow-y-auto px-8 py-7 outline-none max-md:px-4 max-md:py-5">
+          {/* relative: absolute descendants (sr-only captions/live text) must be clipped here, not stretch the document. */}
+          <main id="main" tabIndex={-1} className="relative flex-1 overflow-y-auto px-8 py-7 outline-none max-md:px-4 max-md:py-5">
             {children}
           </main>
         </div>

@@ -48,11 +48,16 @@ test("body: key order and values as HOSxP sends", () => {
 });
 
 test("response: success, dataError, text, HTTP error; 13-digit ids masked", () => {
-  assert.deepEqual(parseResponse(200, '{"seq":12345678901,"authenCode":"EP1234567890"}'), { ok: true, seq: "12345678901", authenCode: "EP1234567890" });
-  assert.deepEqual(parseResponse(200, '{"dataError":"visit ซ้ำ"}'), { ok: false, error: "ผลตอบกลับไม่มีรหัส authenCode: visit ซ้ำ" });
-  assert.deepEqual(parseResponse(400, '{"dataError":{"pid":"1234567890123 ไม่ถูกต้อง"}}'), { ok: false, error: 'HTTP 400: {"pid":"************* ไม่ถูกต้อง"}' });
-  assert.deepEqual(parseResponse(401, "Unauthorized"), { ok: false, error: "HTTP 401: Unauthorized" });
-  assert.deepEqual(parseResponse(502, ""), { ok: false, error: "HTTP 502" });
+  assert.deepEqual(parseResponse(200, '{"seq":12345678901,"authenCode":"EP1234567890"}'), { ok: true, seq: "12345678901", authenCode: "EP1234567890", dataError: null });
+  assert.deepEqual(parseResponse(200, '{"seq":1,"authenCode":"EP1","dataError":"pid 1234567890123 ไม่ตรงทะเบียน"}'), {
+    ok: true, seq: "1", authenCode: "EP1", dataError: "pid ************* ไม่ตรงทะเบียน",
+  });
+  assert.deepEqual(parseResponse(200, '{"dataError":"visit ซ้ำ"}'), { ok: false, error: "ผลตอบกลับไม่มีรหัส authenCode: visit ซ้ำ", dataError: "visit ซ้ำ" });
+  assert.deepEqual(parseResponse(400, '{"dataError":{"pid":"1234567890123 ไม่ถูกต้อง"}}'), {
+    ok: false, error: 'HTTP 400: {"pid":"************* ไม่ถูกต้อง"}', dataError: '{"pid":"************* ไม่ถูกต้อง"}',
+  });
+  assert.deepEqual(parseResponse(401, "Unauthorized"), { ok: false, error: "HTTP 401: Unauthorized", dataError: null });
+  assert.deepEqual(parseResponse(502, ""), { ok: false, error: "HTTP 502", dataError: null });
 });
 
 test("postClaim: sends Bearer JSON, handles network error and timeout", async () => {
@@ -61,14 +66,15 @@ test("postClaim: sends Bearer JSON, handles network error and timeout", async ()
     seen = { url, init };
     return new Response('{"seq":1,"authenCode":"EP0000000001"}', { status: 200 });
   }, "http://mock/claim", "tok", { a: 1 });
-  assert.deepEqual(ok, { ok: true, seq: "1", authenCode: "EP0000000001", httpStatus: 200 });
+  assert.deepEqual(ok, { ok: true, seq: "1", authenCode: "EP0000000001", dataError: null, httpStatus: 200 });
   assert.equal(seen.init.headers.Authorization, "Bearer tok");
   assert.equal(seen.init.body, '{"a":1}');
 
   const down = await postClaim(async () => { throw new TypeError("fetch failed"); }, "http://mock", "t", {});
-  assert.deepEqual(down, { ok: false, error: "เชื่อมต่อ สปสช. ไม่สำเร็จ: fetch failed", httpStatus: null });
+  assert.deepEqual(down, { ok: false, error: "เชื่อมต่อ สปสช. ไม่สำเร็จ: fetch failed", dataError: null, httpStatus: null });
 
   const slow = await postClaim((_, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))), "http://mock", "t", {}, 20);
   assert.equal(slow.ok, false);
   assert.match(slow.error, /ไม่ได้รับผลภายใน/);
+  assert.equal(slow.dataError, null);
 });

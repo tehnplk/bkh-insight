@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
-import { OPI_BY_DATE, badRequest, inList, isAuthed, parseRange, unauthorized } from "../_lib/fund";
+import { ADP_TYPE, NOT_DRUG } from "../../fdh/files/sql";
+import { badRequest, inList, isAuthed, parseRange, unauthorized } from "../_lib/fund";
 import {
   RESULT_LABEL, checkItem, matches, needsFix, sortRows, summarize,
   type CheckResult, type HisItem, type StpCatalog, type StpCheckPage, type StpCheckRow, type StpEntry, type TmtMaps,
@@ -15,20 +16,31 @@ const FILTER_GET = { result: (r) => r.result } satisfies RowGetters<StpCheckRow,
 type FilterKey = keyof typeof FILTER_GET;
 const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 
+// ค่าเดียวกับแฟ้ม ADP/DRU ที่ส่งออก (fdh/files/sql.ts): ยา = หมวดค่ารักษา 3/4, CODE/TYPE สูตรเดียวกัน, visit STP ที่ไม่ admit
+// shortcut: เริ่มจาก ovst (visit STP ไม่กี่ร้อยต่อเดือน) แล้วเข้า opitemrece ด้วย ix_vn ไม่สแกนตามวันจึงไม่ใช้ OPI_BY_DATE ; นำไปใช้กับกองทุนใหญ่ต้อง prove ใหม่
 async function loadItems(start: string, end: string, pttypes: string[]): Promise<HisItem[]> {
   return hisQuery<HisItem>(
-    `SELECT o.hos_guid, o.vn, o.hn, o.vstdate, o.icode, s.name AS item_name,
-            o.qty, o.unitprice, o.sum_price, o.paidst, o.income,
-            n.nhso_adp_code, n.nhso_adp_type_id,
+    `SELECT op.hos_guid, op.vn, op.hn, op.vstdate, op.icode, s.name AS item_name,
+            op.qty, op.unitprice, op.sum_price, op.paidst, op.income,
+            CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN 'DRU' ELSE 'ADP' END AS kind,
+            nd.nhso_adp_code, nd.nhso_adp_type_id,
+            CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN NULL
+                 ELSE COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) END AS adp_code,
+            CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN NULL ELSE ${ADP_TYPE} END AS adp_type,
             d.tpu_code_list, d.tmt_tp_code
-     FROM ${OPI_BY_DATE}
-     LEFT JOIN s_drugitems s ON s.icode = o.icode
-     LEFT JOIN nondrugitems n ON n.icode = o.icode
-     LEFT JOIN drugitems d ON d.icode = o.icode
-     WHERE o.vstdate BETWEEN ? AND ?
-       AND o.vn IS NOT NULL
-       AND ${inList("o.pttype", pttypes.length)}
-     ORDER BY o.vstdate, o.vn, o.icode`,
+     FROM ovst v
+     JOIN opitemrece op ON op.vn = v.vn
+     LEFT JOIN income inc ON inc.income = op.income
+     LEFT JOIN s_drugitems s ON s.icode = op.icode
+     LEFT JOIN nondrugitems nd ON nd.icode = op.icode
+     LEFT JOIN drugitems d ON d.icode = op.icode
+     WHERE v.vstdate BETWEEN ? AND ?
+       AND ${inList("v.pttype", pttypes.length)}
+       AND (v.an IS NULL OR v.an = '')
+       AND (op.an IS NULL OR op.an = '')
+       AND ((inc.drg_chrgitem_id IN (3, 4) AND d.icode IS NOT NULL)
+         OR (${NOT_DRUG} AND nd.icode IS NOT NULL))
+     ORDER BY op.vstdate, op.vn, op.icode`,
     [start, end, ...pttypes],
   );
 }
@@ -41,7 +53,7 @@ const group = (pairs: { k: string; v: string }[]) => {
 
 /** tp -> tpu สำหรับยาที่ไม่มี tpu_code_list แล้ว tpu -> gpu (แยกจาก query รายการ) list ว่างไม่ query */
 async function loadTmt(items: HisItem[]): Promise<TmtMaps> {
-  const drugs = items.filter((i) => i.icode.startsWith("1"));
+  const drugs = items.filter((i) => i.kind === "DRU");
   const tps = [...new Set(drugs.filter((i) => !i.tpu_code_list?.trim()).map((i) => i.tmt_tp_code?.trim()).filter((v): v is string => !!v))];
   const tpuOfTp = group(
     tps.length
