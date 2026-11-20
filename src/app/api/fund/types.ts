@@ -145,24 +145,3 @@ export type ClaimOverviewResponse = {
   /** ทุกวันในช่วง เติม 0 วันที่ไม่มีข้อมูล */
   daily: ({ date: string } & ClaimTotals)[];
 };
-
-/**
- * GET /api/fund/claim-overview/pending?start&end[&status=pending|authen_only|none][&fund][&dep]
- *   + DataGrid params (sort: amount (ค่าเริ่มต้น desc), vstdate, hn, full_name, dep_name; q = HN/ชื่อ; format=xlsx)
- *   -> { rows: PendingRow[], total }  status ค่าเริ่มต้น pending = authen_only + none
- */
-export type PendingRow = {
-  vn: string;
-  vstdate: string;
-  hn: string;
-  full_name: string;
-  pttype_name: string;
-  fund_code: string;
-  fund_name: string;
-  dep_name: string;
-  authen_code: string | null;
-  /** มีค่าเฉพาะ status = closed */
-  close_code: string | null;
-  status: ClaimStatus;
-  amount: number;
-};

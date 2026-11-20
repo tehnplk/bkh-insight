@@ -308,9 +308,13 @@ export function ClaimOverview() {
   const router = useRouter();
   const { loading, data, error, retry } = useJson<ClaimOverviewResponse>(`/api/fund/claim-overview?${new URLSearchParams({ start, end })}`);
 
-  // กดกองทุน/แผนกในกราฟ = ไปรายการที่ยังไม่ปิดสิทธิของกองทุน/แผนกนั้น ช่วงวันที่เดียวกัน
-  const selectFund = useCallback((fund: string) => router.push(`/fund/claim-status?${new URLSearchParams({ start, end, fund })}`), [router, start, end]);
-  const selectDep = useCallback((dep: string) => router.push(`/fund/claim-status?${new URLSearchParams({ start, end, dep })}`), [router, start, end]);
+  // กดกองทุน/แผนกในกราฟ = ไป /opd/admissions เฉพาะยังไม่ปิดสิทธิ ช่วงวันที่เดียวกัน
+  // กองทุนเป็นตัวกรองหัวคอลัมน์ fund (fundOf เดียวกัน รวม UNKNOWN) แผนกเป็น deps (depSql เดียวกัน รวม UNKNOWN)
+  const selectFund = useCallback(
+    (fund: string) => router.push(`/opd/admissions?${new URLSearchParams({ start, end, unclosed: "1", cf: JSON.stringify({ fund: [fund] }) })}`),
+    [router, start, end],
+  );
+  const selectDep = useCallback((dep: string) => router.push(`/opd/admissions?${new URLSearchParams({ start, end, unclosed: "1", deps: dep })}`), [router, start, end]);
 
   let summary: ReactNode;
   if (error) {

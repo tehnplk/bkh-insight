@@ -1,4 +1,53 @@
-# Handoff: werawat (อัปเดต 17 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 19 พ.ย. 2569)
+
+## รอบ 18–19 พ.ย. 2569 (PR #53–#63 merge แล้ว, deploy แล้ว main `a77a267`)
+- deploy แล้ว (ทุก migration รันแล้ว):
+  - **e-Claim:**
+    - ปุ่มส่งออก TEXT/DBF เทียบไฟล์ HOSxP ที่นำเข้าได้จริงแล้ว ได้แก่ INS 19 ช่อง (ไม่มี HCODE) และ DIAG ผ่าน `icd10_nhso` (Z1281→Z128)
+    - OOP แผนไทยดึงตอนกดปุ่ม และ 0009 ไม่ส่ง
+    - ไฟล์ Service Catalog นำเข้า/ตรวจ อยู่ใน Downloads (`ServiceCatalogImport-11252-2026-11-18*.xlsx`)
+  - **16 แฟ้ม FDH:**
+    - วันที่เป็น YYYYMMDD
+    - ODX ใช้ ICD-10 เท่านั้น และหัตถการจาก ovstdiag ไป OOP
+    - C515: AER คู่กับ ORF/IRF, `rfrcs` เป็น IREFTYPE/OREFTYPE, ตรวจ 46 รหัส
+    - zip ใส่ครบทุกแฟ้ม
+  - **`/opd/admissions`:**
+    - ตัวกรอง REP, กองทุนย่อย, ตรวจสอบสิทธิ (SRM) โดยใช้ token จาก `nhso_token` และ cache 24 ชม. ใน `srm_right_check` พร้อมปุ่มยืนยันใช้สิทธิ HIS
+    - HCODE(HIS) / สิทธิ(HIS)
+    - เลขบัตรใน modal
+    - ป้าย Admit ค้าง OPD ใต้ VN
+    - สถานะเคลม
+  - **`/ipd/admissions`:** ป้าย PDx ขาด/รอสรุป (7 วัน), Ward หลังชื่อ, กล่องเรียกเก็บแล้ว/ไม่มี PDx, By Transfer สีเหลือง, ยอดคำนวณเงินใต้ตาราง (DataGrid `renderFooter`)
+  - **สถานะส่งเคลม:**
+    - ลำดับหลักฐาน: STM > REP > `fdh_claim_status` > ชุดส่งออก (`claim_batch`)
+    - ปุ่มยืนยันส่งแล้ว
+    - หน้า `/fdh/claim-batch`
+  - **หน้าใหม่:**
+    - `/fund/smt-reconcile`: เทียบ SMT กับ STM มีปุ่มดึงใหม่
+    - `/fund/claim-type`: แยกประเภทการเรียกเก็บแบบ RiMS (OP)
+    - `/admin/cup`
+  - **นำเข้า REP/STM อัตโนมัติ:**
+    - Chrome extension `extension/eclaim-sync` v1.0.1 ดาวน์โหลด zip ได้จาก modal ใน `/fund/rep-import`
+    - สคริปต์ `npm run eclaim:sync`
+    - ยังไม่ยืนยันว่าดึงได้ครบกับ e-Claim จริง
+  - **skill `.claude/skills/fdh-c-check`:** ใช้แจก รพ. อื่น ถ้าแก้กฎต้องรัน `export_rules.mjs`
+  - **หน้าแรก:** ครองเตียงหารด้วย `HOSPITAL_BEDS=90` (ตั้งใน `.env` ของ server แล้ว แต่ `.env` เครื่องนี้ยังไม่ได้ตั้ง)
+- **รอผู้ใช้ตัดสินใจ / สอบถาม:**
+  1. **`fdh_reservation_status = Y`:** ตอนนี้นับเป็น "ส่งถึง สปสช." แต่ผู้ใช้สงสัยว่าเป็นแค่ "จองเคลม" (เคสเมื่อวานยังไม่น่าส่ง) ถ้าใช่ให้เปลี่ยนเป็น "จองเคลมแล้ว" และไม่นับว่าส่งแล้ว (แก้ใน `src/app/api/fdh/claim-batch/claim.ts`)
+  2. **ปรับไฟล์ 16 แฟ้มตาม RCM (`sql4rcm` แถว EXPORT16FILE ใน his):**
+     - TYPEIN/TYPEOUT ใช้ `ovstist/ovstost.export_code`
+     - IREFTYPE/OREFTYPE กลับเป็น `1100` (IP ใช้ `ipt.iref_type`)
+     - LABFU dedupe (vn, labtest)
+     - OPTYPE ส่งว่าง (ตกลงแล้ว)
+  3. **เกณฑ์ "เกินกำหนด":** admissions ใช้ 30 วัน แต่ claim-pipeline ใช้ OP 15 วัน ยังไม่ตรงกัน
+  4. **CUP:** ค่าเริ่มต้นตอนนี้ใช้อำเภอเดียวกัน (24 แห่ง) แต่ `hospcode_cup` ของ HOSxP มี 20 แห่ง (ar-sync ใช้) เสนอให้ใช้ `hospcode_cup` + 11252
+  5. **VA ของ สสจ.พิษณุโลก:** ยังไม่รู้ ตอนนี้รวมไว้ใน "ในจังหวัด"
+  6. **ไฟล์ ClaimDetail ของ FDH:** ผู้ใช้ยังไม่เคยเห็น รอสอบถาม
+  7. **STP/SSS ในสถานะเคลม:** STP มี `stp_claim_status_log` อยู่แล้ว
+  8. **กฎ STP-R111/R113:** ยังอ่าน referout แบบเดิม และใบส่งตัวที่ผูก VN ของ visit ที่ admit (ต.ค. 89 ใบ) ยังไม่ได้ส่งใน ORF/IRF
+  9. **C121:** มี 3 AN ที่ `dchtime = 00:00` เป็นข้อมูลผิดใน HOSxP ให้เวชระเบียนแก้
+  10. **ยังไม่ได้ทดสอบใน browser:** หน้าใหม่ทั้งหมด (claim-type, admin/cup, claim-batch, smt refresh)
+- **ยกเลิก/ไม่ทำ:** UCS ฟอกไต (รพ. ไม่มีบริการ)
 
 ## รอบ 17 พ.ย. 2569 (PR #48–#50 merge แล้ว, deploy แล้ว main `b78a309`)
 - deploy แล้ว:

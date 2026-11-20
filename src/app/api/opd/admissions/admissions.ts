@@ -18,7 +18,7 @@ export const MAX_EXPORT_VNS = 1000;
 /** เลือกส่ง FDH ได้รวมสูงสุด (modal ยิงทีละชุด MAX_EXPORT_VNS) เพดานจากขนาดข้อมูลที่ browser ถือ */
 export const MAX_SELECT_VNS = 5000;
 
-/** สถานะปิดสิทธิ (หลักเดียวกับ /fund/claim-status ; OFC closed = มี Approval Code EDC): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
+/** สถานะปิดสิทธิ (หลักเดียวกับ STATUS_SQL ของ fund/_lib/claim.ts ; OFC closed = มี Approval Code EDC): closed ปิดแล้ว, authen_only มีแค่ authen, none ยังไม่มีทั้งคู่ */
 export type ClaimStatus = "closed" | "authen_only" | "none";
 
 /** แถวจาก SQL รายการ (his) ตัวเลข DECIMAL อาจมาเป็น string */
