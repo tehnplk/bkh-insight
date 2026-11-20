@@ -43,7 +43,6 @@ export const navItems: NavItem[] = [
     label: "ก่อนส่งเคลม",
     icon: "alert",
     children: [
-      { label: "สถานะปิดสิทธิ", href: "/fund/claim-status" },
       { label: "ปิดสิทธิ", href: "/fund/close-privilege" },
       { label: "แยกประเภทการเรียกเก็บ", href: "/fund/claim-type" },
       { label: "ตรวจรายการเบิก STP", href: "/fund/stp-check" },

@@ -31,7 +31,7 @@ const XLSX_MAX = 30_000;
 
 // เลขที่ใบเสร็จ: rcpt_print (index vn) เฉพาะ status OK (ABORT = ยกเลิก) visit จ่ายหลายใบคั่นด้วย ", "
 // visit ผู้ป่วยนอก (visit ที่ admit แสดงเฉพาะรายที่ยังมีรายการค้างฝั่ง OPD ดู whereFor) PDx/มูลค่าจาก vn_stat ชื่อโรคจาก icd101 (PK)
-// authen/เลขปิดสิทธิ/สถานะปิดสิทธิ ใช้หลักเดียวกับ /fund/claim-status (CLAIM_JOINS: c = nhso_confirm_privilege, vp = visit_pttype)
+// authen/เลขปิดสิทธิ/สถานะปิดสิทธิ ใช้หลักเดียวกับ STATUS_SQL ของ fund/_lib/claim.ts (CLAIM_JOINS: c = nhso_confirm_privilege, vp = visit_pttype)
 // เลขปิดสิทธิ: OFC = Approval Code จาก EDC ตัวล่าสุด (ตัวท้ายของ ovst_seq.edc_approve_list_text) ไม่ fallback
 // สูตรเดียวกับ PERMITNO ของ fdh/files/sql.ts ; สิทธิอื่น = ยืนยันกับ สปสช. แล้ว (ไม่ถูกยกเลิก) หรือ EP
 // ใช้ทั้งแสดงผล สถานะ ตัวกรอง unclosed และ facet codes (prove-query ผ่านแล้ว)
