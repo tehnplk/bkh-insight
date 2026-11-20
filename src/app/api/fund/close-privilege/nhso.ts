@@ -50,6 +50,14 @@ export function msUntilMidnight(nowMs: number): number {
 /** ปิดสิทธิได้เฉพาะ visit ของวันนี้ (เวลาไทย) ก่อน 24.00 น. */
 export const isClosableNow = (vstdate: string, nowMs: number) => String(vstdate).slice(0, 10) === thaiDate(nowMs);
 
+/** คัดก่อนยิงจากข้อมูลแถวที่หน้ามีอยู่ (เช่น /opd/admissions) null = ส่งได้ ; server ยังตรวจซ้ำทุกข้อ (ข้อมูลแถวอาจเก่า) */
+export function closeSkipReason(v: { vstdate: string | null; an: string | null; closed: boolean }, nowMs: number): string | null {
+  if (v.an) return "Admit แล้ว";
+  if (v.closed) return "ปิดสิทธิแล้ว";
+  if (!v.vstdate || !isClosableNow(v.vstdate, nowMs)) return "ไม่ใช่ visit ของวันนี้";
+  return null;
+}
+
 export type ClaimInput = {
   hcode: string;
   vn: string;

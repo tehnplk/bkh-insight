@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ReceiptText } from "lucide-react";
 import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
 import { DateRangeFilter, useDateRange } from "@/components/date-range-filter/date-range-filter";
@@ -18,6 +18,7 @@ import { DebtorItems, Fact, Facts } from "@/app/(app)/fund/uc-debtor/uc-debtor-d
 import { ClaimStats, FundSelect, RepBadge } from "@/app/(app)/ipd/admissions/admissions-grid";
 import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
 import { ClaimBadge } from "@/app/(app)/fund/_components/claim-badge";
+import { ClosePrivilegeButton } from "./close-button";
 import { HisHcode, RightCheckContext, RightCheckStatus, SrmHcode, SrmRight, SrmStatus, useRightCheck } from "./right-check";
 
 const FILTERS = ["pttypes", "deps", "unclosed"] as const;
@@ -55,8 +56,8 @@ function Pdx({ row }: { row: VisitRow }) {
   );
 }
 
-/** visit ที่เลือกส่ง FDH: VN -> ชื่อ (คงอยู่ข้ามหน้าและข้ามตัวกรอง จนกว่าจะล้าง) */
-type Selection = { picked: Map<string, string>; toggle: (rows: VisitRow[], on: boolean) => void };
+/** visit ที่เลือกส่ง FDH: VN -> แถวตอนติ๊ก (คงอยู่ข้ามหน้าและข้ามตัวกรอง จนกว่าจะล้าง ; ปุ่มปิดสิทธิใช้คัดราย) */
+type Selection = { picked: Map<string, VisitRow>; toggle: (rows: VisitRow[], on: boolean) => void };
 const SelectionContext = createContext<Selection>({ picked: new Map(), toggle: () => {} });
 const checkbox = `size-4 cursor-pointer accent-[var(--accent)] ${focusRing}`;
 
@@ -204,8 +205,17 @@ const detailTitle = (r: VisitRow) => (
   </>
 );
 
+/** ส่ง grid.reload ให้ปุ่มใน summaryActions (DataGrid ไม่ส่ง grid ให้ summaryActions) */
+const ReloadContext = createContext<(reload: () => void) => void>(() => {});
+function ReloadBridge({ grid }: { grid: SummaryGrid }) {
+  const register = useContext(ReloadContext);
+  useEffect(() => register(grid.reload), [register, grid.reload]);
+  return null;
+}
+
 const renderSummary = (d: VisitsPage, grid: SummaryGrid) => (
   <div className="flex flex-col gap-1.5">
+    <ReloadBridge grid={grid} />
     <p className="flex flex-wrap items-center gap-2 tabular-nums">
       <RightCheckButton grid={grid} />
       <span className="inline-flex items-baseline gap-1.5 rounded-md border border-line bg-surface-sunken px-2.5 py-1">
@@ -302,76 +312,87 @@ export function VisitsGrid({ pttypeOptions, depOptions }: { pttypeOptions: CodeO
   usePersistedFilter("opd/admissions", FILTERS);
   const { start, end } = useDateRange(OPD_MAX_DAYS);
   const { pttypes, deps, unclosed, set } = useUrlParams(FILTERS);
-  const [picked, setPicked] = useState<Map<string, string>>(() => new Map());
+  const [picked, setPicked] = useState<Map<string, VisitRow>>(() => new Map());
   const toggle = (rows: VisitRow[], on: boolean) =>
     setPicked((prev) => {
       const next = new Map(prev);
       for (const r of rows) {
-        if (on) next.set(r.vn, r.patient_name);
+        if (on) next.set(r.vn, r);
         else next.delete(r.vn);
       }
       return next;
     });
   const [previewOpen, setPreviewOpen] = useState(false);
   const rights = useRightCheck();
+  const reloadRef = useRef<() => void>(() => {});
+  const registerReload = useCallback((reload: () => void) => {
+    reloadRef.current = reload;
+  }, []);
   return (
     <SelectionContext.Provider value={{ picked, toggle }}>
       <RightCheckContext.Provider value={rights}>
-        <SelectionBar onClear={() => setPicked(new Map())} />
-        <FdhPreviewModal
-          open={previewOpen}
-          onClose={() => setPreviewOpen(false)}
-          ids={[...picked.keys()]}
-          idField="vns"
-          previewUrl="/api/opd/fdh-export"
-          checkUrl="/api/opd/fdh-check"
-          zipPrefix="op"
-          chunkSize={MAX_EXPORT_VNS}
-          unit="visit"
-        />
-        <DataGrid<VisitRow, VisitsPage>
-          endpoint="/api/opd/admissions"
-          params={{ start, end, pttypes, deps, unclosed }}
-          liveSearch
-          // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง)
-          toolbar={
-            <>
-              <FundSelect groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
-              <MultiSelect label="กรองตามสิทธิการรักษา" hideLabel groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
-              <MultiSelect label="กรองตามแผนก" hideLabel groups={depOptions} value={split(deps)} onChange={(v) => set({ deps: v.join(",") })} />
-              <div role="group" aria-label="วันที่รับบริการ" className="flex items-center gap-2">
-                <DateRangeFilter
-                  maxDays={OPD_MAX_DAYS}
-                  hideLabels
-                  labels={{ preset: "ช่วงวันที่รับบริการ", start: "วันที่รับบริการ ตั้งแต่", end: "วันที่รับบริการ ถึง" }}
-                />
-              </div>
-              <label className="flex h-9 cursor-pointer items-center gap-2 text-sm whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  checked={unclosed === "1"}
-                  onChange={(e) => set({ unclosed: e.target.checked ? "1" : null })}
-                  className={checkbox}
-                />
-                เฉพาะยังไม่ปิดสิทธิ
-              </label>
-            </>
-          }
-          columns={columns}
-          getRowId={(r) => r.vn}
-          renderDetail={renderDetail}
-          detailTitle={detailTitle}
-          detailSize="medium"
-          renderSummary={renderSummary}
-          exportPlacement="summary"
-          summaryActions={<PreviewButton onOpen={() => setPreviewOpen(true)} />}
-          searchSize="compact"
-          detailIcon={<ReceiptText aria-hidden className="size-4" />}
-          reorderable
-          hideable
-          fitScreen
-          pinColumns={5}
-        />
+        <ReloadContext.Provider value={registerReload}>
+          <SelectionBar onClear={() => setPicked(new Map())} />
+          <FdhPreviewModal
+            open={previewOpen}
+            onClose={() => setPreviewOpen(false)}
+            ids={[...picked.keys()]}
+            idField="vns"
+            previewUrl="/api/opd/fdh-export"
+            checkUrl="/api/opd/fdh-check"
+            zipPrefix="op"
+            chunkSize={MAX_EXPORT_VNS}
+            unit="visit"
+          />
+          <DataGrid<VisitRow, VisitsPage>
+            endpoint="/api/opd/admissions"
+            params={{ start, end, pttypes, deps, unclosed }}
+            liveSearch
+            // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง)
+            toolbar={
+              <>
+                <FundSelect groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
+                <MultiSelect label="กรองตามสิทธิการรักษา" hideLabel groups={pttypeOptions} value={split(pttypes)} onChange={(v) => set({ pttypes: v.join(",") })} />
+                <MultiSelect label="กรองตามแผนก" hideLabel groups={depOptions} value={split(deps)} onChange={(v) => set({ deps: v.join(",") })} />
+                <div role="group" aria-label="วันที่รับบริการ" className="flex items-center gap-2">
+                  <DateRangeFilter
+                    maxDays={OPD_MAX_DAYS}
+                    hideLabels
+                    labels={{ preset: "ช่วงวันที่รับบริการ", start: "วันที่รับบริการ ตั้งแต่", end: "วันที่รับบริการ ถึง" }}
+                  />
+                </div>
+                <label className="flex h-9 cursor-pointer items-center gap-2 text-sm whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={unclosed === "1"}
+                    onChange={(e) => set({ unclosed: e.target.checked ? "1" : null })}
+                    className={checkbox}
+                  />
+                  เฉพาะยังไม่ปิดสิทธิ
+                </label>
+              </>
+            }
+            columns={columns}
+            getRowId={(r) => r.vn}
+            renderDetail={renderDetail}
+            detailTitle={detailTitle}
+            detailSize="medium"
+            renderSummary={renderSummary}
+            exportPlacement="summary"
+            summaryActions={
+              <>
+                <ClosePrivilegeButton rows={[...picked.values()]} reload={() => reloadRef.current()} />
+                <PreviewButton onOpen={() => setPreviewOpen(true)} />
+              </>
+            }
+            searchSize="compact"
+            detailIcon={<ReceiptText aria-hidden className="size-4" />}
+            reorderable
+            hideable
+            fitScreen
+            pinColumns={5}
+          />
+        </ReloadContext.Provider>
       </RightCheckContext.Provider>
     </SelectionContext.Provider>
   );
