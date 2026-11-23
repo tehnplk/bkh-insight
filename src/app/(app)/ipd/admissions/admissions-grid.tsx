@@ -52,14 +52,14 @@ import { SubfundBadges } from "@/app/(app)/fund/_components/subfund-badges";
 import { ClaimBadge } from "@/app/(app)/fund/_components/claim-badge";
 import { OVERDUE_VALUES, UNSENT_VALUES } from "@/app/api/fdh/claim-batch/claim";
 
-const FILTERS = ["pttypes", "wards", "dx", "dxpos", "adjrw_min", "adjrw_max"] as const;
+const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
 const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
 /** ข้อความอัตรา เช่น "จำหน่ายตั้งแต่ 1 ต.ค. 2569: 5,119.00 บาท/AdjRW · ..." */
 const RATE_NOTE = `AdjRW × อัตราตามวันจำหน่าย: ${ADJRW_RATES.map((r) => `ตั้งแต่ ${formatThaiDate(r.from)} ${formatBaht(r.rate)} บาท`).join(" · ")}`;
 const dash = <span className="text-muted">–</span>;
 const nowrap = { className: "whitespace-nowrap" };
 const dateCell = { className: "whitespace-nowrap tabular-nums" };
-// ตัวกรองหัวคอลัมน์ (ค่าจาก /api/ipd/admissions?facet=<id>) ทุกคอลัมน์ยกเว้น RW/AdjRW/เงิน/สถานะ REP
+// ตัวกรองหัวคอลัมน์ (ค่าจาก /api/ipd/admissions?facet=<id>) ทุกคอลัมน์ยกเว้น RW/เงิน/สถานะ REP ; AdjRW เป็นช่วง (adjrw_min/adjrw_max)
 const filterable = { ...nowrap, filter: true } as const;
 const dateFilter = { ...dateCell, filter: { format: (v: string) => formatThaiDate(v) || v } } as const;
 const chip = "rounded border px-1.5 py-0.5 whitespace-nowrap";
@@ -223,11 +223,11 @@ const count = (key: "los_days", header: string) =>
     cell: (c) => (c.getValue() == null ? dash : formatCount(c.getValue()!)),
     meta: { className: num, filter: true },
   });
-const decimal = (key: "rw" | "adjrw", header: string) =>
+const decimal = (key: "rw" | "adjrw", header: string, range?: { min: string; max: string; validate: (min: string, max: string) => boolean }) =>
   col.accessor(key, {
     header,
     cell: (c) => c.getValue()?.toFixed(4) ?? dash,
-    meta: { className: num },
+    meta: { className: num, range },
   });
 const money = (key: "income" | "uc_money", header: string) =>
   col.accessor(key, {
@@ -348,7 +348,7 @@ const columns = col.columns([
   }),
   text("drg", "DRG", false),
   decimal("rw", "RW"),
-  decimal("adjrw", "AdjRW"),
+  decimal("adjrw", "AdjRW", { min: "adjrw_min", max: "adjrw_max", validate: (lo, hi) => parseAdjrw(lo, hi) !== "invalid" }),
   // ช่วงคร่อมวันเปลี่ยนอัตรา ลำดับยอดไม่เท่ากับลำดับ AdjRW จึงไม่ให้ sort (เรียงตาม AdjRW แทนได้)
   col.accessor("adjrw_amount", {
     header: "ยอดคำนวณเงิน (บาท)",
@@ -781,61 +781,6 @@ export function FundSelect({
   );
 }
 
-const ADJRW_INPUT = `h-9 w-14 rounded-md border border-line bg-surface px-2 text-right text-sm tabular-nums aria-invalid:border-danger aria-invalid:text-danger ${focusRing}`;
-const ADJRW_ERROR = "AdjRW ต้องเป็นตัวเลข 0–100 และค่าตั้งแต่ต้องไม่เกินค่าถึง";
-
-/** ช่วง AdjRW (รวมขอบ ใส่ช่องเดียวได้) เขียน URL ตอน blur/Enter ; ค่าผิดแสดง invalid ที่ช่องและไม่ส่ง */
-function AdjrwFilter({ min, max, onChange }: { min: string; max: string; onChange: (min: string, max: string) => void }) {
-  const [draft, setDraft] = useState({ min, max });
-  const [bad, setBad] = useState(() => parseAdjrw(min, max) === "invalid");
-  // URL เปลี่ยนจากที่อื่น (ย้อนกลับ/ล้าง) = ร่างตาม ; ค่าที่ช่องนี้ส่งเองไม่ทับร่าง (ผู้ใช้อาจพิมพ์ต่อก่อน URL เปลี่ยนเสร็จ) และไม่ remount เพื่อไม่ทิ้ง focus
-  const [url, setUrl] = useState({ min, max });
-  const [sent, setSent] = useState({ min, max });
-  if (url.min !== min || url.max !== max) {
-    setUrl({ min, max });
-    setDraft((d) => ({ min: min !== url.min && min !== sent.min ? min : d.min, max: max !== url.max && max !== sent.max ? max : d.max }));
-  }
-  const commit = () => {
-    const ok = parseAdjrw(draft.min, draft.max) !== "invalid";
-    setBad(!ok);
-    const next = { min: draft.min.trim(), max: draft.max.trim() };
-    if (ok && (next.min !== min || next.max !== max)) {
-      setSent(next);
-      onChange(next.min, next.max);
-    }
-  };
-  // ช่องเดียวผิด = ช่องนั้น ; ทั้งสองถูกแต่ min > max = ทั้งสองช่อง
-  const badMin = bad && (parseAdjrw(draft.min, null) === "invalid" || parseAdjrw(null, draft.max) !== "invalid");
-  const badMax = bad && (parseAdjrw(null, draft.max) === "invalid" || parseAdjrw(draft.min, null) !== "invalid");
-  const field = (k: "min" | "max", label: string, invalid: boolean) => (
-    <input
-      inputMode="decimal"
-      aria-label={label}
-      aria-invalid={invalid || undefined}
-      aria-describedby={invalid ? "adjrw-error" : undefined}
-      title={invalid ? ADJRW_ERROR : label}
-      value={draft[k]}
-      onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && commit()}
-      className={ADJRW_INPUT}
-    />
-  );
-  return (
-    <div role="group" aria-label="ช่วง AdjRW" className="flex items-center gap-1 text-sm">
-      <span className="font-medium text-muted" aria-hidden>AdjRW</span>
-      {field("min", "AdjRW ตั้งแต่", badMin)}
-      <span className="text-muted" aria-hidden>–</span>
-      {field("max", "AdjRW ถึง", badMax)}
-      {bad && (
-        <span id="adjrw-error" role="alert" className="sr-only">
-          {ADJRW_ERROR}
-        </span>
-      )}
-    </div>
-  );
-}
-
 /** ปุ่มเปิดดู 16 แฟ้มของรายที่เลือก วางหน้าปุ่มส่งออก Excel ในแถบสรุปของ DataGrid */
 function PreviewButton({ onOpen }: { onOpen: () => void }) {
   const { picked } = useContext(SelectionContext);
@@ -892,7 +837,7 @@ export function AdmissionsGrid({
 }) {
   usePersistedFilter("ipd/admissions", FILTERS);
   const { start, end } = useDateRange(IPD_MAX_DAYS);
-  const { pttypes, wards, dx, dxpos, adjrw_min, adjrw_max, set } = useUrlParams(FILTERS);
+  const { pttypes, wards, dx, dxpos, set } = useUrlParams(FILTERS);
   const [picked, setPicked] = useState<Map<string, string>>(() => new Map());
   const toggle = (rows: AdmissionRow[], on: boolean) =>
     setPicked((prev) => {
@@ -920,8 +865,7 @@ export function AdmissionsGrid({
       />
       <DataGrid<AdmissionRow, AdmissionsPage>
         endpoint="/api/ipd/admissions"
-        // AdjRW ใน URL ที่ผิด (link ที่แก้มือ) ไม่ส่ง API ไม่งั้นทั้งตารางตอบ 400 ; ช่องแสดง invalid แทน
-        params={{ start, end, pttypes, wards, dx, dxpos, ...(parseAdjrw(adjrw_min, adjrw_max) !== "invalid" && { adjrw_min, adjrw_max }) }}
+        params={{ start, end, pttypes, wards, dx, dxpos }}
         liveSearch
         // fragment: ตัวกรองทุกตัวอยู่แถวเดียวกับช่องค้นหาของ DataGrid (จอแคบขึ้นบรรทัดใหม่เอง) ห้ามห่อด้วย div ที่ wrap แยก
         toolbar={
@@ -970,11 +914,6 @@ export function AdmissionsGrid({
                 </select>
               </label>
             )}
-            <AdjrwFilter
-              min={adjrw_min}
-              max={adjrw_max}
-              onChange={(lo, hi) => set({ adjrw_min: lo, adjrw_max: hi })}
-            />
             <div
               role="group"
               aria-label="วันที่จำหน่าย"

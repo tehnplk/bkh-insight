@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Icon } from "@/components/app-shell/icons";
 import type { FacetPage } from "@/lib/grid-query";
 
@@ -10,6 +10,40 @@ const SEARCH_DEBOUNCE_MS = 300;
 const BLANK = "(ว่าง)";
 const fmt = (n: number) => n.toLocaleString("th-TH");
 const checkboxes = (root: HTMLElement | null) => [...(root?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]') ?? [])];
+const popClass = "fixed inset-auto m-0 w-72 max-w-[calc(100vw-16px)] flex-col rounded-lg border border-line bg-surface text-left text-sm font-normal whitespace-normal text-foreground shadow-lg open:flex";
+const clearBtn = `h-8 rounded-md px-3 font-medium hover:bg-hover disabled:pointer-events-none disabled:opacity-40 ${focusRing}`;
+const okBtn = `h-8 rounded-md bg-accent px-3 font-medium text-accent-fg hover:opacity-90 ${focusRing}`;
+
+/** วาง popover ใต้ปุ่ม ไม่ล้นขอบจอ */
+function placeBelow(pop: HTMLElement, btn: HTMLElement) {
+  const r = btn.getBoundingClientRect();
+  pop.style.top = `${r.bottom + 4}px`;
+  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - POP_WIDTH - 8))}px`;
+  pop.style.maxHeight = `${Math.max(240, innerHeight - r.bottom - 12)}px`;
+}
+
+/** ปุ่มกรวยบนหัวคอลัมน์ (ทึบเมื่อมีตัวกรอง) */
+function FilterTrigger({ btnRef, popId, open, active, ariaLabel, title }: { btnRef: RefObject<HTMLButtonElement | null>; popId: string; open: boolean; active: boolean; ariaLabel: string; title: string }) {
+  return (
+    <button
+      ref={btnRef}
+      type="button"
+      popoverTarget={popId}
+      aria-label={ariaLabel}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      title={title}
+      // ไม่ให้คลิกที่ปุ่มไปลากคอลัมน์หรือ sort
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
+      className={`ml-1 inline-grid size-6 place-items-center rounded align-middle ${active ? "bg-accent-soft text-accent-text" : "text-muted opacity-60 hover:opacity-100"} hover:bg-hover hover:text-foreground ${focusRing}`}
+    >
+      <svg viewBox="0 0 20 20" className="size-3.5" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 4h14l-5.5 6.5V16l-3-1.5v-4z" />
+      </svg>
+    </button>
+  );
+}
 
 /**
  * ตัวกรองบนหัวคอลัมน์แบบ Excel: ปุ่มกรวย -> popover รายการค่าที่ไม่ซ้ำ (ดึงจาก server ตามตัวกรองอื่นที่ใช้อยู่) ติ๊กเลือก และพิมพ์ค้นหาค่าได้
@@ -75,10 +109,7 @@ export function ColumnFilter({
     if (!pop || !btn) return;
     const before = (e: Event) => {
       if ((e as ToggleEvent).newState !== "open") return;
-      const r = btn.getBoundingClientRect();
-      pop.style.top = `${r.bottom + 4}px`;
-      pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - POP_WIDTH - 8))}px`;
-      pop.style.maxHeight = `${Math.max(240, innerHeight - r.bottom - 12)}px`;
+      placeBelow(pop, btn);
       setDraft(latest.current.value);
       setQuery("");
       setSentQuery("");
@@ -130,23 +161,14 @@ export function ColumnFilter({
   const active = value.length > 0;
   return (
     <>
-      <button
-        ref={btnRef}
-        type="button"
-        popoverTarget={`${id}-pop`}
-        aria-label={active ? `กรอง${label} (เลือก ${value.length})` : `กรอง${label}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+      <FilterTrigger
+        btnRef={btnRef}
+        popId={`${id}-pop`}
+        open={open}
+        active={active}
+        ariaLabel={active ? `กรอง${label} (เลือก ${value.length})` : `กรอง${label}`}
         title={active ? `กรอง: ${value.map((v) => show(v)).join(", ")}` : `กรอง${label}`}
-        // ไม่ให้คลิกที่ปุ่มไปลากคอลัมน์หรือ sort
-        draggable={false}
-        onDragStart={(e) => e.preventDefault()}
-        className={`ml-1 inline-grid size-6 place-items-center rounded align-middle ${active ? "bg-accent-soft text-accent-text" : "text-muted opacity-60 hover:opacity-100"} hover:bg-hover hover:text-foreground ${focusRing}`}
-      >
-        <svg viewBox="0 0 20 20" className="size-3.5" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3 4h14l-5.5 6.5V16l-3-1.5v-4z" />
-        </svg>
-      </button>
+      />
 
       <div
         ref={popRef}
@@ -155,7 +177,7 @@ export function ColumnFilter({
         role="dialog"
         aria-label={`กรอง${label}`}
         onKeyDown={onListKey}
-        className="fixed inset-auto m-0 w-72 max-w-[calc(100vw-16px)] flex-col rounded-lg border border-line bg-surface text-sm font-normal whitespace-normal text-foreground shadow-lg open:flex"
+        className={popClass}
       >
         <div className="flex items-center gap-2 border-b border-line px-3">
           <Icon name="search" className="size-4 shrink-0 text-muted" />
@@ -216,7 +238,7 @@ export function ColumnFilter({
               type="button"
               disabled={draft.length === 0}
               onClick={() => setDraft([])}
-              className={`h-8 rounded-md px-3 font-medium hover:bg-hover disabled:pointer-events-none disabled:opacity-40 ${focusRing}`}
+              className={clearBtn}
             >
               ล้าง
             </button>
@@ -226,8 +248,155 @@ export function ColumnFilter({
                 popRef.current?.hidePopover();
                 btnRef.current?.focus();
               }}
-              className={`h-8 rounded-md bg-accent px-3 font-medium text-accent-fg hover:opacity-90 ${focusRing}`}
+              className={okBtn}
             >
+              ตกลง
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** ช่วงค่าเริ่มต้นของ RangeFilter: ว่างได้ ตัวเลขไม่ติดลบ และค่าตั้งแต่ไม่เกินค่าถึง */
+export function validRange(min: string, max: string) {
+  const lo = min.trim() ? Number(min) : null;
+  const hi = max.trim() ? Number(max) : null;
+  const ok = (n: number | null) => n === null || (Number.isFinite(n) && n >= 0);
+  return ok(lo) && ok(hi) && (lo === null || hi === null || lo <= hi);
+}
+
+const rangeText = (lo: string, hi: string) => (lo && hi ? `${lo}–${hi}` : lo ? `ตั้งแต่ ${lo}` : hi ? `ถึง ${hi}` : "");
+const rangeInput = `h-9 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-right text-foreground tabular-nums aria-invalid:border-danger aria-invalid:text-danger ${focusRing}`;
+
+/**
+ * ตัวกรองช่วงตัวเลขบนหัวคอลัมน์ (รวมขอบ ใส่ช่องเดียวได้) ปุ่มและ popover แบบเดียวกับ ColumnFilter
+ * ร่างส่ง onChange ตอนปิดเมื่อค่าถูกต้อง ; กดตกลง/Enter ตอนค่าผิด = แสดง invalid และไม่ปิด
+ */
+export function RangeFilter({
+  label,
+  min,
+  max,
+  onChange,
+  validate = validRange,
+}: {
+  label: string;
+  min: string;
+  max: string;
+  onChange: (min: string, max: string) => void;
+  validate?: (min: string, max: string) => boolean;
+}) {
+  const id = useId();
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const minRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({ min, max });
+  const [tried, setTried] = useState(false);
+  const latest = useRef({ draft, min, max, onChange, validate });
+  useEffect(() => {
+    latest.current = { draft, min, max, onChange, validate };
+  });
+
+  useEffect(() => {
+    const pop = popRef.current;
+    const btn = btnRef.current;
+    if (!pop || !btn) return;
+    const before = (e: Event) => {
+      if ((e as ToggleEvent).newState !== "open") return;
+      placeBelow(pop, btn);
+      const { min: m, max: x, validate: ok } = latest.current;
+      setDraft({ min: m, max: x });
+      // ค่าใน URL ที่ผิด (link ที่แก้มือ) แสดง invalid ทันที
+      setTried(!ok(m, x));
+    };
+    const toggle = (e: Event) => {
+      const isOpen = (e as ToggleEvent).newState === "open";
+      setOpen(isOpen);
+      if (isOpen) minRef.current?.focus();
+      else {
+        const { draft: d, min: m, max: x, onChange: change, validate: ok } = latest.current;
+        const lo = d.min.trim();
+        const hi = d.max.trim();
+        if (ok(lo, hi) && (lo !== m || hi !== x)) change(lo, hi);
+      }
+    };
+    pop.addEventListener("beforetoggle", before);
+    pop.addEventListener("toggle", toggle);
+    return () => {
+      pop.removeEventListener("beforetoggle", before);
+      pop.removeEventListener("toggle", toggle);
+    };
+  }, []);
+
+  const valid = validate(draft.min, draft.max);
+  const bad = tried && !valid;
+  // ช่องเดียวผิด = ช่องนั้น ; ทั้งสองถูกแต่ตั้งแต่ > ถึง = ทั้งสองช่อง
+  const badMin = bad && (!validate(draft.min, "") || validate("", draft.max));
+  const badMax = bad && (!validate("", draft.max) || validate(draft.min, ""));
+  function apply() {
+    if (!valid) return setTried(true);
+    popRef.current?.hidePopover();
+    btnRef.current?.focus();
+  }
+  const field = (k: "min" | "max", text: string, invalid: boolean) => (
+    <label className="flex min-w-0 flex-1 flex-col gap-1 text-muted">
+      {text}
+      <input
+        ref={k === "min" ? minRef : undefined}
+        inputMode="decimal"
+        aria-label={`${label} ${text}`}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? `${id}-err` : undefined}
+        value={draft[k]}
+        onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          apply();
+        }}
+        className={rangeInput}
+      />
+    </label>
+  );
+
+  // ค่าที่ผิดไม่ถูกส่งไปกรอง (DataGrid ตัดทิ้ง) ปุ่มจึงไม่ active
+  const current = validate(min, max) ? rangeText(min, max) : "";
+  return (
+    <>
+      <FilterTrigger
+        btnRef={btnRef}
+        popId={`${id}-pop`}
+        open={open}
+        active={!!current}
+        ariaLabel={current ? `กรอง${label} (${current})` : `กรอง${label}`}
+        title={current ? `กรอง: ${current}` : `กรอง${label}`}
+      />
+
+      <div ref={popRef} id={`${id}-pop`} popover="auto" role="dialog" aria-label={`กรอง${label}`} className={popClass}>
+        <div className="flex items-end gap-2 px-3 pt-3 pb-2">
+          {field("min", "ตั้งแต่", badMin)}
+          <span className="pb-2 text-muted" aria-hidden="true">
+            –
+          </span>
+          {field("max", "ถึง", badMax)}
+        </div>
+        {bad && (
+          <p id={`${id}-err`} role="alert" className="px-3 pb-2 text-danger">
+            ตัวเลขไม่ถูกต้อง หรือค่าตั้งแต่มากกว่าค่าถึง
+          </p>
+        )}
+
+        <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2">
+          <span className="text-muted tabular-nums" aria-live="polite">
+            {valid ? rangeText(draft.min.trim(), draft.max.trim()) || "ทั้งหมด" : ""}
+          </span>
+          <div className="flex gap-1">
+            <button type="button" disabled={!draft.min && !draft.max} onClick={() => setDraft({ min: "", max: "" })} className={clearBtn}>
+              ล้าง
+            </button>
+            <button type="button" onClick={apply} className={okBtn}>
               ตกลง
             </button>
           </div>

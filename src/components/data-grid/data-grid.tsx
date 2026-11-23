@@ -19,7 +19,7 @@ import {
 } from "@tanstack/react-table";
 import { DetailModal, type DetailModalProps } from "@/components/detail-modal/detail-modal";
 import { STORAGE_USER_EVENT, storageUser } from "@/lib/persisted-filter";
-import { ColumnFilter } from "./column-filter";
+import { ColumnFilter, RangeFilter, validRange } from "./column-filter";
 import { ColumnChooser } from "./column-chooser";
 import { ALL_PAGE_SIZE, DEFAULT_PAGE_SIZE, PAGE_SIZES, type GridPage } from "@/lib/grid-query";
 
@@ -32,8 +32,14 @@ const features = tableFeatures({
   expandedRowModel: createExpandedRowModel(),
   /** className ใส่ให้ทั้ง th และ td เช่น "text-right" สำหรับตัวเลข
    *  filter: ตัวกรองบนหัวคอลัมน์ (ติ๊กเลือกค่า/ค้นหาค่า) endpoint ต้องรองรับ cf/facet ของคอลัมน์นี้ (parseColumnFilters)
-   *  ใส่ true หรือ { format } แปลงค่าที่ server ส่งเป็นข้อความที่แสดง เช่น วันที่ ISO -> พ.ศ. */
-  columnMeta: metaHelper<{ className?: string; filter?: true | { format?: (v: string) => string } }>(),
+   *  ใส่ true หรือ { format } แปลงค่าที่ server ส่งเป็นข้อความที่แสดง เช่น วันที่ ISO -> พ.ศ.
+   *  range: ตัวกรองช่วงตัวเลข { min, max } = ชื่อ URL param ส่งต่อให้ endpoint/facet/Excel (route validate เอง)
+   *  validate ค่าเริ่มต้น validRange (ตัวเลขไม่ติดลบ min ≤ max) ค่าใน URL ที่ไม่ผ่านไม่ส่ง */
+  columnMeta: metaHelper<{
+    className?: string;
+    filter?: true | { format?: (v: string) => string };
+    range?: { min: string; max: string; validate?: (min: string, max: string) => boolean };
+  }>(),
   /** cell เรียก info.table.options.meta?.reload() ให้โหลดหน้าปัจจุบันใหม่ เช่น หลังปุ่มในแถวแก้ข้อมูล */
   tableMeta: metaHelper<{ reload: () => void }>(),
 });
@@ -94,7 +100,7 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   fitScreen?: boolean;
   /** ตรึงคอลัมน์ซ้ายกี่คอลัมน์ (นับตามลำดับที่แสดง ไม่รวมปุ่มรายละเอียดซึ่งตรึงให้เอง) ใช้คู่กับ fitScreen */
   pinColumns?: number;
-  /** เก็บ state (page, pageSize, sort, dir, q, cf, filterKeys) ใน React state เริ่มจากค่านี้ แทน URL
+  /** เก็บ state (page, pageSize, sort, dir, q, cf, filterKeys, ช่วงของ meta.range) ใน React state เริ่มจากค่านี้ แทน URL
    *  ใช้กับ grid ใน modal ที่มี DataGrid อีกตัวในหน้าเดียวกัน เช่น { pageSize: "100", cf: '{"fund":["UCS"]}' } ไม่ส่ง = ใช้ URL */
   localState?: Record<string, string>;
 };
@@ -217,6 +223,16 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   for (const k of [...API_KEYS, ...filterKeys]) {
     const v = sp.get(k);
     if (v) apiParams.set(k, v);
+  }
+  // ตัวกรองช่วงของหัวคอลัมน์ (รวมคอลัมน์ที่ซ่อน) ; ค่าที่ผิด (link ที่แก้มือ) ไม่ส่ง ไม่งั้นทั้งตารางตอบ 400
+  const ranges = columns.flatMap((c) => (c.meta?.range ? [c.meta.range] : []));
+  const activeRanges = ranges.filter((r) => sp.get(r.min) || sp.get(r.max));
+  for (const r of activeRanges) {
+    const lo = sp.get(r.min) ?? "";
+    const hi = sp.get(r.max) ?? "";
+    if (!(r.validate ?? validRange)(lo, hi)) continue;
+    if (lo) apiParams.set(r.min, lo);
+    if (hi) apiParams.set(r.max, hi);
   }
   for (const [k, v] of Object.entries(params ?? {})) if (v) apiParams.set(k, v);
   const apiQuery = apiParams.toString();
@@ -666,7 +682,16 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
                   const id = h.column.id;
                   const filterMeta = h.column.columnDef.meta?.filter;
                   const headerDef = h.column.columnDef.header;
-                  const filterEl = filterMeta && (
+                  const rangeMeta = h.column.columnDef.meta?.range;
+                  const filterEl = rangeMeta ? (
+                    <RangeFilter
+                      label={typeof headerDef === "string" ? headerDef : id}
+                      min={sp.get(rangeMeta.min) ?? ""}
+                      max={sp.get(rangeMeta.max) ?? ""}
+                      onChange={(lo, hi) => setParams({ [rangeMeta.min]: lo, [rangeMeta.max]: hi, page: null })}
+                      validate={rangeMeta.validate}
+                    />
+                  ) : filterMeta && (
                     <ColumnFilter
                       label={typeof headerDef === "string" ? headerDef : id}
                       value={columnFilters[id] ?? []}
@@ -751,9 +776,13 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
           {!loading && showAll && total > ALL_PAGE_SIZE && <span className="ml-2 text-warning">{`แสดงได้ครั้งละ ${fmt(ALL_PAGE_SIZE)} แถว ดูต่อที่หน้าถัดไปหรือส่งออก Excel`}</span>}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          {Object.keys(columnFilters).length > 0 && (
-            <button type="button" onClick={() => setParams({ cf: null, page: null })} className={`rounded px-1.5 underline-offset-2 hover:text-foreground hover:underline ${focusRing}`}>
-              ล้างตัวกรองคอลัมน์ ({fmt(Object.keys(columnFilters).length)})
+          {Object.keys(columnFilters).length + activeRanges.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setParams({ cf: null, page: null, ...Object.fromEntries(activeRanges.flatMap((r) => [[r.min, null], [r.max, null]])) })}
+              className={`rounded px-1.5 underline-offset-2 hover:text-foreground hover:underline ${focusRing}`}
+            >
+              ล้างตัวกรองคอลัมน์ ({fmt(Object.keys(columnFilters).length + activeRanges.length)})
             </button>
           )}
           {reorderable && order.length > 0 && (
