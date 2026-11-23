@@ -9,12 +9,12 @@ import { usePersistedFilter } from "@/lib/persisted-filter";
 import { THAI_MONTHS, THAI_MONTHS_SHORT, formatThaiDate, todayIso } from "@/lib/thai-date";
 import { FY_BACK, fiscalYearOf, parseFiscalYear } from "@/app/api/fund/uc-dashboard/dashboard";
 import {
-  DEFAULT_FUNDS, MAX_DEPS, METRICS, METRIC_LABEL, assignSlots, hospitalValues, parseSlots, partialMonth, selectedTotal, summarize, topDeps, valuesByDep,
+  DEFAULT_DEPS, DEFAULT_FUNDS, MAX_DEPS, METRICS, METRIC_LABEL, assignSlots, hospitalValues, parseSlots, partialMonth, selectedTotal, summarize, valuesByDep,
   type DepSummary, type DeptTrendResponse, type Metric,
 } from "@/app/api/fund/dept-trend/trend";
 import { Notice, Panel, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 
-// deps = ช่องสีของแผนกที่เลือก (ดู parseSlots) ไม่ส่ง = 5 อันดับแรก ; funds ไม่ส่ง = OFC+LGO, "all" = ทุกกองทุน
+// deps = ช่องสีของแผนกที่เลือก (ดู parseSlots) ไม่ส่ง = DEFAULT_DEPS ; funds ไม่ส่ง = OFC+LGO, "all" = ทุกกองทุน
 // ทั้งปีงบโหลดครั้งเดียว เปลี่ยนแผนก/กองทุน/ตัวชี้วัดคำนวณในหน้า ไม่ยิง API ใหม่
 const PARAMS = ["fy", "deps", "funds", "metric"] as const;
 const PERSIST = ["deps", "funds", "metric"] as const;
@@ -57,7 +57,7 @@ export function DeptTrend({ title }: { title: ReactNode }) {
     const fundSet = funds.length ? new Set(funds) : null;
     const byDep = valuesByDep(data.rows, months, fundSet, metric);
     const activeDeps = data.deps.filter((d) => d.active);
-    const slots = p.deps ? parseSlots(p.deps) : topDeps(byDep, new Set(activeDeps.map((d) => d.code)));
+    const slots = p.deps ? parseSlots(p.deps) : DEFAULT_DEPS;
     const names = new Map(data.deps.map((d) => [d.code, d.name]));
     const series: (TrendSeries & { summary: DepSummary })[] = slots.flatMap((code, i) => {
       if (!code) return [];
@@ -192,7 +192,7 @@ export function DeptTrend({ title }: { title: ReactNode }) {
             groups={view?.depGroups ?? []}
             value={view?.slots.filter(Boolean) ?? []}
             onChange={(v) => p.set({ deps: assignSlots(view?.slots ?? [], v).join(",") || null })}
-            allLabel="5 อันดับแรก"
+            allLabel="ค่าเริ่มต้น"
             max={MAX_DEPS}
           />
           <MultiSelect
