@@ -6,7 +6,8 @@ export type Metric = (typeof METRICS)[number];
 export const METRIC_LABEL: Record<Metric, string> = { claim: "ลูกหนี้สิทธิ", income: "มูลค่ารวม", visits: "จำนวนครั้ง" };
 /** แผนกที่เลือกได้สูงสุด = จำนวนสี categorical (--chart-1..7) */
 export const MAX_DEPS = 7;
-export const DEFAULT_TOP = 5;
+/** แผนกเริ่มต้นเมื่อไม่มี deps (ลำดับ = ช่องสี) : 053 คลินิกพรีเมียม, 027 กายภาพบำบัด */
+export const DEFAULT_DEPS = ["053", "027"];
 export const DEFAULT_FUNDS = ["OFC", "LGO"];
 /** ผลรวมต่อ (เดือน, แผนก, กองทุน) */
 export type TrendRow = { month: string; dep: string; fund: string; visits: number; income: number; claim: number };
@@ -106,15 +107,6 @@ export function valuesByDep(rows: TrendRow[], months: string[], funds: Set<strin
 }
 
 const sum = (v: number[]) => round2(v.reduce((s, x) => s + x, 0));
-
-/** แผนกที่ยอดรวมทั้งปีสูงสุด n อันดับ (เฉพาะที่อยู่ใน eligible) ยอด 0 ไม่นับ */
-export function topDeps(byDep: Map<string, number[]>, eligible: Set<string>, n = DEFAULT_TOP): string[] {
-  return [...byDep]
-    .filter(([dep, v]) => eligible.has(dep) && sum(v) > 0)
-    .sort(([a, x], [b, y]) => sum(y) - sum(x) || a.localeCompare(b))
-    .slice(0, n)
-    .map(([dep]) => dep);
-}
 
 /** ผลรวมทุกแผนกต่อเดือน = ยอดทั้งโรงพยาบาล (1 visit อยู่แผนกเดียว) */
 export function hospitalValues(byDep: Map<string, number[]>, months: string[]): number[] {

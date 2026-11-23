@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/dept-trend/trend.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregate, assignSlots, fiscalMonths, hospitalValues, monthRanges, parseSlots, partialMonth, selectedTotal, summarize, topDeps, valuesByDep } from "./trend.ts";
+import { aggregate, assignSlots, fiscalMonths, hospitalValues, monthRanges, parseSlots, partialMonth, selectedTotal, summarize, valuesByDep } from "./trend.ts";
 
 test("selected total sums selected departments; hospital total = all departments", () => {
   const months = ["2026-10", "2026-11"];
@@ -60,7 +60,7 @@ test("aggregate pttype rows to fund, money rounded", () => {
   assert.equal(rows.length, 3);
 });
 
-test("values by dep filter funds, zero-fill months; top deps by total", () => {
+test("values by dep filter funds, zero-fill months", () => {
   const rows = [
     { month: "2026-10", dep: "010", fund: "OFC", visits: 1, income: 10, claim: 5 },
     { month: "2026-11", dep: "010", fund: "LGO", visits: 1, income: 10, claim: 7 },
@@ -71,8 +71,6 @@ test("values by dep filter funds, zero-fill months; top deps by total", () => {
   assert.deepEqual(by.get("010"), [5, 7]);
   assert.deepEqual(by.get("020"), [0, 20]);
   assert.equal(by.has("030"), false);
-  assert.deepEqual(topDeps(by, new Set(["010", "020"]), 5), ["020", "010"]);
-  assert.deepEqual(topDeps(by, new Set(["010"]), 5), ["010"]);
   assert.deepEqual([...valuesByDep(rows, ["2026-10", "2026-11"], null, "visits").get("030")], [0, 9]);
 });
 
