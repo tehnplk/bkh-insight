@@ -36,6 +36,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
+      { label: "แนวโน้มค่าใช้จ่ายตามแผนก", href: "/fund/dept-trend" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
     ],
   },

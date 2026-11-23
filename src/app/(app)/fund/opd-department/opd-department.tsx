@@ -160,14 +160,14 @@ type DepartmentDetailProps = {
   onIncome: (code: string) => void;
 };
 
-// grid โหมดปกติไม่มีคอลัมน์แผนก เพราะทุกแถวเป็นแผนกเดียวกัน ส่วนโหมดคิวแสดงแผนกหลักของ visit
+// grid โหมดปกติไม่มีคอลัมน์แผนก เพราะทุกแถวเป็นแผนกเดียวกัน ส่วนโหมดคิวแสดงแผนกที่นับของ visit (main_dep หรือ 053 ถ้าส่งเข้าคิว 053)
 function DepartmentDetail({ dep, queue, fund, income, start, end, filter, onFund, onIncome }: DepartmentDetailProps) {
   // chip เฉพาะกองทุนที่มีค่าในขอบเขตนั้น (กองทุนที่มีแต่คิวไม่โผล่ในโหมดปกติ)
   const funds = dep.funds.filter((x) => (queue ? x.queued > 0 || x.queuedAmount > 0 : x.visits > 0 || x.amount > 0));
   const f = funds.find((x) => x.fund_code === fund);
   const s = f ?? dep;
 
-  // โหมดคิวไม่ส่ง deps: route กรอง deps ด้วย main_dep จะตัด visit ที่มาจากแผนกอื่นทิ้ง
+  // โหมดคิวไม่ส่ง deps: route กรอง deps ด้วยแผนกที่นับ (svcDepSql) จะตัด visit ที่นับที่แผนกอื่นทิ้ง
   const params: Record<string, string> = queue
     ? { start, end, qdep: dep.dep_code, pttypes: filter.pttypes }
     : { start, end, dep: dep.dep_code, ...filter };

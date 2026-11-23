@@ -6,8 +6,8 @@ import { xlsxResponse } from "@/lib/xlsx";
 import { sexAgeText } from "@/lib/sex-age";
 import type { FundVisitRow } from "../../types";
 import {
-  FULL_NAME_SQL, OPI_BY_DATE, activePttypes, depNameSql, depSql, badRequest, effectiveCodes, fundPttypeFilter, fundSql, inList, isAuthed,
-  loadDepartments, loadLookups, parseCodes, parseRange, round2, unauthorized,
+  FULL_NAME_SQL, OPI_BY_DATE, SVC_OVERRIDE_DEP, activePttypes, badRequest, effectiveCodes, fundPttypeFilter, fundSql, inList, isAuthed,
+  loadDepartments, loadLookups, parseCodes, parseRange, round2, svcDepJoin, svcDepNameSql, svcDepSql, unauthorized,
 } from "../../_lib/fund";
 
 // allowlist: ค่าที่ client ส่งมา -> alias ใน SELECT ด้านล่าง
@@ -30,7 +30,7 @@ const FILTER_DEFS: ColumnFilterDefs = {
   hn: { expr: "v.hn" },
   full_name: { expr: FULL_NAME_SQL },
   pttype_name: { expr: "v.pttype", label: "t.name" },
-  dep_name: { expr: depSql("v"), label: "k.department" },
+  dep_name: { expr: svcDepSql("v"), label: "k.department" },
 };
 const FILTERABLE = ["vstdate", "hn", "full_name", "pttype_name", "dep_name"] as const;
 
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
     where += ` AND (a.vn IS NOT NULL OR (${own.join(" AND ")}))`;
   }
   if (filters.dep) {
-    where += ` AND ${depSql("v")} = ?`;
+    where += ` AND ${svcDepSql("v")} = ?`;
     whereParams.push(filters.dep);
   }
   if (filters.qdep) {
@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
     whereParams.push(filters.qdep === "UNKNOWN" ? "" : filters.qdep);
   }
   if (deps) {
-    where += ` AND ${inList(depSql("v"), deps.length)}`;
+    where += ` AND ${inList(svcDepSql("v"), deps.length)}`;
     whereParams.push(...deps);
   }
   if (q) {
@@ -142,17 +142,19 @@ export async function GET(request: NextRequest) {
 
   const from = `FROM ovst v
     LEFT JOIN (${itemSql}) a ON a.vn = v.vn
+    ${svcDepJoin("v.vn")}
     LEFT JOIN patient p ON p.hn = v.hn
     LEFT JOIN pttype t ON t.pttype = v.pttype
-    LEFT JOIN kskdepartment k ON k.depcode = v.main_dep
+    LEFT JOIN kskdepartment k ON k.depcode = COALESCE(sq.depcode, v.main_dep)
     LEFT JOIN vn_stat vs ON vs.vn = v.vn`;
   const select = `SELECT v.vn, v.vstdate, v.hn, ${FULL_NAME_SQL} AS full_name, v.pttype, IFNULL(t.name, v.pttype) AS pttype_name,
-    ${fundSql("t")} AS fund_code, ${depSql("v")} AS dep_code, ${depNameSql("v")} AS dep_name,
+    ${fundSql("t")} AS fund_code, ${svcDepSql("v")} AS dep_code, ${svcDepNameSql("v")} AS dep_name,
     vs.sex, vs.age_y, vs.age_m, vs.age_d,
     IFNULL(a.amount, 0) AS amount ${from}`;
   // sort มาจาก allowlist และ dir เป็น asc|desc เท่านั้น
   const orderBy = `ORDER BY ${sort ? `${SORT_SQL[sort]} ${dir}, ` : "v.vstdate, "}v.vn`;
-  const allParams = [...itemParams, ...whereParams];
+  // ลำดับ ? ตาม from: itemSql, svcDepJoin, แล้ว where
+  const allParams = [...itemParams, SVC_OVERRIDE_DEP, ...whereParams];
   if (facet) return Response.json(await loadFacet(hisQuery, FILTER_DEFS, facet, cf.query.facetQ, from, { sql: where, params: allParams }));
 
   type RawRow = Omit<FundVisitRow, "sex_age"> & { sex: string | null; age_y: number | null; age_m: number | null; age_d: number | null };

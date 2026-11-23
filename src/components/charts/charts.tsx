@@ -315,6 +315,166 @@ export function TrendChart({
   );
 }
 
+/* ---------- แนวโน้มหลายเส้น: เส้นละ entity, legend HTML, tooltip ทุกเส้นเรียงมากไปน้อย ---------- */
+
+export type TrendSeries = {
+  key: string;
+  label: string;
+  /** ชื่อ token สี เช่น "--chart-1" ผูกกับ entity (ไม่ใช่อันดับ) เปลี่ยนการเลือกแล้วสีไม่เปลี่ยน */
+  color: string;
+  /** ค่าต่อ category ตามลำดับ categories ; null = ยังไม่มีข้อมูล (ไม่วาดจุด ไม่ใช่ศูนย์) */
+  values: (number | null)[];
+};
+
+/** canvas อ่านด้วย screen reader ไม่ได้ ผู้เรียกต้องมีตารางข้อมูล (DataTableToggle) คู่กันเสมอ */
+export function MultiTrendChart({
+  categories,
+  series,
+  tickFormat,
+  valueFormat,
+  unit,
+  ariaLabel,
+}: {
+  /** label = ป้ายแกน x, title = หัว tooltip */
+  categories: { label: string; title: string }[];
+  series: TrendSeries[];
+  tickFormat: (n: number) => string;
+  /** ค่าเต็มใน tooltip เช่น formatBaht */
+  valueFormat: (n: number) => string;
+  /** หน่วยของแกน y แสดงเหนือแกน เช่น "ล้านบาท" */
+  unit: string;
+  ariaLabel: string;
+}) {
+  const theme = useChartTheme();
+  // ลูกศรเลื่อนได้ถึงเดือนสุดท้ายที่มีข้อมูล
+  const count = Math.max(0, ...series.map((s) => s.values.findLastIndex((v) => v !== null) + 1));
+  const { chartRef, active, onKeyDown, onBlur } = useKeyboardActive(count);
+
+  const colors = useMemo(() => {
+    if (!theme) return [];
+    const css = getComputedStyle(document.documentElement);
+    return series.map((s) => css.getPropertyValue(s.color).trim());
+  }, [series, theme]);
+
+  const data = useMemo(
+    () => ({
+      labels: categories.map((c) => c.label),
+      datasets: series.map((s, i) => ({
+        label: s.label,
+        data: s.values,
+        borderColor: colors[i],
+        backgroundColor: colors[i],
+        borderWidth: 2,
+        tension: 0,
+        spanGaps: false,
+        borderJoinStyle: "round" as const,
+        borderCapStyle: "round" as const,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: colors[i],
+        pointBorderColor: theme?.surface,
+        pointBorderWidth: 2,
+        pointHoverBorderWidth: 2,
+        pointHitRadius: 10,
+      })),
+    }),
+    [categories, series, colors, theme],
+  );
+
+  const options = useMemo<ChartOptions<"line">>(() => {
+    if (!theme) return {};
+    const tick = { color: theme.muted, font: { family: theme.font, size: 11 } };
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      layout: { padding: { top: 4, right: 8 } },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: theme.line },
+          ticks: { ...tick, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: theme.line },
+          border: { display: false },
+          ticks: { ...tick, maxTicksLimit: 5, padding: 6, callback: (v) => tickFormat(Number(v)) },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        crosshair: { color: theme.muted },
+        tooltip: {
+          ...tooltipStyle(theme),
+          displayColors: true,
+          usePointStyle: true,
+          boxWidth: 8,
+          boxHeight: 8,
+          bodyFont: { family: theme.font, size: 12, weight: 400 as const },
+          filter: (item) => item.raw !== null && item.raw !== undefined,
+          itemSort: (a, b) => Number(b.raw) - Number(a.raw),
+          callbacks: {
+            title: (items) => categories[items[0]?.dataIndex]?.title ?? "",
+            label: (item) => `${item.dataset.label} ${valueFormat(Number(item.raw))}`,
+          },
+        },
+      } as ChartOptions<"line">["plugins"],
+    };
+  }, [theme, categories, tickFormat, valueFormat]);
+
+  const current = active !== null ? categories[active] : null;
+  const liveText = current
+    ? `${current.title}: ${series.map((s) => `${s.label} ${s.values[active!] === null ? "ไม่มีข้อมูล" : valueFormat(s.values[active!]!)}`).join(", ")}`
+    : "";
+
+  return (
+    <>
+      {series.length > 1 && (
+        <ul aria-label="คำอธิบายสี" className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {series.map((s) => (
+            <li key={s.key} className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(${s.color})` }} />
+              <span className="truncate">{s.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p aria-hidden="true" className="mb-1 text-xs text-muted">
+        {unit}
+      </p>
+      <div
+        tabIndex={0}
+        role="group"
+        aria-label={`${ariaLabel} (${unit}) ใช้ลูกศรซ้ายขวาเพื่ออ่านค่าทีละช่วง`}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
+        className={`relative h-72 ${focusRing}`}
+      >
+        {theme ? (
+          <Line
+            key={theme.key}
+            ref={(c) => {
+              chartRef.current = (c as Chart | null | undefined) ?? null;
+            }}
+            data={data}
+            options={options}
+            plugins={[crosshair]}
+            role="img"
+            aria-label={ariaLabel}
+          />
+        ) : (
+          <div className="h-full animate-pulse rounded-md bg-surface-sunken" />
+        )}
+        <p aria-live="polite" className="sr-only">
+          {liveText}
+        </p>
+      </div>
+    </>
+  );
+}
+
 /* ---------- donut: สัดส่วนของทั้งหมด, ข้อความกลางวง, legend/ตารางเป็นของผู้เรียก ---------- */
 
 export type DonutSegment = {
