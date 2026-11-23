@@ -22,6 +22,8 @@ export type MultiSelectProps = {
   allLabel?: string;
   /** ซ่อนป้าย (ยังอ่านได้ด้วย screen reader) แล้วแสดงเป็น hint ตอนชี้แทน ใช้เมื่อแถวตัวกรองแน่น */
   hideLabel?: boolean;
+  /** เลือกได้ไม่เกินกี่ค่า (ครบแล้วติ๊กเพิ่มไม่ได้ ติ๊กทั้งกลุ่มได้เท่าที่เหลือ) */
+  max?: number;
 };
 
 const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -33,7 +35,7 @@ const matches = (o: MultiSelectOption, q: string) =>
 // ปุ่มสรุปค่าที่เลือก + รายการ checkbox แบ่งกลุ่มใน native popover (top layer, Esc/คลิกนอกกรอบปิด และคืน focus ให้ปุ่ม)
 // เลือกในรายการเป็นร่าง แล้วส่ง onChange ครั้งเดียวตอนปิด หน้าที่โหลดข้อมูลตาม URL จึงไม่ยิง query ทุกครั้งที่ติ๊ก
 // คีย์บอร์ด: เปิดแล้ว focus อยู่ที่ช่องค้นหา, ลูกศรขึ้น/ลงเลื่อนระหว่าง checkbox, Space ติ๊ก, Esc ปิด
-export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั้งหมด", hideLabel = false }: MultiSelectProps) {
+export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั้งหมด", hideLabel = false, max = Infinity }: MultiSelectProps) {
   const id = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -87,12 +89,13 @@ export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั
     .map((g) => ({ ...g, options: g.options.filter((o) => matches(o, q)) }))
     .filter((g) => g.options.length);
   const selected = new Set(draft);
+  const full = draft.length >= max;
 
   function setMany(values: string[], on: boolean) {
     const next = new Set(draft);
     for (const v of values) {
-      if (on) next.add(v);
-      else next.delete(v);
+      if (!on) next.delete(v);
+      else if (next.size < max) next.add(v);
     }
     setDraft(sorted([...next]));
   }
@@ -176,7 +179,8 @@ export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั
                     ref={(el) => {
                       if (el) el.indeterminate = n > 0 && n < values.length;
                     }}
-                    onChange={(e) => setMany(values, e.target.checked)}
+                    // มี max: กลุ่มเลือกครบไม่ได้ จึงติ๊กกลุ่มที่เลือกไว้บางส่วน = เอาออกทั้งกลุ่ม
+                    onChange={(e) => setMany(values, max < Infinity && n > 0 ? false : e.target.checked)}
                     className={`size-3.5 shrink-0 accent-accent ${focusRing}`}
                   />
                   <span id={`${id}-g-${g.value}`} className="min-w-0 flex-1 truncate">
@@ -185,10 +189,11 @@ export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั
                   <span className="text-xs font-normal text-muted tabular-nums">{n > 0 ? `${n}/${values.length}` : values.length}</span>
                 </label>
                 {g.options.map((o) => (
-                  <label key={o.value} className="flex min-h-8 cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-7 hover:bg-hover">
+                  <label key={o.value} className="flex min-h-8 cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-7 hover:bg-hover has-disabled:cursor-not-allowed has-disabled:text-muted">
                     <input
                       type="checkbox"
                       checked={selected.has(o.value)}
+                      disabled={full && !selected.has(o.value)}
                       onChange={(e) => setMany([o.value], e.target.checked)}
                       className={`size-3.5 shrink-0 accent-accent ${focusRing}`}
                     />
@@ -203,7 +208,7 @@ export function MultiSelect({ label, groups, value, onChange, allLabel = "ทั
 
         <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2">
           <span className="text-muted tabular-nums" aria-live="polite">
-            {draft.length ? `เลือก ${draft.length}` : allLabel}
+            {draft.length ? `เลือก ${draft.length}${max < Infinity ? `/${max}` : ""}` : allLabel}
           </span>
           <div className="flex gap-1">
             <button

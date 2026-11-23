@@ -19,6 +19,16 @@ export const fundSql = (t: string) => `COALESCE(NULLIF(TRIM(${t}.hipdata_code), 
 export const depSql = (v: string) => `COALESCE(NULLIF(TRIM(${v}.main_dep), ''), '${UNKNOWN_FUND}')`;
 /** SQL ของชื่อแผนก ต้อง LEFT JOIN kskdepartment k ON k.depcode = <ovst>.main_dep */
 export const depNameSql = (v: string) => `IF(${depSql(v)} = '${UNKNOWN_FUND}', '${UNKNOWN_NAME}', IFNULL(k.department, ${v}.main_dep))`;
+// ผู้บริหารต้องการเห็นยอดของ visit ที่ส่งเข้าคลินิกพรีเมียมที่คลินิกนั้น ไม่ใช่ที่แผนกหลัก (กติกาเดียวกับ /fund/dept-trend)
+export const SVC_OVERRIDE_DEP = "053";
+// shortcut: JOIN รองรับแผนกพิเศษตัวเดียว ถ้าต้องหลายแผนกเปลี่ยนเป็น CASE WHEN EXISTS ตามลำดับความสำคัญ
+/** JOIN คิวของ SVC_OVERRIDE_DEP (bind param หนึ่งตัว = SVC_OVERRIDE_DEP) ; (vn, depcode) unique จึงไม่ทำให้แถวซ้ำ */
+export const svcDepJoin = (vnExpr: string) => `LEFT JOIN opd_dep_queue sq ON sq.vn = ${vnExpr} AND sq.depcode = ?`;
+/** แผนกที่นับของ visit: SVC_OVERRIDE_DEP ถ้าส่งเข้าคิวนั้น ไม่งั้น main_dep ต้องมี svcDepJoin */
+export const svcDepSql = (v: string) => `COALESCE(sq.depcode, NULLIF(TRIM(${v}.main_dep), ''), '${UNKNOWN_FUND}')`;
+/** ชื่อของ svcDepSql ต้อง LEFT JOIN kskdepartment k ON k.depcode = COALESCE(sq.depcode, <ovst>.main_dep) */
+export const svcDepNameSql = (v: string) =>
+  `IF(${svcDepSql(v)} = '${UNKNOWN_FUND}', '${UNKNOWN_NAME}', IFNULL(k.department, COALESCE(sq.depcode, ${v}.main_dep)))`;
 export const FULL_NAME_SQL = "CONCAT_WS(' ', CONCAT(IFNULL(p.pname,''), p.fname), p.lname)";
 export const ITEM_NAME_SQL = "CONCAT_WS(' ', s.name, NULLIF(TRIM(s.strength), ''))";
 

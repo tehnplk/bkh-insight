@@ -2,11 +2,12 @@ import type { NextRequest } from "next/server";
 import { hisQuery } from "@/lib/db";
 import type { CodeOptionGroup, DepartmentSummary, DepartmentSummaryResponse } from "../../types";
 import {
-  OPI_BY_DATE, UNKNOWN_FUND, UNKNOWN_NAME, add, badRequest, categoryList, depSql, effectiveCodes, fundOf, inList, int, isAuthed,
-  activePttypes, loadDepartments, loadLookups, parseCodes, parseRange, pttypeOptionGroups, round2, unauthorized,
+  OPI_BY_DATE, UNKNOWN_FUND, UNKNOWN_NAME, add, badRequest, categoryList, effectiveCodes, fundOf, inList, int, isAuthed,
+  activePttypes, loadDepartments, loadLookups, parseCodes, parseRange, pttypeOptionGroups, round2, svcDepJoin, svcDepSql, SVC_OVERRIDE_DEP, unauthorized,
 } from "../../_lib/fund";
 
-// แผนก = ovst.main_dep: มูลค่าทุกรายการของ visit นับเข้าแผนกหลักของ visit
+// แผนก = ovst.main_dep ยกเว้น visit ที่ส่งเข้าคิว SVC_OVERRIDE_DEP (053 คลินิกพรีเมียม) นับที่แผนกนั้น (svcDepSql เดียวกับ /fund/dept-trend)
+// visit หนึ่งนับแผนกเดียว มูลค่าทุกรายการของ visit นับเข้าแผนกนั้น
 // กองทุนภายในแผนก: มูลค่าตาม opitemrece.pttype, จำนวน visit ตาม ovst.pttype (หลักเดียวกับหน้ากองทุน)
 // ?deps=<code,…> กรองแผนก, ?pttypes=<code,…> กรองสิทธิ (ทั้ง ovst.pttype และ opitemrece.pttype) รหัสผิดรูปแบบ -> 400
 // response เพิ่ม pttypeOptions/depOptions (groups ของ MultiSelect)
@@ -24,34 +25,37 @@ export async function GET(request: NextRequest) {
   const activeDeps = deps.filter((d) => d.active);
   const pttypes = effectiveCodes(rawPttypes, activePttypes(lk));
   const depCodes = effectiveCodes(rawDeps, activeDeps.map((d) => d.code));
-  const depFilter = depCodes ? inList(depSql("v"), depCodes.length) : "";
+  const depFilter = depCodes ? inList(svcDepSql("v"), depCodes.length) : "";
   const vFilter = (pttypes ? ` AND ${inList("v.pttype", pttypes.length)}` : "") + (depFilter && ` AND ${depFilter}`);
   const oFilter = pttypes ? ` AND ${inList("o.pttype", pttypes.length)}` : "";
   const params = [start, end, ...(pttypes ?? []), ...(depCodes ?? [])];
+  // ลำดับ ? ของ query ที่มี svcDepJoin: visit = JOIN ก่อน WHERE, item = derived table ก่อน JOIN
+  const visitParams = [SVC_OVERRIDE_DEP, ...params];
+  const itemParams = [start, end, ...(pttypes ?? []), SVC_OVERRIDE_DEP, ...(depCodes ?? [])];
 
   const qFilter = (pttypes ? ` AND ${inList("v.pttype", pttypes.length)}` : "") + (depCodes ? ` AND ${inList("x.depcode", depCodes.length)}` : "");
 
   const [visitRows, patientRows, itemRows, queueRows, queueAmountRows] = await Promise.all([
     hisQuery<{ dep: string; pttype: string | null; visits: number }>(
-      `SELECT ${depSql("v")} AS dep, v.pttype, COUNT(*) AS visits FROM ovst v
+      `SELECT ${svcDepSql("v")} AS dep, v.pttype, COUNT(*) AS visits FROM ovst v ${svcDepJoin("v.vn")}
        WHERE v.vstdate BETWEEN ? AND ?${vFilter} GROUP BY dep, v.pttype`,
-      params,
+      visitParams,
     ),
     // ROLLUP แถว dep = NULL คือจำนวนคนไม่ซ้ำทั้งช่วง
     hisQuery<{ dep: string | null; patients: number }>(
-      `SELECT ${depSql("v")} AS dep, COUNT(DISTINCT v.hn) AS patients FROM ovst v
+      `SELECT ${svcDepSql("v")} AS dep, COUNT(DISTINCT v.hn) AS patients FROM ovst v ${svcDepJoin("v.vn")}
        WHERE v.vstdate BETWEEN ? AND ?${vFilter} GROUP BY dep WITH ROLLUP`,
-      params,
+      visitParams,
     ),
     // รวม opitemrece ใน derived table ที่ใช้ ix_vstdate ก่อน แล้วค่อย join ovst ด้วย vn (unique) เพื่อหาแผนก
     // ห้าม join ovst กับ opitemrece ตรงๆ: FORCE INDEX ทำให้ใช้ ix_vn ไม่ได้ และ optimizer อาจเริ่มจาก ovst
     hisQuery<{ dep: string; pttype: string; income: string; amount: number }>(
-      `SELECT ${depSql("v")} AS dep, x.pttype, x.income, SUM(x.amount) AS amount
+      `SELECT ${svcDepSql("v")} AS dep, x.pttype, x.income, SUM(x.amount) AS amount
        FROM (SELECT o.vn, o.pttype, o.income, SUM(o.sum_price) AS amount FROM ${OPI_BY_DATE}
              WHERE o.vstdate BETWEEN ? AND ? AND o.vn IS NOT NULL${oFilter} GROUP BY o.vn, o.pttype, o.income) x
-       LEFT JOIN ovst v ON v.vn = x.vn${depFilter && ` WHERE ${depFilter}`}
+       LEFT JOIN ovst v ON v.vn = x.vn ${svcDepJoin("x.vn")}${depFilter && ` WHERE ${depFilter}`}
        GROUP BY dep, x.pttype, x.income`,
-      params,
+      itemParams,
     ),
     // visit ที่ถูกส่งเข้าคิวของแผนก (ตรงกับ OPD Visit List ของ HOSxP) visit เดียวเข้าได้หลายแผนก จึงห้ามรวมข้ามแผนก
     // shortcut: depcode ว่างนับเป็น UNKNOWN ในโค้ด แต่ ?deps=UNKNOWN ไม่จับแถวนั้น (ไม่ COALESCE ใน SQL เพื่อใช้ index), แก้เมื่อแถวว่างมีนัยสำคัญ
