@@ -15,7 +15,7 @@ import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
 import { CLAIM_LABEL, claimCounts, claimText } from "@/app/api/fdh/claim-batch/claim";
 import { loadClaims, type ClaimCand } from "@/app/api/fdh/claim-batch/load";
-import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
+import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, parseAdjrw, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -153,7 +153,7 @@ const XLSX_COLUMNS: XlsxColumn<XlsxRow>[] = [
   { key: "uc_money", header: "ลูกหนี้สิทธิ (บาท)", width: 14, type: "money" },
 ];
 
-/** GET ?start&end[&pttypes=89,77][&wards=01,02][&dx=malnutrition[&dxpos=pdx|sdx]] + พารามิเตอร์ DataGrid: admission ที่จำหน่ายในช่วง ไม่ส่ง = ทุกสิทธิ/ทุก ward/ทุกโรค */
+/** GET ?start&end[&pttypes=89,77][&wards=01,02][&dx=malnutrition[&dxpos=pdx|sdx]][&adjrw_min=0.5][&adjrw_max=2] + พารามิเตอร์ DataGrid: admission ที่จำหน่ายในช่วง ไม่ส่ง = ทุกสิทธิ/ทุก ward/ทุกโรค */
 export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();
   const params = request.nextUrl.searchParams;
@@ -168,6 +168,9 @@ export async function GET(request: NextRequest) {
   if (dxSel === "invalid") return badRequest("dx หรือ dxpos ไม่ถูกต้อง");
   // มีรหัสในกลุ่มที่เลือก (OR ข้ามกลุ่ม) ตามตำแหน่งรหัส ; alias dg เพราะ d ใช้กับ dchstts ใน FROM
   const dx = dxSel && dxGroupSql({ icd10: "dg.icd10", diagtype: "dg.diagtype" }, dxSel.keys, dxSel.pos);
+  const adj = parseAdjrw(params.get("adjrw_min"), params.get("adjrw_max"));
+  if (adj === "invalid") return badRequest("adjrw_min/adjrw_max ไม่ถูกต้อง");
+  const { min: adjMin, max: adjMax } = adj;
   const grid = parseGridQuery<SortKey>(params, SORTABLE);
   if (!grid.ok) return badRequest(grid.error);
   const { page, pageSize, sort, dir, q, format } = grid.query;
@@ -190,11 +193,11 @@ export async function GET(request: NextRequest) {
   /** WHERE ตามตัวกรองทั้งหมด ยกเว้นตัวกรองหัวคอลัมน์ของ except (ใช้ตอนหาค่า facet) */
   const whereFor = (except: FilterKey | null) => {
     const like = `%${escapeLike(q)}%`;
-    const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${dx ? ` AND EXISTS (SELECT 1 FROM iptdiag dg WHERE dg.an = i.an AND ${dx.sql})` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}`;
+    const base = `WHERE i.dchdate BETWEEN ? AND ?${pttypes ? ` AND ${inList("i.pttype", pttypes.length)}` : ""}${wards ? ` AND ${inList("i.ward", wards.length)}` : ""}${dx ? ` AND EXISTS (SELECT 1 FROM iptdiag dg WHERE dg.an = i.an AND ${dx.sql})` : ""}${q ? ` AND (i.an LIKE ? OR i.hn LIKE ? OR ${FULL_NAME_SQL} LIKE ?)` : ""}${adjMin != null ? " AND i.adjrw >= ?" : ""}${adjMax != null ? " AND i.adjrw <= ?" : ""}`;
     const lists = ([["rep", repAns], ["subfund", subAns], ["claim", claimAns]] as const).filter(([k, v]) => v && except !== k).map(([, v]) => v as string[]);
     const cfw = columnFilterWhere(defs, { ...filters, rep: undefined, subfund: undefined, claim: undefined }, except);
     const parts = [...lists.map((l) => (l.length ? inList("i.an", l.length) : "1 = 0")), ...cfw.parts];
-    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...lists.flat(), ...cfw.params];
+    const params: SqlValue[] = [start, end, ...(pttypes ?? []), ...(wards ?? []), ...(dx?.params ?? []), ...(q ? [like, like, like] : []), ...(adjMin != null ? [adjMin] : []), ...(adjMax != null ? [adjMax] : []), ...lists.flat(), ...cfw.params];
     return { sql: parts.length ? `${base}\n  AND ${parts.join("\n  AND ")}` : base, params };
   };
   // ตัวกรอง/facet ของ REP และกองทุนย่อย: ไม่ใช้ = ไม่มี query เพิ่ม ; ใช้ = จัดค่าของทุก AN ที่ผ่านตัวกรองอื่น (90 วันราว 2,400 AN)
