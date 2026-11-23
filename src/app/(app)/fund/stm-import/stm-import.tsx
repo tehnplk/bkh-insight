@@ -121,6 +121,17 @@ function DeleteFile({ row }: { row: StmFileRow }) {
 
 const FY_MONTHS = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 const BASE_ROWS = ["UCS|OP", "UCS|IP", "OFC|OP", "OFC|IP"];
+// สีผูกกับครั้งที่ (run_no) ไม่ใช่ลำดับที่เจอ ครั้งที่ 2 ทุกเดือนจึงสีเดียวกัน เกิน 7 ใช้สีกลาง ; class เต็มเพื่อให้ Tailwind เห็น
+const RUN_COLORS = [
+  "border-(--chart-1) bg-[color-mix(in_oklab,var(--chart-1)_16%,var(--surface))]",
+  "border-(--chart-2) bg-[color-mix(in_oklab,var(--chart-2)_16%,var(--surface))]",
+  "border-(--chart-3) bg-[color-mix(in_oklab,var(--chart-3)_16%,var(--surface))]",
+  "border-(--chart-4) bg-[color-mix(in_oklab,var(--chart-4)_16%,var(--surface))]",
+  "border-(--chart-5) bg-[color-mix(in_oklab,var(--chart-5)_16%,var(--surface))]",
+  "border-(--chart-6) bg-[color-mix(in_oklab,var(--chart-6)_16%,var(--surface))]",
+  "border-(--chart-7) bg-[color-mix(in_oklab,var(--chart-7)_16%,var(--surface))]",
+];
+const RUN_OTHER = "border-(--chart-other) bg-[color-mix(in_oklab,var(--chart-other)_16%,var(--surface))]";
 const fiscalYear = (iso: string) => {
   const [y, m] = iso.split("-").map(Number);
   return m >= 10 ? y + 1 : y; // ค.ศ. ของปีงบ (ต.ค.–ก.ย.)
@@ -166,7 +177,13 @@ function StmPeriods() {
                       if (got)
                         return (
                           <td key={m} className="px-2 py-1.5 text-center whitespace-nowrap" aria-label={`${label} ครั้งที่ ${got.join(", ")}`}>
-                            {got.join(" ")}
+                            <span className="inline-flex gap-0.5">
+                              {got.map((r) => (
+                                <span key={r} title={`${label} ครั้งที่ ${r}`} className={`grid size-5 place-items-center rounded-full border-2 text-xs font-medium ${RUN_COLORS[r - 1] ?? RUN_OTHER}`}>
+                                  {r}
+                                </span>
+                              ))}
+                            </span>
                           </td>
                         );
                       const missing = ym < thisMonth;
