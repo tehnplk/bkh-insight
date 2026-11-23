@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/ipd/admissions/admissions.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRows, pdxMissing, repFilterValues } from "./admissions.ts";
+import { buildRows, parseAdjrw, pdxMissing, repFilterValues } from "./admissions.ts";
 
 const FUND = { "89": "UCS", O1: "OFC", S1: "SSS" };
 const fundOf = (p) => FUND[p] ?? "UNKNOWN";
@@ -80,4 +80,13 @@ test("REP header filter value: latest status on any fund, none only on UCS, blan
 
 test("missing PDx: pending within 7 days after discharge, late after (or no discharge date)", () => {
   assert.deepEqual([0, 7, 8, 30, null].map(pdxMissing), ["pending", "pending", "late", "late", "late"]);
+});
+
+test("AdjRW range: blank = no bound, one side allowed, invalid on non-number / out of 0–100 / min > max", () => {
+  assert.deepEqual(parseAdjrw(null, ""), { min: null, max: null });
+  assert.deepEqual(parseAdjrw(" 4 ", null), { min: 4, max: null });
+  assert.deepEqual(parseAdjrw("0.5", "2"), { min: 0.5, max: 2 });
+  assert.deepEqual(parseAdjrw("2", "2"), { min: 2, max: 2 });
+  assert.deepEqual(parseAdjrw("0", "100"), { min: 0, max: 100 });
+  for (const [lo, hi] of [["abc", ""], ["-1", ""], ["", "100.1"], ["3", "1"], ["Infinity", ""], ["1,5", ""]]) assert.equal(parseAdjrw(lo, hi), "invalid", `${lo}..${hi}`);
 });

@@ -202,6 +202,21 @@ export type OperRow = {
 };
 export type AdmissionDetail = { diags: DiagRow[]; opers: OperRow[] };
 
+/** ค่า AdjRW หนึ่งช่อง: ว่าง = null, ไม่ใช่ตัวเลขหรือนอก 0–100 = NaN (ipt.adjrw จริงอยู่ราว 0–8) */
+export function adjrwValue(s: string | null | undefined) {
+  const t = (s ?? "").trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : NaN;
+}
+/** ตัวกรองช่วง AdjRW (`adjrw_min`/`adjrw_max` รวมขอบ ใส่ช่องเดียวได้) ใช้ทั้ง route และช่องกรอกของหน้า ; ค่าผิดหรือ min > max = "invalid" */
+export function parseAdjrw(min: string | null | undefined, max: string | null | undefined) {
+  const lo = adjrwValue(min);
+  const hi = adjrwValue(max);
+  if (Number.isNaN(lo) || Number.isNaN(hi) || (lo != null && hi != null && lo > hi)) return "invalid" as const;
+  return { min: lo, max: hi };
+}
+
 /** ช่วงวันจำหน่ายยาวสุดที่หน้านี้ยอม (หน้าอื่น 31 วัน) ยาวได้เพราะ query ไม่อ่าน opitemrece ตามช่วงวันที่ ใช้ทั้งหน้าและ API */
 export const IPD_MAX_DAYS = 90;
 
