@@ -11,7 +11,7 @@ import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } f
 import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { DataFreshness } from "../_components/freshness";
 import { CaseResync } from "../_components/case-resync";
-import { AdjustRequestForm, AdjustRequests, Journal, TrialBalance } from "./ar-ledger-extras";
+import { AdjustRequestForm, AdjustRequests, CashReceiptForm, Journal, TrialBalance } from "./ar-ledger-extras";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
 import type { AccountBalance, ArLedgerSummary } from "@/app/api/fund/ar-ledger/route";
@@ -166,7 +166,7 @@ const detailTitle = (r: LedgerEntry) => (
   </>
 );
 
-function LedgerDetail({ row, account, onResync }: { row: LedgerEntry; account: ReactNode; onResync: () => void }) {
+function LedgerDetail({ row, account, canReceive, onResync }: { row: LedgerEntry; account: ReactNode; canReceive: boolean; onResync: () => void }) {
   return (
     <div className="text-sm">
       <Facts>
@@ -189,6 +189,7 @@ function LedgerDetail({ row, account, onResync }: { row: LedgerEntry; account: R
         // ยอดของ adjust/cancel/reverse ไม่ใช่ยอดหนี้ทั้งก้อน จึงเทียบส่วนต่างเฉพาะแถวตั้งหนี้
         <DebtorItems vn={row.vn} an={row.an} debtor={row.kind === "set" ? Number(row.amount) : undefined} />
       )}
+      {canReceive && <CashReceiptForm patientType={row.patient_type} debtRef={row.ref} onDone={onResync} />}
       <AdjustRequestForm patientType={row.patient_type} debtRef={row.ref} />
     </div>
   );
@@ -214,7 +215,9 @@ export function ArLedger() {
     </>
   );
   // ไม่ remount DataGrid (จะปิด modal) แถวในตารางจึงเห็นรายการใหม่เมื่อโหลดตารางครั้งถัดไป
-  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} onResync={retry} />;
+  // รับเงินเองได้เฉพาะบัญชีที่ไม่ตัดด้วย STM (route ตรวจซ้ำ)
+  const canReceive = !!selected?.code && !selected.settles_by_stm;
+  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} canReceive={canReceive} onResync={retry} />;
 
   return (
     <div className="flex flex-col gap-5">

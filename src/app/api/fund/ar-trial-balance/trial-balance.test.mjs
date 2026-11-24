@@ -84,3 +84,11 @@ test("snapshotChanges counts changed, added and removed accounts", () => {
   const changed = trialBalance([...allKinds("month"), g("month", "set", "1")]);
   assert.equal(snapshotChanges(changed, snap), 2); // ลูกหนี้ + รายได้
 });
+
+test("เงินรับล่วงหน้า (fwf) เป็นบัญชีงบดุล ยกมาข้ามปีงบ ไม่เข้าผลสะสมปีงบก่อน", () => {
+  const tb = trialBalance([g("prior", "set", "1000"), g("prior", "settle", "-600", { source: "fwf" }), g("month", "settle", "-100", { source: "fwf" })]);
+  assert.deepEqual(row(tb, "pool", "2103010103.502"), {
+    type: "pool", code: "2103010103.502", name: "รายได้ค่ารักษาแรงงานต่างด้าวรับล่วงหน้า", opening_dr: 600, opening_cr: null, dr: 100, cr: 0, closing_dr: 700, closing_cr: null,
+  });
+  assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
+});
