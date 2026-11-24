@@ -6,7 +6,7 @@ import { GROUPS, fiscalMonths, fundBars, groupOf, groupTrend } from "./trend.ts"
 const months = fiscalMonths(2569);
 const ucIp = groupOf("uc-ip");
 const row = (period_month, extra = {}) => ({
-  period_month, scheme: "UCS", patient_type: "IP", files: 1, paid_all: null, claim_normal: null,
+  period_month, scheme: "UCS", patient_type: "IP", files: 1, paid_all: null, claim_normal: null, claim_claimable: null, paid_claimable: null,
   cases: null, rw_all: null, rw_drg: null, drg_amount: null, first_run_no: 1, lag_first_days: null, lag_avg_days: null, lag_max_days: null, ...extra,
 });
 
@@ -66,4 +66,36 @@ test("fundBars: สีผูกกับกองทุนไม่ใช่อ�
   assert.deepEqual(values[2], [0, 0]);
   const ofc = fundBars([f("2025-10-01", "CARE", 7, "OFC")], groupOf("ofc-ip"), months);
   assert.deepEqual(ofc.funds, [{ key: "CARE", color: "--chart-1" }]);
+});
+
+test("fundBars: UC OP ใช้รายการกองทุนของตัวเอง (OP/PALLIATIVE ไม่ตกไปอื่นๆ) ไม่ปนกับ UC IP", () => {
+  const f = (fund, amount, patient_type = "OP") => ({ period_month: "2025-10-01", scheme: "UCS", patient_type, fund, amount });
+  const op = fundBars([f("INST", 1), f("OP", 2), f("PALLIATIVE", 3), f("HC", 4), f("IP", 9, "IP")], groupOf("uc-op"), months);
+  assert.deepEqual(op.funds, [
+    { key: "INST", color: "--chart-1" },
+    { key: "OP", color: "--chart-6" },
+    { key: "PALLIATIVE", color: "--chart-7" },
+    { key: "OTHER", color: "--chart-other" },
+  ]);
+  assert.deepEqual(op.others, ["HC"]);
+  const ip = fundBars([f("INST", 1, "IP")], ucIp, months);
+  assert.deepEqual(ip.funds, [{ key: "INST", color: "--chart-3" }]); // สีของ UC IP คงเดิม
+});
+
+test("groupTrend: UC OP อัตรา = paid_claimable ÷ claim_claimable ; กลุ่มอื่นยังใช้ paid_all ÷ claim_normal", () => {
+  const op = (period_month, extra) => row(period_month, { patient_type: "OP", ...extra });
+  const t = groupTrend(
+    [
+      op("2025-10-01", { paid_all: 500, claim_normal: 10000, paid_claimable: 20, claim_claimable: 100 }),
+      op("2025-11-01", { paid_all: 500, claim_normal: 10000, paid_claimable: 30, claim_claimable: 200 }),
+      op("2025-12-01", { paid_all: 500, claim_normal: 10000, paid_claimable: 5, claim_claimable: null }),
+    ],
+    groupOf("uc-op"),
+    months,
+  );
+  assert.deepEqual(t.rate.slice(0, 3), [0.2, 0.15, null]);
+  assert.equal(t.total.rate, 50 / 300); // รวมก่อนหาร ไม่นับเดือนที่ไม่มียอดเรียกเก็บ
+  assert.equal(t.total.paid, 1500); // ยอดชดเชยยังเป็น paid_all
+  const ip = groupTrend([row("2025-10-01", { paid_all: 50, claim_normal: 100, paid_claimable: 1, claim_claimable: 1 })], ucIp, months);
+  assert.equal(ip.total.rate, 0.5);
 });

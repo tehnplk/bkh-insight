@@ -44,18 +44,31 @@ const METRICS_SQL = `WITH fl AS (
   WHERE f.period_month BETWEEN $1::date AND $2::date
     AND f.patient_type = 'IP' AND r.section = 'normal' AND r.adjrw > 0
   GROUP BY 1, 2, 3
+), cl AS (
+  -- UC OP: claim_total ทั้ง visit ส่วนใหญ่เป็นเหมาจ่ายรายหัว (REP main_fund ว่าง จ่าย 0) จึงคิดอัตราเฉพาะรายที่ REP ระบุกองทุน ; ไม่มี REP = นับ
+  -- rep_row.tran_id เป็น PK (1:1) ; ต้องกรอง scheme เพราะ tran_id ชนข้าม scheme
+  SELECT f.period_month, f.scheme, f.patient_type,
+         SUM(r.claim_total) FILTER (WHERE p.tran_id IS NULL OR cardinality(p.main_fund) > 0) AS claim_claimable,
+         SUM(r.paid_total)  FILTER (WHERE p.tran_id IS NULL OR cardinality(p.main_fund) > 0) AS paid_claimable
+  FROM stm_file f
+  JOIN stm_row r ON r.stm_file_id = f.id
+  LEFT JOIN rep_row p ON p.tran_id = r.tran_id AND p.scheme = 'UCS'
+  WHERE f.period_month BETWEEN $1::date AND $2::date
+    AND f.scheme = 'UCS' AND f.patient_type = 'OP' AND r.section = 'normal'
+  GROUP BY 1, 2, 3
 )
 SELECT fl.period_month, fl.scheme, fl.patient_type, fl.files,
-       sm.paid_all, sm.claim_normal,
+       sm.paid_all, sm.claim_normal, cl.claim_claimable, cl.paid_claimable,
        rw.cases, rw.rw_all, rw.rw_drg, rw.drg_amount,
        fl.first_run_no, fl.lag_first_days, fl.lag_avg_days, fl.lag_max_days
 FROM fl
 LEFT JOIN sm USING (period_month, scheme, patient_type)
 LEFT JOIN rw USING (period_month, scheme, patient_type)
+LEFT JOIN cl USING (period_month, scheme, patient_type)
 ORDER BY 1, 2, 3`;
 
 type Raw<T> = { [K in keyof T]: T[K] extends number | null ? string | number | null : T[K] };
-const NUM_KEYS = ["files", "paid_all", "claim_normal", "cases", "rw_all", "rw_drg", "drg_amount", "first_run_no", "lag_first_days", "lag_avg_days", "lag_max_days"] as const;
+const NUM_KEYS = ["files", "paid_all", "claim_normal", "claim_claimable", "paid_claimable", "cases", "rw_all", "rw_drg", "drg_amount", "first_run_no", "lag_first_days", "lag_avg_days", "lag_max_days"] as const;
 // pg คืน numeric/bigint เป็น string ; null คงเป็น null (= ไม่มีข้อมูล ไม่ใช่ 0)
 const n = (v: string | number | null) => (v === null ? null : Number(v));
 

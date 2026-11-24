@@ -11,6 +11,9 @@ export type MetricRow = {
   files: number;
   paid_all: number | null;
   claim_normal: number | null;
+  /** UC OP เท่านั้น (กลุ่มอื่น null): ยอดเรียกเก็บ/ชดเชย section normal ของรายที่ REP ระบุกองทุน (ไม่ใช่เหมาจ่ายรายหัว) */
+  claim_claimable: number | null;
+  paid_claimable: number | null;
   cases: number | null;
   rw_all: number | null;
   rw_drg: number | null;
@@ -34,10 +37,13 @@ export type Group = (typeof GROUPS)[number];
 export type GroupKey = Group["key"];
 export const groupOf = (key: string): Group => GROUPS.find((g) => g.key === key) ?? GROUPS[0];
 
-/** ลำดับ = สี --chart-1.. ของกองทุนต่อ scheme ; key อื่นรวมเป็น OTHER_FUND (--chart-other) */
-export const FUND_ORDER: Record<string, readonly string[]> = {
-  UCS: ["IP", "DMIS", "INST", "AE", "PP", "HC_DRUG", "AE_DRUG"],
-  OFC: ["CARE", "DRUG", "INST", "ROOM", "TRANSPORT"],
+const OFC_FUNDS = ["CARE", "DRUG", "INST", "ROOM", "TRANSPORT"] as const;
+/** ลำดับ = สี --chart-1.. ของกองทุนต่อกลุ่ม (UC OP กับ UC IP กองทุนหลักต่างกัน) ; key อื่นรวมเป็น OTHER_FUND (--chart-other) */
+export const FUND_ORDER: Record<GroupKey, readonly string[]> = {
+  "uc-op": ["INST", "PP", "AE", "HC_DRUG", "AE_DRUG", "OP", "PALLIATIVE"],
+  "uc-ip": ["IP", "DMIS", "INST", "AE", "PP", "HC_DRUG", "AE_DRUG"],
+  "ofc-op": OFC_FUNDS,
+  "ofc-ip": OFC_FUNDS,
 };
 export const OTHER_FUND = "OTHER";
 
@@ -60,7 +66,7 @@ const inGroup = (g: Group) => (r: { scheme: string; patient_type: string }) => r
  * values[เดือน][series] เดือนที่ไม่มีไฟล์ = 0 (แท่งว่าง)
  */
 export function fundBars(rows: FundRow[], g: Group, months: string[]): { funds: { key: string; color: string }[]; values: number[][]; others: string[] } {
-  const order = FUND_ORDER[g.scheme] ?? [];
+  const order = FUND_ORDER[g.key];
   const bucket = (fund: string) => (order.includes(fund) ? fund : OTHER_FUND);
   const totals = new Map<string, number>();
   const cell = new Map<string, number>();
@@ -107,18 +113,20 @@ export function groupTrend(rows: MetricRow[], g: Group, months: string[]): Group
   const present = at.filter((r): r is MetricRow => r !== null);
   const total = (k: keyof MetricRow, filter?: (r: MetricRow) => boolean) =>
     present.some((r) => r[k] != null) ? sumOf(present.filter(filter ?? (() => true)).map((r) => r[k] as number | null)) : null;
+  // UC OP: อัตราเทียบเฉพาะรายที่ REP ระบุกองทุน เพราะ claim ทั้ง visit ส่วนใหญ่เป็นเหมาจ่ายรายหัวที่ STM จ่าย 0
+  const [paidKey, claimKey] = g.key === "uc-op" ? (["paid_claimable", "claim_claimable"] as const) : (["paid_all", "claim_normal"] as const);
   const days = months.flatMap((m, i) => (at[i]?.lag_first_days != null ? [transferDay(m, at[i]!.lag_first_days!)] : []));
   return {
     group: g,
     paid: pick((r) => r.paid_all),
-    rate: pick((r) => div(r.paid_all, r.claim_normal)),
+    rate: pick((r) => div(r[paidKey], r[claimKey])),
     bahtPerRw: pick((r) => div(r.drg_amount, r.rw_drg)),
     cmi: pick((r) => div(r.rw_all, r.cases)),
     lag: pick((r) => r.lag_first_days),
     total: {
       paid: total("paid_all"),
       // อัตราทั้งปีหารเฉพาะเดือนที่มียอดเรียกเก็บ กันเดือนที่ไม่มี claim ทำให้อัตราสูงเกินจริง
-      rate: div(total("paid_all", (r) => !!r.claim_normal), total("claim_normal")),
+      rate: div(total(paidKey, (r) => !!r[claimKey]), total(claimKey)),
       bahtPerRw: div(total("drg_amount"), total("rw_drg")),
       cmi: div(total("rw_all"), total("cases")),
     },

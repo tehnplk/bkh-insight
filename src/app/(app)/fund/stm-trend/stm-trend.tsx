@@ -23,8 +23,7 @@ const monthTick = (m: string) => `${THAI_MONTHS_SHORT[+m.slice(5, 7) - 1]} ${Str
 const fromMillions = (n: number) => formatBaht(n * 1e6);
 const Dash = () => <span className="text-muted">–</span>;
 
-// กราฟเส้น: กลุ่มที่ค่ามีความหมาย ; UC OP ไม่อยู่ในอัตราเพราะผู้ป่วยนอก UC ส่วนใหญ่จ่ายแบบเหมาจ่ายรายหัว ไม่ผ่าน STM
-const RATE_GROUPS: GroupKey[] = ["uc-ip", "ofc-op", "ofc-ip"];
+// กราฟเส้น: กลุ่มที่ค่ามีความหมาย
 const IP_GROUPS: GroupKey[] = ["uc-ip", "ofc-ip"];
 const ALL_GROUPS = GROUPS.map((g) => g.key);
 
@@ -73,7 +72,9 @@ export function StmTrend({ title }: { title: ReactNode }) {
           <Kpi label="ยอดชดเชยทั้งปีงบ" sub={`${formatCount(files)} ไฟล์ STM`}>
             {t.total.paid === null ? <Dash /> : <CompactBaht value={t.total.paid} />}
           </Kpi>
-          {group.key !== "uc-op" && <Kpi label="อัตราได้รับชดเชย" sub="ชดเชย ÷ เรียกเก็บ">{t.total.rate === null ? <Dash /> : <Big>{pctText(t.total.rate)}</Big>}</Kpi>}
+          <Kpi label="อัตราได้รับชดเชย" sub={group.key === "uc-op" ? "ชดเชย ÷ เรียกเก็บของรายที่ REP ระบุกองทุน" : "ชดเชย ÷ เรียกเก็บ"}>
+            {t.total.rate === null ? <Dash /> : <Big>{pctText(t.total.rate)}</Big>}
+          </Kpi>
           {group.patient_type === "IP" && (
             <>
               <Kpi label="บาทต่อ AdjRW" sub="ค่ารักษาตาม DRG ÷ AdjRW">{t.total.bahtPerRw === null ? <Dash /> : <Big unit="บาท">{formatBaht(t.total.bahtPerRw)}</Big>}</Kpi>
@@ -103,9 +104,9 @@ export function StmTrend({ title }: { title: ReactNode }) {
         <div className="grid gap-8 xl:grid-cols-2">
           <TrendPanel
             title="อัตราได้รับชดเชย"
-            note="ไม่รวม UC OP เพราะผู้ป่วยนอก UC ส่วนใหญ่จ่ายแบบเหมาจ่ายรายหัว ไม่ผ่าน STM"
+            note="UC OP หารด้วยยอดเรียกเก็บเฉพาะรายที่ REP ระบุกองทุน ไม่รวมรายเหมาจ่ายรายหัว"
             categories={categories}
-            series={line("rate", RATE_GROUPS)}
+            series={line("rate", ALL_GROUPS)}
             tickFormat={(n) => `${Math.round(n * 100)}%`}
             valueFormat={pctText}
             unit="% ของยอดเรียกเก็บ"
