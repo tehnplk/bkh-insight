@@ -7,7 +7,7 @@ import type { PatientType } from "@/app/api/fund/ar-sync/ledger";
 export type ArAccount = {
   code: string;
   name: string;
-  /** บัญชีรายได้คู่ และบัญชีส่วนต่าง (ได้รับต่ำกว่า = Dr, สูงกว่า = Cr) สำหรับสมุดรายวัน */
+  /** บัญชีรายได้คู่ และบัญชีส่วนต่าง (ชื่อตามผังบัญชี สธ.: ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง = Dr เมื่อได้รับต่ำกว่า, ที่ต่ำกว่าข้อตกลง = Cr เมื่อได้รับสูงกว่า) สำหรับสมุดรายวัน */
   revenue_code: string | null;
   diff_under_code: string | null;
   diff_over_code: string | null;

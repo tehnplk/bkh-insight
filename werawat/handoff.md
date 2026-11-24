@@ -1,4 +1,19 @@
-# Handoff: werawat (อัปเดต 20 พ.ย. 2569)
+# Handoff: werawat (อัปเดต 23 พ.ย. 2569)
+
+## รอบ 23 พ.ย. 2569 (PR #69–#73 merge แล้ว, deploy แล้ว main `a45cc94`)
+
+เสร็จแล้ว:
+- #69 stm-import ป้ายวงกลมแยกสีตามครั้งที่ของงวด
+- #70–#71 `/fund/dept-trend` หน้าใหม่ (กราฟรายเดือนทั้งปีงบต่อแผนก, ค่าเริ่มต้นแผนก 053+027 `DEFAULT_DEPS`, เดือนล่าสุดเทียบเดือนก่อนพร้อม "ข้อมูล N วัน") ; กติกาแผนก 1 visit = 1 แผนก: `main_dep` ยกเว้น visit ที่ส่งเข้าคิว 053 คลินิกพรีเมียม นับที่ 053 (`SVC_OVERRIDE_DEP`/`svcDepJoin`/`svcDepSql`/`svcDepNameSql` ใน `src/app/api/fund/_lib/fund.ts`, รองรับแผนกพิเศษตัวเดียว) ใช้ที่ dept-trend, `/fund/opd-department`, `/api/fund/opd-fund/visits` ; opd-department เอาคอลัมน์/modal "ส่งเข้าแผนก" ออก (คิวซ้ำข้ามแผนก)
+- #72–#73 `/ipd/admissions` ตัวกรองช่วง AdjRW เป็นตัวกรองหัวคอลัมน์ ; DataGrid มี meta `range: { min, max, validate? }` (ชื่อ URL param) ใช้กับคอลัมน์ตัวเลขอื่นได้
+- คู่มือตั้งและตัดลูกหนี้ (artifact ส่วนตัว https://claude.ai/artifact/GNPDgZf4pcgseUPGJybRhA ภาพจำลองหน้าจอข้อมูลสมมติ) ต้นฉบับอยู่ใน scratchpad ของ session ไม่ได้อยู่ใน repo ; แก้ต่อจาก session อื่นให้ใช้ Artifact `read` ด้วย URL
+
+ค้าง:
+- **FWF (ต่างด้าว) ส่งออก 16 แฟ้มด้วย FCODE**: ผู้ใช้ให้ยึด ACCLOEI เป็นต้นแบบ รอผู้ใช้ส่งไฟล์ zip ตัวอย่างที่ ACCLOEI ส่งออก (หรือภาพแฟ้ม INS/PAT/DRU) เพื่อยืนยัน: INS.INSCL (`FWF` หรือ `NRH`), INS คอลัมน์ 5 (DATEIN หรือ HCODE), FCODE แทนเลขบัตรทุกแฟ้มหรือแค่ INS, MISArv ใส่ DID หรือ DIDSTD ; ยังไม่ได้ตัดสินว่าจะทำ (ประเมินยอดเบิกได้ ~1.1 แสนบาท/ปี: สิทธิ 99 IP 6 admit ≈ 81,000 + ARV ≤ 25,000 + วัคซีน)
+  - ข้อเท็จจริงที่ตรวจแล้ว: ช่องทางส่ง = FDH ; FCODE ได้จากลงทะเบียน BIO ID ใน FDH-Migrants (xlsx ทะเบียนที่ผู้ใช้มี) ; `patient_employer.fwf_code` มีค่า 562 แถว รูปแบบถูก `^F[0-9]{12}$` แค่ 271 (สิทธิ 99 มี FCODE ถูกรูปแบบ 4/14 คน) ; รหัส FWF ใหม่ (Google Sheet FDH 7 แท็บ: IP 9, on top 5, อุปกรณ์ 55 รหัส 4 หลัก, ARV MISArv01–29 ลงแฟ้ม DRU USE_STATUS 1/2, แล็บ HIV 34 รหัส ADP TYPE 15, วัคซีน/ยาฝัง ADP TYPE 4) ต่างจาก `fwf_item` ของ HOSxP 89 รหัส ; map ใน HOSxP = 0 รายการ ; ARV ใหม่ไม่มี DTG/TAF
+  - จุดที่ต้องแก้ในโค้ดถ้าทำ: เลขบัตร `pt.cid` ใน `src/app/api/fdh/files/sql.ts` (INS/PAT/CHA/DRU/LABFU/ODX/OOP/CHT), PERMITNO CASE (สำเนาใน `fdh/c-check/checks.ts` + test), กฎ C104/C116, `FdhPreviewModal`
+- **hosxp-mapper** (`hosxp-mapper/` gitignored, port 3100): พักไว้รอข้อมูล FWF ; user DB ของผู้ใช้ยังไม่มีสิทธิ SELECT `fwf_item` (หน้า /fwf/items 500)
+- error `crypto.getRandomValues()` ตอน prerender หน้า `/` (เห็นใน console หลัง login) ยังไม่ได้ตรวจ
 
 ## ค้าง: วิเคราะห์ระบบตั้ง/ตัดลูกหนี้เทียบรายงานการเงิน (20 พ.ย. 2569, ยังไม่แก้โค้ด)
 เป้าหมาย: ให้ระบบออกรายงานที่งานการเงินใช้จริงได้ และยอดตรงกัน แล้วปรับ UX หน้าลูกหนี้

@@ -416,8 +416,8 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
           <>
             <th className={TH}>บัญชีลูกหนี้</th>
             <th className={TH}>รายได้คู่</th>
-            <th className={TH}>ส่วนต่าง ได้รับต่ำกว่า (Dr)</th>
-            <th className={TH}>ส่วนต่าง ได้รับสูงกว่า (Cr)</th>
+            <th className={TH}>ส่วนต่างค่ารักษาสูงกว่าข้อตกลง (Dr)</th>
+            <th className={TH}>ส่วนต่างค่ารักษาต่ำกว่าข้อตกลง (Cr)</th>
             <th className={TH}>ตัดหนี้ด้วย STM</th>
             <th className={TH}><span className="sr-only">จัดการ</span></th>
           </>
@@ -429,8 +429,8 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
             <tr key={a.code} className="border-t border-line hover:bg-surface-sunken">
               <td className={TD}><span className="whitespace-nowrap tabular-nums">{a.code}</span> <span className="text-muted">{a.name}</span></td>
               <td className={TD}>{editing ? input("revenue_code", `รายได้คู่ของ ${a.code}`) : code(a.revenue_code)}</td>
-              <td className={TD}>{editing ? input("diff_under_code", `ส่วนต่างได้รับต่ำกว่าของ ${a.code}`) : a.diff_under_code ? code(a.diff_under_code) : <span className="text-muted">–</span>}</td>
-              <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างได้รับสูงกว่าของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : <span className="text-muted">–</span>}</td>
+              <td className={TD}>{editing ? input("diff_under_code", `ส่วนต่างค่ารักษาสูงกว่าข้อตกลงของ ${a.code}`) : a.diff_under_code ? code(a.diff_under_code) : <span className="text-muted">–</span>}</td>
+              <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างค่ารักษาต่ำกว่าข้อตกลงของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : <span className="text-muted">–</span>}</td>
               <td className={TD}>
                 {editing ? (
                   <input type="checkbox" aria-label={`ตัดหนี้ ${a.code} ด้วย STM`} checked={draft.settles_by_stm} onChange={(e) => setDraft({ ...draft, settles_by_stm: e.target.checked })} className="size-4 accent-accent" />

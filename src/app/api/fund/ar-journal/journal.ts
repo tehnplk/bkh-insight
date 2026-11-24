@@ -1,7 +1,7 @@
 // สร้างรายการสมุดรายวัน Dr/Cr จากยอดรวมของ ar_ledger ในงวด แบบ pure ทดสอบด้วย node ได้ตรง (journal.test.mjs)
 //   ตั้งหนี้/ปรับปรุง/ยกเลิก/กลับรายการ (HOSxP และ manual): บวก Dr ลูกหนี้ / Cr รายได้ ; ลบ กลับข้าง
 //   รับชำระ (STM): ลบ Dr เงินฝากธนาคาร / Cr ลูกหนี้ ; บวก (เรียกคืน) กลับข้าง
-//   ส่วนต่าง (STM): ลบ = ได้รับต่ำกว่า Dr บัญชีส่วนต่างต่ำกว่า / Cr ลูกหนี้ ; บวก = ได้รับสูงกว่า Dr ลูกหนี้ / Cr บัญชีส่วนต่างสูงกว่า
+//   ส่วนต่าง (STM), ชื่อบัญชีตามผังบัญชี สธ. มองจากค่ารักษาที่เรียกเก็บ: ลบ = ได้รับต่ำกว่า Dr ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง / Cr ลูกหนี้ ; บวก = ได้รับสูงกว่า Dr ลูกหนี้ / Cr ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง
 
 /** ยอดรวมของ ar_ledger ต่อ (บัญชี, kind, เครื่องหมาย) พร้อมบัญชีคู่จาก ar_account */
 export type JournalGroup = {
@@ -33,7 +33,7 @@ export function journalLines(groups: JournalGroup[]): JournalLine[] {
     let other: { type: AccountType; code: string | null; name: string };
     if (g.kind === "settle") other = { type: "cash", code: null, name: CASH_NAME };
     else if (g.kind === "diff")
-      other = cents < 0 ? { type: "diff_under", code: g.diff_under_code, name: "ส่วนต่างได้รับต่ำกว่าลูกหนี้" } : { type: "diff_over", code: g.diff_over_code, name: "ส่วนต่างได้รับสูงกว่าลูกหนี้" };
+      other = cents < 0 ? { type: "diff_under", code: g.diff_under_code, name: "ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง" } : { type: "diff_over", code: g.diff_over_code, name: "ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง" };
     else other = { type: "revenue", code: g.revenue_code, name: "รายได้" };
     const [dr, cr] = cents > 0 ? [ar, other] : [other, ar];
     const kind = KIND_TEXT[g.kind] ?? g.kind;
