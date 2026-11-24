@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
-import { ADP_TYPE, NOT_DRUG } from "../../fdh/files/sql";
+import { ADP_TYPE, ITEM_LINE, ITEM_RATE, NOT_DRUG } from "../../fdh/files/sql";
 import { badRequest, inList, isAuthed, parseRange, unauthorized } from "../_lib/fund";
 import {
   RESULT_LABEL, checkItem, matches, needsFix, sortRows, summarize,
@@ -16,12 +16,12 @@ const FILTER_GET = { result: (r) => r.result } satisfies RowGetters<StpCheckRow,
 type FilterKey = keyof typeof FILTER_GET;
 const FILTERABLE = Object.keys(FILTER_GET) as FilterKey[];
 
-// ค่าเดียวกับแฟ้ม ADP/DRU ที่ส่งออก (fdh/files/sql.ts): ยา = หมวดค่ารักษา 3/4, CODE/TYPE สูตรเดียวกัน, visit STP ที่ไม่ admit
+// ค่าเดียวกับแฟ้ม ADP/DRU ที่ส่งออก (fdh/files/sql.ts): ยา = หมวดค่ารักษา 3/4, CODE/TYPE และราคา/ยอด (ITEM_RATE/ITEM_LINE) สูตรเดียวกัน, visit STP ที่ไม่ admit
 // shortcut: เริ่มจาก ovst (visit STP ไม่กี่ร้อยต่อเดือน) แล้วเข้า opitemrece ด้วย ix_vn ไม่สแกนตามวันจึงไม่ใช้ OPI_BY_DATE ; นำไปใช้กับกองทุนใหญ่ต้อง prove ใหม่
 async function loadItems(start: string, end: string, pttypes: string[]): Promise<HisItem[]> {
   return hisQuery<HisItem>(
     `SELECT op.hos_guid, op.vn, op.hn, op.vstdate, op.icode, s.name AS item_name,
-            op.qty, op.unitprice, op.sum_price, op.paidst, op.income,
+            op.qty, ${ITEM_RATE} AS unitprice, ${ITEM_LINE} AS sum_price, op.paidst, op.income,
             CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN 'DRU' ELSE 'ADP' END AS kind,
             nd.nhso_adp_code, nd.nhso_adp_type_id,
             CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN NULL

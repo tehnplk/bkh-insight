@@ -182,6 +182,27 @@ test("ADP.TYPE and drug split in rules match the exported ADP/DRU", async () => 
   }
 });
 
+test("C555: every file and rule uses the same line amount/rate; no raw sum_price total left", async () => {
+  const { exportSql, ITEM_LINE, ITEM_RATE } = await import("../files/sql.ts");
+  const raw = /SUM\(op\.sum_price\)|ROUND\(op\.sum_price, 2\) AS|THEN op\.sum_price ELSE/;
+  for (const t of FDH_TYPES) {
+    for (const f of ["ADP", "DRU", "CHA", "CHT"]) {
+      const sql = exportSql(t, f);
+      assert.ok(sql.includes(ITEM_LINE), `${t} ${f} export`);
+      assert.ok(!raw.test(sql.split(ITEM_LINE).join("")), `${t} ${f} export ยังใช้ sum_price ตรง`);
+    }
+    assert.ok(exportSql(t, "ADP").includes(`${ITEM_RATE} AS \`RATE\``) && exportSql(t, "DRU").includes(`${ITEM_RATE} AS \`DRUGPRICE\``), t);
+    for (const f of ["ADP", "DRU", "CHA", "CHT"]) {
+      const sql = ruleSummarySql(t, f);
+      assert.ok(sql.includes(`${ITEM_LINE} AS SP`) && sql.includes(`ROUND(COALESCE(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END, 0) * ${ITEM_RATE}, 2) AS QXP`), `${t} ${f} it`);
+      assert.ok(!raw.test(sql.split(ITEM_LINE).join("")), `${t} ${f} rule ยังใช้ sum_price ตรง`);
+    }
+    assert.ok(ruleSummarySql(t, "DRU").includes(`${ITEM_RATE} AS DRUGPRICE, ${ITEM_LINE} AS TOTAL`), `${t} dru_s`);
+    assert.ok(ruleSummarySql(t, "ADP").includes(`${ITEM_RATE} AS RATE, ${ITEM_LINE} AS TOTAL`), `${t} adp_s`);
+    assert.ok(countDef(t, "CHA").sql.includes(`HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0`), `${t} count CHA`);
+  }
+});
+
 test("ODX keeps only ICD-10 rows of ovstdiag; OOP adds ICD-9-CM rows not in doctor_operation (export, count, rules agree)", async () => {
   const { exportSql, fileColumns } = await import("../files/sql.ts");
   const icd10 = "od.icd10 REGEXP '^[A-Za-z]'";
