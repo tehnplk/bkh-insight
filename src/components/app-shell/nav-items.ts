@@ -81,6 +81,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "นำเข้า STM", href: "/fund/stm-import" },
       { label: "เทียบยอดโอน SMT กับ STM", href: "/fund/smt-reconcile" },
+      { label: "แนวโน้ม STM", href: "/fund/stm-trend" },
     ],
   },
   {
