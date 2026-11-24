@@ -166,7 +166,15 @@ const RECENT_MINUTES = 5;
  * เดือนที่ยังไม่เคยดึง (ตั้งแต่เดือนของ POOL_START) ทีละเดือนตามลำดับ + เดือนนี้และเดือนก่อนทุกครั้ง
  * (ยกเว้นดึงไปไม่ถึง 5 นาที เว้นแต่ force) คืนเดือนที่ดึง
  */
-export async function autoSync(by: string, force: boolean): Promise<{ months: string[]; counts: Record<string, SyncCounts> }> {
+type AutoSyncResult = { months: string[]; counts: Record<string, SyncCounts> };
+// เปิดหน้าพร้อมกันหลายคน (และ dev StrictMode ยิง effect ซ้ำ) ใช้รอบที่กำลังดึงอยู่ร่วมกัน ไม่ยิง HOSxP ซ้ำ
+// shortcut: กันซ้ำได้เฉพาะใน process เดียว, ใช้ pg_advisory_lock ถ้ารันหลาย instance
+let running: Promise<AutoSyncResult> | null = null;
+export function autoSync(by: string, force: boolean): Promise<AutoSyncResult> {
+  running ??= runAutoSync(by, force).finally(() => (running = null));
+  return running;
+}
+async function runAutoSync(by: string, force: boolean): Promise<AutoSyncResult> {
   const today = todayIso();
   const done = await insightQuery<{ month: string; recent: boolean }>(
     `SELECT to_char(month, 'YYYY-MM') AS month, synced_at > now() - make_interval(mins => $1) AS recent FROM fwf_sync_month`, [RECENT_MINUTES],
