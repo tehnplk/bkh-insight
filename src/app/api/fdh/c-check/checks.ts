@@ -16,6 +16,13 @@ const AI = "p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e";
 const DRUG_INC = "INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4)";
 const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
 const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+// ยอด/ราคารายแถวที่เขียนลงแฟ้ม ADP/DRU/CHA/CHT (ITEM_LINE/ITEM_RATE ของ fdh/files/sql.ts ข้อความเดียวกัน) ; C555 เทียบ CHA กับ จำนวน x ราคา (ITEM_QXP) แบบที่ FDH คิดใหม่
+const ITEM_QTY = "CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END";
+const ITEM_CALC = `COALESCE(ROUND(${ITEM_QTY} * ROUND(op.unitprice, 2), 2), 0)`;
+const ITEM_EDITED = `ABS(COALESCE(op.sum_price, 0) - ${ITEM_CALC}) >= 1`;
+const ITEM_LINE = `CASE WHEN ${ITEM_EDITED} THEN ROUND(op.sum_price, 2) ELSE ${ITEM_CALC} END`;
+const ITEM_RATE = `CASE WHEN ${ITEM_EDITED} AND ${ITEM_QTY} > 0 THEN ROUND(op.sum_price / ${ITEM_QTY}, 2) ELSE ROUND(op.unitprice, 2) END`;
+const ITEM_QXP = `ROUND(COALESCE(${ITEM_QTY}, 0) * ${ITEM_RATE}, 2)`;
 // แล็บหมวด 07: LAB (C914) = icode ที่ไม่ได้ TMLT ตาม pickTmlt (param 5 labCsv) ; CAT (C190) = icode ที่ไม่อยู่ใน Lab Catalog FDH (param 6 catCsv)
 // FIND_IN_SET แทน JSON_TABLE เพราะเร็วกว่า (prove) ; ? สองตัวนี้อยู่หลัง H4 เสมอ ลำดับ labCsv แล้ว catCsv
 const LAB_CAT = `GROUP_CONCAT(DISTINCT CASE WHEN CHRGITEM = '07' AND NOT FIND_IN_SET(ICODE, ?) THEN ICODE END ORDER BY ICODE) AS LAB,
@@ -53,7 +60,7 @@ const OP_COUNT = {
   OOP: n(`(SELECT 1 FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn
     UNION ALL SELECT 1 FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = v.hn WHERE ${OD_ICD9_NOT_IN_DOP}) u`),
   CHT: n("p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn WHERE v.an IS NULL OR v.an = ''"),
-  CHA: n("(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(op.sum_price), 2) > 0) g"),
+  CHA: n(`(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
   AER: n(`p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${AER_REF} WHERE (v.an IS NULL OR v.an = '') AND ${aerHas("v.vn")}`),
   ADP: { sql: OP_ITEMS, col: "adp_phdb" },
   DRU: { sql: OP_ITEMS, col: "dru" },
@@ -70,7 +77,7 @@ const IP_COUNT = {
   IDX: n(`${AI} INNER JOIN iptdiag id ON id.an = a.an`),
   IOP: n(`${AI} INNER JOIN iptoprt io ON io.an = a.an`),
   CHT: n(`${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn`),
-  CHA: n(`(SELECT 1 FROM ${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(op.sum_price), 2) > 0) g`),
+  CHA: n(`(SELECT 1 FROM ${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
   AER: n(`${AI} INNER JOIN ovst v ON v.an = a.an ${AER_REF} WHERE ${aerHas("a.an")}`),
   ADP: { sql: IP_ITEMS, col: "adp_phdb" },
   LVD: n(`${AI} INNER JOIN ipt_home_leave hl ON hl.an = a.an`),
@@ -112,26 +119,26 @@ orf_s AS (
 // CTE STP ที่อ่าน opitemrece/vn_stat/an_stat (ต่อท้าย PREFIX_ITEMS)
 const STP_OP_ITEMS = `adp_s AS (
   SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, ${ADP_TYPE} AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
-         ROUND(op.qty, 2) AS QTY, ROUND(op.unitprice, 2) AS RATE, ROUND(op.sum_price, 2) AS TOTAL
+         ROUND(op.qty, 2) AS QTY, ${ITEM_RATE} AS RATE, ${ITEM_LINE} AS TOTAL
   FROM stp s JOIN opitemrece op ON op.vn = s.SEQ INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN income inc ON inc.income = op.income
   WHERE (op.an IS NULL OR op.an = '') AND ${NOT_DRUG}
 ),
 dru_s AS (
-  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ROUND(op.unitprice, 2) AS DRUGPRICE, ROUND(op.sum_price, 2) AS TOTAL,
+  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ${ITEM_RATE} AS DRUGPRICE, ${ITEM_LINE} AS TOTAL,
          CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS USE_STATUS
   FROM stp s JOIN opitemrece op ON op.vn = s.SEQ ${DRUG_INC} INNER JOIN drugitems d ON d.icode = op.icode
   WHERE (op.an IS NULL OR op.an = '')
 ),
 cha_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
-         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(op.sum_price), 2) AS AMOUNT
+         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
   FROM stp s JOIN opitemrece op ON op.vn = s.SEQ LEFT JOIN income inc ON inc.income = op.income
   WHERE (op.an IS NULL OR op.an = '')
   GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
-  HAVING ROUND(SUM(op.sum_price), 2) > 0
+  HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0
 ),
 cht_s AS (
-  SELECT s.HN, s.AN, s.SEQ, ROUND(vs.income, 2) AS TOTAL FROM stp s JOIN vn_stat vs ON vs.vn = s.SEQ
+  SELECT s.HN, s.AN, s.SEQ, ROUND(COALESCE((SELECT SUM(${ITEM_LINE}) FROM opitemrece op LEFT JOIN income inc ON inc.income = op.income WHERE op.vn = s.SEQ AND (op.an IS NULL OR op.an = '')), 0), 2) AS TOTAL FROM stp s
 )`;
 
 const STP_IP_BASE = `stp AS (
@@ -161,24 +168,24 @@ orf_s AS (
 // CTE STP ที่อ่าน opitemrece/vn_stat/an_stat (ต่อท้าย PREFIX_ITEMS)
 const STP_IP_ITEMS = `adp_s AS (
   SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, ${ADP_TYPE} AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
-         ROUND(op.qty, 2) AS QTY, ROUND(op.unitprice, 2) AS RATE, ROUND(op.sum_price, 2) AS TOTAL
+         ROUND(op.qty, 2) AS QTY, ${ITEM_RATE} AS RATE, ${ITEM_LINE} AS TOTAL
   FROM stp s JOIN opitemrece op ON op.an = s.AN INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN income inc ON inc.income = op.income
   WHERE ${NOT_DRUG}
 ),
 dru_s AS (
-  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ROUND(op.unitprice, 2) AS DRUGPRICE, ROUND(op.sum_price, 2) AS TOTAL,
+  SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ${ITEM_RATE} AS DRUGPRICE, ${ITEM_LINE} AS TOTAL,
          CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS USE_STATUS
   FROM stp s JOIN opitemrece op ON op.an = s.AN ${DRUG_INC} INNER JOIN drugitems d ON d.icode = op.icode
 ),
 cha_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
-         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(op.sum_price), 2) AS AMOUNT
+         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
   FROM stp s JOIN opitemrece op ON op.an = s.AN LEFT JOIN income inc ON inc.income = op.income
   GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
-  HAVING ROUND(SUM(op.sum_price), 2) > 0
+  HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0
 ),
 cht_s AS (
-  SELECT s.HN, s.AN, s.SEQ, ROUND(ans.income, 2) AS TOTAL FROM stp s JOIN an_stat ans ON ans.an = s.AN
+  SELECT s.HN, s.AN, s.SEQ, ROUND(COALESCE((SELECT SUM(${ITEM_LINE}) FROM opitemrece op FORCE INDEX (ix_an) LEFT JOIN income inc ON inc.income = op.income WHERE op.an = s.AN), 0), 2) AS TOTAL FROM stp s
 )`;
 
 // PREFIX_BASE ไม่แตะ opitemrece ; PREFIX_ITEMS = BASE + CTE ที่ scan opitemrece (แฟ้ม ADP DRU CHA CHT รัน statement ละแฟ้ม)
@@ -257,7 +264,7 @@ dx AS (
 ${STP_IP_BASE}`,
 };
 
-// cha/cmp ใช้ข้อความเดียวกันทั้งสองหมวด ; cmp = ยอด CHA ต่อหมวด (A) เทียบผลรวม ADP+DRU ของหมวดนั้น (T, NULL = ไม่มีรายการในหมวด)
+// cha/cmp ใช้ข้อความเดียวกันทั้งสองหมวด ; cmp = ยอด CHA ต่อหมวด (A) เทียบผลรวม จำนวน x ราคา ของ ADP+DRU ในหมวดนั้น (T, NULL = ไม่มีรายการในหมวด)
 const CHA_CMP = `cha AS (
   SELECT HN, AN, SEQ, K, D, CHRGITEM, ROUND(SUM(SP), 2) AS AMOUNT FROM it
   GROUP BY HN, AN, SEQ, K, D, CHRGITEM HAVING ROUND(SUM(SP), 2) > 0
@@ -267,7 +274,7 @@ cmp AS (
          SUM(CASE WHEN AMT > 0 THEN AMT END) AS A,
          CASE WHEN SUM(ITN) > 0 THEN ROUND(SUM(ITM), 2) END AS T
   FROM (SELECT HN, AN, SEQ, K, D, CHRGITEM, ROUND(SUM(SP), 2) AS AMT, SUM(IS_ADP OR IS_DRU) AS ITN,
-               SUM(CASE WHEN IS_ADP OR IS_DRU THEN TOTAL END) AS ITM
+               SUM(CASE WHEN IS_ADP OR IS_DRU THEN QXP END) AS ITM
         FROM it GROUP BY HN, AN, SEQ, K, D, CHRGITEM) g
   GROUP BY HN, AN, SEQ, K, CHRGITEM HAVING SUM(AMT > 0) > 0
 )`;
@@ -282,7 +289,7 @@ it AS (
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
          ${ADP_TYPE} AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
-         op.qty AS QTY, op.sum_price AS SP, ROUND(op.sum_price, 2) AS TOTAL
+         op.qty AS QTY, ${ITEM_LINE} AS SP, ${ITEM_LINE} AS TOTAL, ${ITEM_QXP} AS QXP
   FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e
   LEFT JOIN income inc ON inc.income = op.income
   LEFT JOIN nondrugitems nd ON nd.icode = op.icode
@@ -317,13 +324,16 @@ it AS (
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
          ${ADP_TYPE} AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
-         op.qty AS QTY, op.sum_price AS SP, ROUND(op.sum_price, 2) AS TOTAL
+         op.qty AS QTY, ${ITEM_LINE} AS SP, ${ITEM_LINE} AS TOTAL, ${ITEM_QXP} AS QXP
   FROM a JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.AN
   LEFT JOIN income inc ON inc.income = op.income
   LEFT JOIN nondrugitems nd ON nd.icode = op.icode
   LEFT JOIN drugitems d ON d.icode = op.icode
 ),
-cht AS (SELECT ans.hn AS HN, ans.an AS AN, '' AS SEQ, ans.an AS K, ROUND(ans.income, 2) AS TOTAL FROM a JOIN an_stat ans ON ans.an = a.AN),
+cht AS (
+  SELECT ans.hn AS HN, ans.an AS AN, '' AS SEQ, ans.an AS K, ROUND(COALESCE(x.S, 0), 2) AS TOTAL
+  FROM a JOIN an_stat ans ON ans.an = a.AN LEFT JOIN (SELECT K, SUM(SP) AS S FROM it GROUP BY K) x ON x.K = ans.an
+),
 ${CHA_CMP},
 ${STP_IP_ITEMS}`,
 };
