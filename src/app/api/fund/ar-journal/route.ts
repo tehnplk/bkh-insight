@@ -10,11 +10,11 @@ import { CASH_NAME, journalLines, type JournalGroup, type JournalLine } from "./
 export type ArJournal = { month: string; lines: JournalLine[]; total: number; missing: number };
 
 // แยกตามเครื่องหมายด้วย ให้ยอดบวกและลบของบัญชีเดียวกันออกคนละข้าง (ไม่หักกลบ) ; ตามวันที่ลงบัญชี (entry_date)
-const SQL = `SELECT l.account_code, a.name AS account_name, l.kind, a.revenue_code, a.diff_under_code, a.diff_over_code,
+const SQL = `SELECT l.account_code, a.name AS account_name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code,
   count(*)::int AS n, SUM(l.amount) AS amount
 FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code
 WHERE l.entry_date BETWEEN $1 AND $2
-GROUP BY l.account_code, a.name, l.kind, a.revenue_code, a.diff_under_code, a.diff_over_code, sign(l.amount)`;
+GROUP BY l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, sign(l.amount)`;
 
 export async function GET(request: NextRequest) {
   if (!(await isAuthed())) return unauthorized();

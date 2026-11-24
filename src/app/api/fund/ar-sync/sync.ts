@@ -188,9 +188,9 @@ RETURNING ${LOG_COLS}`,
   return log;
 }
 
-// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวตัดด้วย STM แล้ว (รวมรับบางส่วน)
+// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวรับชำระ/ส่วนต่างแล้ว (STM, เงินรับล่วงหน้า fwf, รับเงิน manual ; รวมรับบางส่วน)
 //   booked = ยอดของ source HOSxP (เท่าคอลัมน์ "ลงสมุดแล้ว"), balance = คงเหลือทางบัญชีทุก source
-const CASE_SQL = `SELECT COALESCE(bool_or(x.source = 'stm'), false) AS settled,
+const CASE_SQL = `SELECT COALESCE(bool_or(x.kind IN ('settle', 'diff')), false) AS settled,
   count(DISTINCT s.ref)::int AS debts,
   COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source), 0) AS booked,
   COALESCE(SUM(x.amount), 0) AS balance
@@ -199,7 +199,7 @@ JOIN ar_ledger x ON x.patient_type = s.patient_type AND x.ref = s.ref
 WHERE s.kind = 'set' AND s.source = $1 AND (s.vn = $2 OR s.an = $2)`;
 type CaseState = { settled: boolean; debts: number; booked: string; balance: string };
 
-/** ตัดด้วย STM แล้ว ดึงใหม่ไม่ได้ (route ตอบ 409) */
+/** ตัดหนี้แล้ว (STM/fwf/รับเงิน) ดึงใหม่ไม่ได้ (route ตอบ 409) */
 export class CaseSettledError extends Error {}
 /** ผลของ POST /api/fund/ar-sync/case (บาท) */
 export type CaseSyncResult = { sync_id: string; counts: SyncCounts; entries: number; booked: number; balance: number };
@@ -222,7 +222,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
   ]);
   return locked(async (tx) => {
     const [before] = await tx<CaseState>(CASE_SQL, [source, id]);
-    if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้ด้วย STM แล้ว ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
+    if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
     if (!before.debts && !debts.length && !cancels.length && !ipd.length) return null;
     const [{ id: syncId }] = await tx<{ id: string }>(
       "INSERT INTO ar_sync_log (mode, range_start, range_end, requested_by, case_ref) VALUES ('case', $1, $1, $2, $3) RETURNING id",

@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, useState, useTransition, type ReactNode } from "react";
-import { formatCount } from "@/lib/number-format";
-import { formatThaiDate } from "@/lib/thai-date";
+import { ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
+import { formatBaht, formatCount } from "@/lib/number-format";
+import { formatThaiDate, todayIso } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson } from "../_components/ui";
 import type { ArJournal } from "@/app/api/fund/ar-journal/route";
 import { CASH_NAME } from "@/app/api/fund/ar-journal/journal";
@@ -10,6 +11,9 @@ import type { AdjustData, DecideResult } from "@/app/api/fund/ar-adjust/route";
 import { MAX_DECIDE_IDS } from "@/app/api/fund/ar-adjust/adjust";
 import type { ArTrialBalance } from "@/app/api/fund/ar-trial-balance/route";
 import type { TbRow } from "@/app/api/fund/ar-trial-balance/trial-balance";
+import type { ReceiptResult } from "@/app/api/fund/ar-ledger/receipt/route";
+import { LEDGER_START } from "@/app/api/fund/ar-sync/ledger";
+import { MAX_RECEIPT_NO } from "@/app/api/fund/ar-settle/settle";
 
 const TH = "px-3 py-2.5 font-medium";
 const TD = "px-3 py-1.5 align-top";
@@ -180,7 +184,7 @@ export function TrialBalance({ month, monthText }: { month: string; monthText: s
               </tfoot>
             </table>
           </div>
-          <p className="text-xs text-muted">บัญชีรายได้และส่วนต่างปิดเข้าผลสะสมปีงบก่อนทุก 1 ต.ค. บัญชีลูกหนี้และเงินฝากยกมาสะสม</p>
+          <p className="text-xs text-muted">บัญชีรายได้และส่วนต่างปิดเข้าผลสะสมปีงบก่อนทุก 1 ต.ค. บัญชีลูกหนี้ เงินฝาก และเงินรับล่วงหน้ายกมาสะสม</p>
         </>
       )}
     </section>
@@ -226,6 +230,63 @@ export function AdjustRequestForm({ patientType, debtRef }: { patientType: "OP" 
         <button type="submit" disabled={pending} className={primary}>{pending ? "กำลังส่ง…" : "ส่งคำขอ"}</button>
       </div>
       {result && <p role={result.ok ? "status" : "alert"} className={result.ok ? "text-success" : "text-danger"}>{result.text}</p>}
+    </form>
+  );
+}
+
+/** บันทึกรับเงินที่ไม่ได้มาจาก STM (บัญชีที่ไม่ตัดด้วย STM) ลงรับชำระ (Dr เงินฝากธนาคาร) และปิดส่วนต่างเมื่อติ๊ก */
+export function CashReceiptForm({ patientType, debtRef, onDone }: { patientType: "OP" | "IP"; debtRef: string; onDone?: () => void }) {
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(todayIso);
+  const [no, setNo] = useState("");
+  const [close, setClose] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ ok: boolean; text: string }>();
+  function submit() {
+    setResult(undefined);
+    startTransition(async () => {
+      const r = await send<ReceiptResult>("/api/fund/ar-ledger/receipt", {
+        method: "POST",
+        body: JSON.stringify({ patient_type: patientType, ref: debtRef, amount: Number(amount), receipt_date: date, receipt_no: no, close }),
+      });
+      if (!r.ok) return setResult({ ok: false, text: r.error });
+      const x = r.body;
+      setResult({
+        ok: true,
+        text: `บันทึกรับเงิน ${formatBaht(x.settle)} บาท${x.diff ? ` · ปิดส่วนต่าง ${formatBaht(x.diff)} บาท` : ""} · คงเหลือ ${formatBaht(x.balance)} บาท${x.shifted ? " · งวดของวันที่นี้ปิดแล้ว ลงวันแรกของงวดที่เปิด" : ""}`,
+      });
+      setAmount("");
+      setNo("");
+      setClose(false);
+      onDone?.();
+    });
+  }
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+      className="mt-4 flex flex-col gap-2 border-t border-line pt-4 text-sm"
+    >
+      <h3 className="font-semibold">บันทึกรับเงิน</h3>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">จำนวนเงิน (บาท)</span>
+          <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${FIELD} w-36 text-right tabular-nums`} />
+        </label>
+        <ThaiDatePicker label="วันที่รับเงิน" value={date} onChange={setDate} min={LEDGER_START} max={todayIso()} stepper={false} />
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">เลขที่ใบเสร็จ</span>
+          <input required maxLength={MAX_RECEIPT_NO} value={no} onChange={(e) => setNo(e.target.value)} className={`${FIELD} w-40`} />
+        </label>
+        <label className="flex h-9 items-center gap-2">
+          <input type="checkbox" checked={close} onChange={(e) => setClose(e.target.checked)} className={checkbox} />
+          ปิดส่วนต่าง
+        </label>
+        <button type="submit" disabled={pending} className={primary}>{pending ? "กำลังบันทึก…" : "บันทึกรับเงิน"}</button>
+      </div>
+      {result && <p role={result.ok ? "status" : "alert"} className={`tabular-nums ${result.ok ? "text-success" : "text-danger"}`}>{result.text}</p>}
     </form>
   );
 }
