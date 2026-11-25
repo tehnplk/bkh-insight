@@ -42,3 +42,17 @@ test("diff ตามเพดาน/สัดส่วน (source HOSxP): ลบ
     ["diff_under", "4301020105.239", "ar", "1102050101.203", 200],
   ]);
 });
+
+test("transfer (ar_transfer ติดลบ = รับ): Dr เงินฝากธนาคาร / Cr บัญชีรายได้ ; ถูกหักคืนกลับข้าง ; บัญชีไม่ขึ้นต้น 4 เป็น ar", () => {
+  const o = { account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" };
+  const lines = journalLines([
+    g("transfer", "-7224700", { ...o, account_code: "4301020105.214" }),
+    g("transfer", "27931.75", { ...o, account_code: "4301020105.214" }),
+    g("transfer", "-100", { ...o, account_code: "1102050101.222", account_name: "OP REFER" }),
+  ]);
+  assert.deepEqual(lines.map((l) => [l.kind, l.dr_type, l.dr_code, l.dr_name, l.cr_type, l.cr_code, l.cr_name, l.amount]), [
+    ["รับเงินโอน", "revenue", "4301020105.214", "รายได้", "cash", null, "เงินฝากธนาคาร", 27931.75],
+    ["รับเงินโอน", "cash", null, "เงินฝากธนาคาร", "ar", "1102050101.222", "OP REFER", 100],
+    ["รับเงินโอน", "cash", null, "เงินฝากธนาคาร", "revenue", "4301020105.214", "รายได้", 7224700],
+  ]);
+});

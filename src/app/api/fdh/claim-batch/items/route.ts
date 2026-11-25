@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
-import { inList } from "@/app/api/fund/_lib/fund";
+import { fdhByVnSql } from "@/app/api/fund/_lib/claim";
 import { latestRepSql } from "@/app/api/fund/_lib/rep";
 import { CLAIM_LABEL, CLAIM_STATUSES, claimText, type BatchItem, type BatchItemRow, type BatchItemsPage, type FdhStatus, type PatientType } from "../claim";
 import { loadClaims, type ClaimCand } from "../load";
@@ -13,10 +13,6 @@ const REP_SQL = { OP: latestRepSql("seq_no", "vn", "OP"), IP: latestRepSql("an",
 const ITEMS_SQL = `SELECT i.patient_type, i.ref, i.hn, i.service_date::text AS service_date, i.scheme, i.subtype, i.hospmain,
   i.cht_total::float8 AS cht_total, i.pdx
 FROM claim_batch_item i WHERE i.batch_id = $1::bigint ORDER BY i.ref`;
-// ผลส่ง FDH ของ HOSxP (OP เท่านั้น, vn UNIQUE)
-const fdhSql = (n: number) => `SELECT vn AS k, fdh_reservation_status AS resv, fdh_reservation_datetime AS resv_at,
-  fdh_claim_status_message AS msg, fdh_claim_status_datetime AS msg_at
-FROM fdh_claim_status WHERE ${inList("vn", n)}`;
 
 const SORTABLE = ["ref", "hn", "service_date", "scheme", "hospmain", "cht_total", "claim"] as const;
 const FILTER_GET = {
@@ -61,7 +57,7 @@ export async function GET(request: NextRequest) {
   let rows: BatchItemRow[];
   try {
     const refs = items.map((i) => i.ref);
-    const fdh = type === "OP" ? await hisQuery<FdhStatus & { k: string }>(fdhSql(refs.length), refs) : [];
+    const fdh = type === "OP" ? await hisQuery<FdhStatus & { k: string }>(fdhByVnSql(refs.length), refs) : [];
     const fdhBy = new Map(fdh.map((f) => [String(f.k), f]));
     // ทุกรายอยู่ในชุดส่งออก: กองทุน/ยอด/ปิดสิทธิมีผลเฉพาะรายที่ชุดถูกยกเลิกและไม่มีหลักฐานอื่น (ใช้ INSCL และ CHT ของแฟ้มแทนข้อมูล HOSxP)
     const cands: ClaimCand[] = items.map((i) => ({
