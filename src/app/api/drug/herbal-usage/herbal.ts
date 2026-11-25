@@ -16,9 +16,11 @@ export type Series = (number | null)[];
 export type ShareSum = { op: number | null; ip: number | null; all: number | null };
 
 export type HerbalReport = {
+  /** เฉพาะรายการที่มีการสั่งใช้ในช่วงที่โหลด */
   items: ItemSum[];
   monthly: { op: Series; ip: Series; share: { op: Series; ip: Series; all: Series } };
-  year: { amt: number; drugAmt: number; rows: number; used: number; share: ShareSum };
+  /** listed/inactive = รายการที่ HOSxP ระบุเป็นยาสมุนไพรทั้งหมด (รวมที่ไม่มีการใช้) */
+  year: { amt: number; drugAmt: number; rows: number; used: number; listed: number; inactive: number; share: ShareSum };
 };
 
 /** response ของ GET /api/drug/herbal-usage?fy=<ปีงบ พ.ศ.> */
@@ -86,18 +88,20 @@ export function buildReport(months: string[], loaded: number, items: HerbalItem[
     const a = round2(s.op.amt + s.ip.amt);
     return { ...it, op: s.op, ip: s.ip, amt: a, share: pctOf(a, amt) };
   });
-  const used = (x: ItemSum) => x.op.rows + x.ip.rows > 0;
-  // ใช้แล้วเรียงตามมูลค่า รายการที่ไม่มีการใช้ไว้ท้าย
-  list.sort((a, b) => Number(used(b)) - Number(used(a)) || b.amt - a.amt || a.icode.localeCompare(b.icode));
+  // รายการที่ไม่มีการสั่งใช้เลยไม่แสดง (ทั้งหน้าและ Excel)
+  const used = list.filter((x) => x.op.rows + x.ip.rows > 0);
+  used.sort((a, b) => b.amt - a.amt || a.icode.localeCompare(b.icode));
 
   return {
-    items: list,
+    items: used,
     monthly: { op, ip, share: { op: share(op, drugVal.OP), ip: share(ip, drugVal.IP), all: share(add(op, ip), add(drugVal.OP, drugVal.IP)) } },
     year: {
       amt,
       drugAmt: round2(drugOp + drugIp),
-      rows: list.reduce((s, x) => s + x.op.rows + x.ip.rows, 0),
-      used: list.filter(used).length,
+      rows: used.reduce((s, x) => s + x.op.rows + x.ip.rows, 0),
+      used: used.length,
+      listed: items.length,
+      inactive: items.filter((x) => !x.active).length,
       share: { op: pctOf(yearOp, drugOp), ip: pctOf(yearIp, drugIp), all: pctOf(amt, drugOp + drugIp) },
     },
   };
