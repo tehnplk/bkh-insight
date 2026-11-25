@@ -34,7 +34,7 @@ export type StmLine = {
 export type DebtRow = Omit<RefState, "balance" | "cancelled"> & { settles_by_stm: boolean; balance: string | number };
 /** หนี้ใน REP งวดนี้ที่ STM ไม่จ่าย (SQL S4) */
 export type MissingRow = { tran_id: string; rep_no: string; hn: string | null; vn?: string | null; an?: string | null; ref: string; account_code: string | null; balance: string | number };
-export type SettleEntry = Omit<Entry, "source" | "kind"> & { source: "stm"; kind: "settle" | "diff"; stm_row_id: string };
+export type SettleEntry = Omit<Entry, "source" | "kind" | "hospmain_type"> & { source: "stm"; kind: "settle" | "diff"; stm_row_id: string };
 
 /** ก ตรงยอด / ข มีส่วนต่าง / ค ไม่พบหนี้ที่ตัดได้ / ง REP งวดนี้ STM ไม่จ่าย / ตัดแล้ว */
 export const SETTLE_GROUPS = ["match", "diff", "none", "missing", "done"] as const;

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
-import { formatCount } from "@/lib/number-format";
+import { formatBaht, formatCount } from "@/lib/number-format";
 import { THAI_MONTHS_SHORT, formatThaiDate, todayIso } from "@/lib/thai-date";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson } from "@/app/(app)/fund/_components/ui";
-import { UC_OP_ACCOUNTS, ledgerMonths, type PatientType } from "@/app/api/fund/ar-sync/ledger";
-import type { ArAccount, ArAccountsData, Unassigned } from "@/app/api/admin/ar-accounts/route";
-import type { SyncLog } from "@/app/api/fund/ar-sync/sync";
+import { LOCS, LOC_LABEL, ledgerMonths, type Loc, type PatientType } from "@/app/api/fund/ar-sync/ledger";
+import type { ArAccount, ArAccountsData, Edited, RuleRow, Unassigned } from "@/app/api/admin/ar-accounts/route";
+import type { RecomputeResult, SyncLog } from "@/app/api/fund/ar-sync/sync";
 
 const SELECT_CLASS = `h-9 min-w-0 rounded-md border border-line bg-surface pr-8 pl-3 ${focusRing}`;
 const TH = "px-3 py-2.5 font-medium";
@@ -112,12 +112,13 @@ function Backfill() {
   );
 }
 
-/* ---------- mapping ---------- */
+/* ---------- กติกาบัญชี ---------- */
 
-type Draft = { by: "hipdata_code" | "pttype"; value: string; patient_type: PatientType; account_code: string };
-const EMPTY: Draft = { by: "hipdata_code", value: "", patient_type: "OP", account_code: "" };
-const ACCOUNT_ID = "ar-map-account";
-const UC_OP_REASON = "HOSxP ไม่ได้บันทึกหน่วยบริการประจำหรือจังหวัด จึงแยกบัญชีตามหน่วยบริการประจำไม่ได้";
+type RuleDraft = { right_code: string; patient_type: PatientType; loc: Loc; account_code: string; cap: string; debt_pct: string };
+const EMPTY: RuleDraft = { right_code: "", patient_type: "OP", loc: "any", account_code: "", cap: "", debt_pct: "" };
+const ACCOUNT_ID = "ar-rule-account";
+const RULE_FORM_ID = "ar-rule-form";
+const ptSelectId = (pttype: string) => `ar-pttype-${pttype}`;
 
 /**
  * ช่องบัญชีแบบพิมพ์ค้น (ARIA combobox) ค้นแบบ substring ทั้งรหัสและชื่อ
@@ -203,62 +204,45 @@ function AccountPicker({ accounts, value, invalid, onChange }: { accounts: ArAcc
   );
 }
 
-function MapForm({ data, draft, setDraft, onSaved }: { data: ArAccountsData; draft: Draft; setDraft: (d: Draft) => void; onSaved: () => void }) {
+function RuleForm({ data, draft, setDraft, onSaved }: { data: ArAccountsData; draft: RuleDraft; setDraft: (d: RuleDraft) => void; onSaved: () => void }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string>();
-  const [saved, setSaved] = useState<{ ok: boolean; text: string }>();
-  const options = draft.by === "pttype" ? data.pttypes.map((p) => ({ code: p.code, name: `${p.code} ${p.name}` })) : data.funds.map((f) => ({ code: f.code, name: `${f.code} ${f.name}` }));
-  const ucOp = draft.by === "hipdata_code" && draft.value === "UCS" && draft.patient_type === "OP";
-  const ucOpPttype = draft.by === "pttype" && draft.patient_type === "OP" && data.pttypes.find((p) => p.code === draft.value)?.fund === "UCS";
-
   const badAccount = draft.account_code !== "" && !data.accounts.some((a) => a.code === draft.account_code);
 
   function save() {
     setError(undefined);
-    setSaved(undefined);
     if (badAccount) {
       setError(`ไม่พบบัญชี ${draft.account_code} ในผังบัญชี เลือกจากรายการ`);
       return document.getElementById(ACCOUNT_ID)?.focus();
     }
-    const existed = data.maps.some((m) => (draft.by === "pttype" ? m.pttype : m.pttype == null && m.hipdata_code) === draft.value && m.patient_type === draft.patient_type);
     startTransition(async () => {
-      const r = await send("/api/admin/ar-accounts", {
-        method: "POST",
-        body: JSON.stringify({ [draft.by]: draft.value, patient_type: draft.patient_type, account_code: draft.account_code }),
-      });
+      const r = await send("/api/admin/ar-accounts", { method: "POST", body: JSON.stringify(draft) });
       if (!r.ok) return setError(r.error);
       setDraft(EMPTY);
-      // recompute ใส่บัญชีเฉพาะรายการที่ account_code ยังเป็น NULL จึงทำต่อจากบันทึกได้เลย ผู้ใช้ไม่ต้องจำกดเอง
-      const c = await send("/api/admin/ar-accounts/recompute", { method: "POST" });
-      setSaved(
-        c.ok
-          ? { ok: true, text: `บันทึกแล้ว · ใส่บัญชีให้รายการที่ยังไม่มีบัญชี ${formatCount((c.body as { updated: number }).updated)} รายการ${existed ? " (รายการที่มีบัญชีแล้วคงบัญชีเดิม)" : ""}` }
-          : { ok: false, text: `บันทึกแล้ว แต่ใส่บัญชีให้รายการเดิมไม่สำเร็จ: ${c.error} · กด คำนวณบัญชีใหม่` },
-      );
       onSaved();
     });
   }
+  const amountInput = (k: "cap" | "debt_pct", label: string) => (
+    <label className="flex flex-col gap-1">
+      <span className="text-muted">{label}</span>
+      <input inputMode="decimal" value={draft[k]} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} className={`h-9 w-28 rounded-md border border-line bg-surface px-3 text-right tabular-nums ${focusRing}`} />
+    </label>
+  );
 
   return (
     <form
+      id={RULE_FORM_ID}
       onSubmit={(e) => {
         e.preventDefault();
         save();
       }}
       className="flex flex-wrap items-end gap-3 text-sm"
     >
-      <label className="flex flex-col gap-1">
-        <span className="text-muted">จับคู่ตาม</span>
-        <select value={draft.by} onChange={(e) => setDraft({ ...draft, by: e.target.value as Draft["by"], value: "" })} className={SELECT_CLASS}>
-          <option value="hipdata_code">กองทุน</option>
-          <option value="pttype">สิทธิ (pttype)</option>
-        </select>
-      </label>
       <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-muted">{draft.by === "pttype" ? "สิทธิ" : "กองทุน"}</span>
-        <select required value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} className={`${SELECT_CLASS} max-w-72`}>
+        <span className="text-muted">กลุ่มสิทธิ</span>
+        <select required value={draft.right_code} onChange={(e) => setDraft({ ...draft, right_code: e.target.value })} className={`${SELECT_CLASS} max-w-72`}>
           <option value="" disabled>เลือก</option>
-          {options.map((o) => <option key={o.code} value={o.code}>{o.name}</option>)}
+          {data.rights.filter((r) => r.books_ar).map((r) => <option key={r.code} value={r.code}>{r.code} {r.name}</option>)}
         </select>
       </label>
       <label className="flex flex-col gap-1">
@@ -268,103 +252,88 @@ function MapForm({ data, draft, setDraft, onSaved }: { data: ArAccountsData; dra
           <option value="IP">IP</option>
         </select>
       </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-muted">หน่วยบริการประจำ</span>
+        <select value={draft.loc} onChange={(e) => setDraft({ ...draft, loc: e.target.value as Loc })} className={SELECT_CLASS}>
+          {LOCS.map((l) => <option key={l} value={l}>{LOC_LABEL[l]}</option>)}
+        </select>
+      </label>
       <label className="flex min-w-0 flex-col gap-1">
         <span className="text-muted">บัญชี</span>
         <AccountPicker accounts={data.accounts} value={draft.account_code} invalid={badAccount} onChange={(account_code) => setDraft({ ...draft, account_code })} />
       </label>
-      <button type="submit" disabled={pending || ucOp} className={primary}>
+      {amountInput("cap", "เพดานลูกหนี้ (บาท)")}
+      {amountInput("debt_pct", "ลูกหนี้ (%)")}
+      <button type="submit" disabled={pending} className={primary}>
         {pending ? "กำลังบันทึก…" : "บันทึก"}
       </button>
-      {ucOp && <p className="w-full text-warning">UCS OP แยกบัญชีตามหน่วยบริการประจำ ถ้าต้องการกำหนดเองให้จับคู่ราย pttype</p>}
-      {ucOpPttype && <p className="w-full text-xs text-muted">กติการาย pttype ใช้ก่อนกติกาอื่น ทุก visit ของสิทธิ {draft.value} จะลงบัญชีนี้ รวมรายที่มีหน่วยบริการประจำนอก CUP</p>}
       {error && <p role="alert" className="w-full text-danger">{error}</p>}
-      {saved && <p role={saved.ok ? "status" : "alert"} className={`w-full ${saved.ok ? "text-success" : "text-danger"}`}>{saved.text}</p>}
     </form>
   );
 }
 
-function Maps({ data, reload }: { data: ArAccountsData; reload: () => void }) {
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+const edited = (e: Edited) => (e.updated_by === "migration" ? "ค่าเริ่มต้นของระบบ" : `${formatThaiDate(e.updated_at)} · ${e.updated_by ?? "–"}`);
+
+function Rules({ data, reload }: { data: ArAccountsData; reload: () => void }) {
+  const [draft, setDraft] = useState<RuleDraft>(EMPTY);
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
   const accountName = new Map(data.accounts.map((a) => [a.code, a.name]));
-  const fundName = new Map(data.funds.map((f) => [f.code, f.name]));
-  const pttypeName = new Map(data.pttypes.map((p) => [p.code, p.name]));
-  // โฟกัสช่องบัญชีให้ฟอร์มเลื่อนเข้าจอ (ปุ่มจับคู่อยู่ใต้ตาราง)
-  const pick = (d: Draft) => {
+  const rightName = new Map(data.rights.map((r) => [r.code, r.name]));
+  const noAr = data.rights.filter((r) => !r.books_ar);
+
+  function remove(r: RuleRow) {
+    setError(undefined);
+    startTransition(async () => {
+      const res = await send(`/api/admin/ar-accounts?${new URLSearchParams({ right_code: r.right_code, patient_type: r.patient_type, loc: r.loc })}`, { method: "DELETE" });
+      if (!res.ok) setError(res.error);
+      reload();
+    });
+  }
+  const pick = (d: RuleDraft) => {
     setDraft(d);
     document.getElementById(ACCOUNT_ID)?.focus();
   };
 
-  function remove(id: string) {
-    setError(undefined);
-    startTransition(async () => {
-      const r = await send(`/api/admin/ar-accounts?${new URLSearchParams({ id })}`, { method: "DELETE" });
-      if (!r.ok) setError(r.error);
-      reload();
-    });
-  }
-  const account = (code: string) => (
-    <>
-      <span className="whitespace-nowrap tabular-nums">{code}</span> <span className="text-muted">{accountName.get(code)}</span>
-    </>
-  );
-
   return (
-    <Section title="การจับคู่บัญชี">
-      <MapForm data={data} draft={draft} setDraft={setDraft} onSaved={reload} />
+    <Section title="บัญชีตามกลุ่มสิทธิ">
+      <RuleForm data={data} draft={draft} setDraft={setDraft} onSaved={reload} />
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <Table
         head={
           <>
-            <th className={TH}>กองทุน / สิทธิ</th>
+            <th className={TH}>กลุ่มสิทธิ</th>
             <th className={TH}>ประเภท</th>
+            <th className={TH}>หน่วยบริการประจำ</th>
             <th className={TH}>บัญชี</th>
+            <th className={TH}>ลูกหนี้</th>
             <th className={TH}>แก้ไขล่าสุด</th>
             <th className={TH}><span className="sr-only">จัดการ</span></th>
           </>
         }
       >
-        <tr className="border-t border-line">
-          <td className={TD}>UCS <span className="text-muted">{fundName.get("UCS")}</span></td>
-          <td className={TD}>OP</td>
-          <td className={TD}>
-            <ul className="flex flex-col gap-0.5">
-              <li>ใน CUP: {account(UC_OP_ACCOUNTS.cup)}</li>
-              <li>นอกสังกัด สธ.: {account(UC_OP_ACCOUNTS.nonMoph)}</li>
-              <li>ในจังหวัด: {account(UC_OP_ACCOUNTS.province)}</li>
-              <li>ต่างจังหวัด: {account(UC_OP_ACCOUNTS.other)}</li>
-            </ul>
-          </td>
-          <td className={`${TD} text-muted`}>ตามหน่วยบริการประจำ</td>
-          <td />
-        </tr>
-        {data.maps.map((m) => {
-          const label = m.pttype ? `สิทธิ ${m.pttype}` : (m.hipdata_code ?? "");
+        {data.rules.map((r) => {
+          const label = `${r.right_code} ${r.patient_type} ${LOC_LABEL[r.loc]}`;
           return (
-            <tr key={m.id} className="border-t border-line hover:bg-surface-sunken">
-              <td className={TD}>
-                {m.pttype ? (
-                  <>สิทธิ <span className="tabular-nums">{m.pttype}</span> <span className="text-muted">{pttypeName.get(m.pttype)}</span></>
-                ) : (
-                  <>{m.hipdata_code} <span className="text-muted">{fundName.get(m.hipdata_code ?? "")}</span></>
-                )}
+            <tr key={`${r.right_code}-${r.patient_type}-${r.loc}`} className="border-t border-line hover:bg-surface-sunken">
+              <td className={TD}>{r.right_code} <span className="text-muted">{rightName.get(r.right_code)}</span></td>
+              <td className={TD}>{r.patient_type}</td>
+              <td className={TD}>{LOC_LABEL[r.loc]}</td>
+              <td className={TD}><span className="whitespace-nowrap tabular-nums">{r.account_code}</span> <span className="text-muted">{accountName.get(r.account_code)}</span></td>
+              <td className={`${TD} whitespace-nowrap tabular-nums`}>
+                {r.cap != null ? `ไม่เกิน ${formatBaht(Number(r.cap))} บาท` : r.debt_pct != null ? `${Number(r.debt_pct)}% ของค่ารักษา` : <span className="text-muted">เต็มจำนวน</span>}
               </td>
-              <td className={TD}>{m.patient_type}</td>
-              <td className={TD}>{account(m.account_code)}</td>
-              <td className={`${TD} whitespace-nowrap text-muted tabular-nums`}>
-                {m.updated_by === "migration" ? "ค่าเริ่มต้นของระบบ" : `${formatThaiDate(m.updated_at)} · ${m.updated_by ?? "–"}`}
-              </td>
+              <td className={`${TD} whitespace-nowrap text-muted tabular-nums`}>{edited(r)}</td>
               <td className={`${TD} text-right whitespace-nowrap`}>
                 <button
                   type="button"
-                  aria-label={`แก้ไข ${label} ${m.patient_type}`}
-                  onClick={() => pick({ by: m.pttype ? "pttype" : "hipdata_code", value: m.pttype ?? m.hipdata_code ?? "", patient_type: m.patient_type, account_code: m.account_code })}
+                  aria-label={`แก้ไข ${label}`}
+                  onClick={() => pick({ right_code: r.right_code, patient_type: r.patient_type, loc: r.loc, account_code: r.account_code, cap: r.cap == null ? "" : String(Number(r.cap)), debt_pct: r.debt_pct == null ? "" : String(Number(r.debt_pct)) })}
                   className={`${btn} h-7 px-2.5`}
                 >
                   แก้ไข
                 </button>{" "}
-                <button type="button" disabled={pending} aria-label={`ลบ ${label} ${m.patient_type}`} onClick={() => remove(m.id)} className={`${btn} h-7 px-2.5 text-danger disabled:opacity-50`}>
+                <button type="button" disabled={pending} aria-label={`ลบ ${label}`} onClick={() => remove(r)} className={`${btn} h-7 px-2.5 text-danger disabled:opacity-50`}>
                   ลบ
                 </button>
               </td>
@@ -372,54 +341,96 @@ function Maps({ data, reload }: { data: ArAccountsData; reload: () => void }) {
           );
         })}
       </Table>
-      <UnassignedList data={data} reload={reload} onPick={pick} />
+      {noAr.length > 0 && <p className="text-sm text-muted">ไม่ตั้งลูกหนี้: {noAr.map((r) => `${r.code} ${r.name}`).join(", ")}</p>}
+      <UnassignedList data={data} onPick={pick} />
     </Section>
   );
 }
 
-/* ---------- unassigned ---------- */
+/* ---------- pttype -> กลุ่มสิทธิ ---------- */
 
-/** สาเหตุที่รายการยังไม่มีบัญชี และฟอร์มที่ปุ่ม "จับคู่" เติมให้ (ไม่มี pick = จับคู่ไม่ได้) ลำดับเดียวกับ accountFor */
-function fixFor(u: Unassigned, data: ArAccountsData): { reason: string; fix: string; pick?: Draft } {
-  const draft = (by: Draft["by"], value: string): Draft => ({ by, value, patient_type: u.patient_type, account_code: "" });
-  const ucOp = u.hipdata_code === "UCS" && u.patient_type === "OP";
-  const pt = u.pttype && data.pttypes.some((p) => p.code === u.pttype) ? u.pttype : null;
-  const ruled = data.maps.some(
-    (m) => m.patient_type === u.patient_type && ((u.pttype != null && m.pttype === u.pttype) || (!ucOp && m.pttype == null && m.hipdata_code === u.hipdata_code)),
-  );
-  if (ruled) return { reason: "มีกติกาแล้ว แต่รายการนี้ยังไม่ได้คำนวณบัญชี", fix: "กด คำนวณบัญชีใหม่" };
-  if (ucOp) return pt ? { reason: UC_OP_REASON, fix: "จับคู่ราย pttype", pick: draft("pttype", pt) } : { reason: UC_OP_REASON, fix: "ไม่มีรหัสสิทธิ จึงจับคู่ราย pttype ไม่ได้" };
-  if (u.hipdata_code && data.funds.some((f) => f.code === u.hipdata_code))
-    return { reason: `กองทุน ${u.hipdata_code} ยังไม่ได้กำหนดบัญชี`, fix: "จับคู่ตามกองทุน", pick: draft("hipdata_code", u.hipdata_code) };
-  const reason = u.hipdata_code ? `ไม่รู้จักกองทุน ${u.hipdata_code}` : "สิทธินี้ไม่ได้ระบุกองทุน";
-  return pt ? { reason, fix: "จับคู่ราย pttype", pick: draft("pttype", pt) } : { reason, fix: "ไม่พบรหัสสิทธิใน HOSxP จึงจับคู่ไม่ได้" };
-}
-
-function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload: () => void; onPick: (d: Draft) => void }) {
+function Pttypes({ data, reload }: { data: ArAccountsData; reload: () => void }) {
+  const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ ok: boolean; text: string }>();
-  const pttypeName = new Map(data.pttypes.map((p) => [p.code, p.name]));
+  const [unmappedOnly, setUnmappedOnly] = useState(false);
+  const mapped = new Map(data.rightPttypes.map((m) => [m.pttype, m]));
+  const rows = unmappedOnly ? data.pttypes.filter((p) => !mapped.has(p.code)) : data.pttypes;
 
-  function recompute() {
-    setResult(undefined);
+  function save(pttype: string, right_code: string) {
+    setError(undefined);
     startTransition(async () => {
-      const r = await send("/api/admin/ar-accounts/recompute", { method: "POST" });
-      setResult(r.ok ? { ok: true, text: `ใส่บัญชีแล้ว ${formatCount((r.body as { updated: number }).updated)} รายการ` } : { ok: false, text: r.error });
+      const r = await send("/api/admin/ar-accounts", { method: "POST", body: JSON.stringify({ pttype, right_code: right_code || null }) });
+      if (!r.ok) setError(r.error);
       reload();
     });
   }
 
   return (
+    <Section
+      title="กลุ่มสิทธิของ pttype"
+      aside={
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={unmappedOnly} onChange={(e) => setUnmappedOnly(e.target.checked)} className="size-4 accent-accent" />
+          เฉพาะที่ยังไม่จับคู่
+        </label>
+      }
+    >
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <Table
+        head={
+          <>
+            <th className={TH}>pttype</th>
+            <th className={TH}>กองทุน</th>
+            <th className={TH}>กลุ่มสิทธิ</th>
+            <th className={TH}>แก้ไขล่าสุด</th>
+          </>
+        }
+      >
+        {rows.map((p) => {
+          const m = mapped.get(p.code);
+          return (
+            <tr key={p.code} className="border-t border-line hover:bg-surface-sunken">
+              <td className={TD}><span className="tabular-nums">{p.code}</span> <span className="text-muted">{p.name}</span></td>
+              <td className={TD}>{p.fund}</td>
+              <td className={TD}>
+                <select
+                  id={ptSelectId(p.code)}
+                  aria-label={`กลุ่มสิทธิของ pttype ${p.code}`}
+                  disabled={pending}
+                  value={m?.right_code ?? ""}
+                  onChange={(e) => save(p.code, e.target.value)}
+                  className={`${SELECT_CLASS} h-8 max-w-72 ${m ? "" : "text-warning"}`}
+                >
+                  <option value="">ยังไม่จับคู่</option>
+                  {data.rights.map((r) => <option key={r.code} value={r.code}>{r.code} {r.name}</option>)}
+                </select>
+              </td>
+              <td className={`${TD} whitespace-nowrap text-muted tabular-nums`}>{m ? edited(m) : "–"}</td>
+            </tr>
+          );
+        })}
+      </Table>
+    </Section>
+  );
+}
+
+/* ---------- ยังไม่มีบัญชี ---------- */
+
+/** สาเหตุที่รายการยังไม่มีบัญชี ลำดับเดียวกับ resolve ; pick = เติมฟอร์มกติกา, pttype = ไปที่ช่องเลือกกลุ่มสิทธิ */
+function fixFor(u: Unassigned, data: ArAccountsData): { reason: string; fix: string; pick?: RuleDraft; pttype?: string } {
+  const right = u.pttype ? data.rightPttypes.find((m) => m.pttype === u.pttype)?.right_code : undefined;
+  if (!u.pttype || !data.pttypes.some((p) => p.code === u.pttype)) return { reason: "ไม่พบรหัสสิทธิใน HOSxP", fix: "จับคู่ไม่ได้" };
+  if (!right) return { reason: `pttype ${u.pttype} ยังไม่ได้จับคู่กลุ่มสิทธิ`, fix: "เลือกกลุ่มสิทธิในตาราง pttype", pttype: u.pttype };
+  if (!data.rules.some((r) => r.right_code === right && r.patient_type === u.patient_type))
+    return { reason: `กลุ่มสิทธิ ${right} ยังไม่มีบัญชี ${u.patient_type}`, fix: "เพิ่มกติกา", pick: { ...EMPTY, right_code: right, patient_type: u.patient_type } };
+  return { reason: `กลุ่มสิทธิ ${right} มีกติกาแล้ว แต่ยังไม่ครอบคลุมรายการนี้หรือยังไม่ได้คำนวณ`, fix: "เพิ่มกติกาของหน่วยบริการประจำ หรือกด คำนวณบัญชีใหม่", pick: { ...EMPTY, right_code: right, patient_type: u.patient_type } };
+}
+
+function UnassignedList({ data, onPick }: { data: ArAccountsData; onPick: (d: RuleDraft) => void }) {
+  const pttypeName = new Map(data.pttypes.map((p) => [p.code, p.name]));
+  return (
     <div className="mt-4 flex flex-col gap-3">
-      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold">ยังไม่มีบัญชี</h3>
-        <div className="flex items-center gap-3 text-sm">
-          {result && <span role={result.ok ? "status" : "alert"} className={result.ok ? "text-success" : "text-danger"}>{result.text}</span>}
-          <button type="button" onClick={recompute} disabled={pending} className={`${btn} disabled:cursor-wait disabled:opacity-60`}>
-            {pending ? "กำลังคำนวณ…" : "คำนวณบัญชีใหม่"}
-          </button>
-        </div>
-      </div>
+      <h3 className="text-base font-semibold">ยังไม่มีบัญชี</h3>
       {data.unassigned.length === 0 ? (
         <p className="text-sm text-muted">ทุกรายการในสมุดลูกหนี้มีบัญชีแล้ว</p>
       ) : (
@@ -432,12 +443,12 @@ function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload
               <th className={`${TH} ${num}`}>จำนวนราย</th>
               <th className={`${TH} ${num}`}>คงเหลือ (บาท)</th>
               <th className={TH}>สาเหตุ</th>
-              <th className={TH}><span className="sr-only">จับคู่</span></th>
+              <th className={TH}><span className="sr-only">แก้ไข</span></th>
             </>
           }
         >
           {data.unassigned.map((u) => {
-            const { reason, fix, pick } = fixFor(u, data);
+            const { reason, fix, pick, pttype } = fixFor(u, data);
             return (
               <tr key={`${u.pttype}-${u.hipdata_code}-${u.patient_type}`} className="border-t border-line hover:bg-surface-sunken">
                 <td className={TD}>
@@ -452,11 +463,11 @@ function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload
                   <span className="block text-muted">{fix}</span>
                 </td>
                 <td className={`${TD} text-right whitespace-nowrap`}>
-                  {pick && (
-                    <button type="button" onClick={() => onPick(pick)} aria-label={`จับคู่บัญชี${pick.by === "pttype" ? "ราย pttype" : "ตามกองทุน"} ${pick.value} ${u.patient_type}`} className={`${btn} h-7 px-2.5`}>
-                      จับคู่
-                    </button>
-                  )}
+                  {pttype ? (
+                    <button type="button" onClick={() => document.getElementById(ptSelectId(pttype))?.focus()} aria-label={`จับคู่กลุ่มสิทธิของ pttype ${pttype}`} className={`${btn} h-7 px-2.5`}>จับคู่</button>
+                  ) : pick ? (
+                    <button type="button" onClick={() => onPick(pick)} aria-label={`เพิ่มกติกาบัญชี ${pick.right_code} ${u.patient_type}`} className={`${btn} h-7 px-2.5`}>เพิ่มกติกา</button>
+                  ) : null}
                 </td>
               </tr>
             );
@@ -464,6 +475,101 @@ function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload
         </Table>
       )}
     </div>
+  );
+}
+
+/* ---------- คำนวณบัญชีใหม่: ดูผลก่อน แล้วยืนยัน ---------- */
+
+function Recompute({ reload }: { reload: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const [preview, setPreview] = useState<RecomputeResult>();
+  const [result, setResult] = useState<{ ok: boolean; text: string }>();
+
+  const run = (apply: boolean) => {
+    setResult(undefined);
+    startTransition(async () => {
+      const r = await send("/api/admin/ar-accounts/recompute", { method: "POST", body: JSON.stringify({ apply }) });
+      if (!r.ok) return setResult({ ok: false, text: r.error });
+      const body = r.body as RecomputeResult;
+      if (!apply) return setPreview(body);
+      setPreview(undefined);
+      setResult({ ok: true, text: `ปรับสมุดแล้ว · ย้ายบัญชี ${formatCount(body.rows_moved)} แถว · ลงรายการใหม่ ${formatCount(body.rows_inserted)} แถว` });
+      reload();
+    });
+  };
+
+  // รวมทุกเดือน แสดงเฉพาะคู่ที่บัญชีเปลี่ยน
+  const sum = <T, K extends string>(rows: T[], key: (r: T) => K, n: (r: T) => number, amt: (r: T) => number) => {
+    const m = new Map<K, { row: T; n: number; amount: number }>();
+    for (const r of rows) {
+      const g = m.get(key(r)) ?? { row: r, n: 0, amount: 0 };
+      m.set(key(r), { row: r, n: g.n + n(r), amount: g.amount + amt(r) });
+    }
+    return [...m.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  };
+  const moves = preview ? sum(preview.moves.filter((m) => m.from !== m.to), (m) => `${m.from}>${m.to}`, (m) => m.refs, (m) => m.amount) : [];
+  const diffs = preview ? sum(preview.diffs, (d) => `${d.account}`, (d) => d.n, (d) => d.amount) : [];
+  const code = (c: string | null) => (c ? <span className="whitespace-nowrap tabular-nums">{c}</span> : <span className="text-warning">ไม่ระบุบัญชี</span>);
+  const changes = moves.length + diffs.length + (preview?.reversed.refs ?? 0) + (preview?.coverage_updated ?? 0);
+
+  return (
+    <Section
+      title="คำนวณบัญชีใหม่"
+      aside={
+        <div className="flex items-center gap-3 text-sm">
+          {result && <span role={result.ok ? "status" : "alert"} className={result.ok ? "text-success" : "text-danger"}>{result.text}</span>}
+          <button type="button" onClick={() => run(false)} disabled={pending} className={`${btn} disabled:cursor-wait disabled:opacity-60`}>
+            {pending && !preview ? "กำลังคำนวณ…" : "ดูผลก่อนปรับ"}
+          </button>
+        </div>
+      }
+    >
+      {preview && (
+        <div className="flex flex-col gap-3 text-sm" aria-live="polite">
+          <ul className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
+            <li>ย้ายบัญชี {formatCount(moves.reduce((s, m) => s + m.n, 0))} ราย</li>
+            <li>ส่วนต่างตามเพดาน/สัดส่วน {formatCount(diffs.reduce((s, d) => s + d.n, 0))} รายการ</li>
+            <li>กลับรายการสิทธิที่ไม่ตั้งลูกหนี้ {formatCount(preview.reversed.refs)} ราย · <Money value={preview.reversed.amount} /> บาท</li>
+            <li>ไม่มีกติกา คงบัญชีเดิม {formatCount(preview.no_rule.refs)} ราย</li>
+            <li>ตัดหนี้แล้ว ไม่ลงส่วนต่าง {formatCount(preview.settled_skipped)} ราย</li>
+            <li>ข้อมูลสิทธิเปลี่ยนตาม HOSxP {formatCount(preview.coverage_updated)} ราย</li>
+          </ul>
+          {moves.length > 0 && (
+            <Table head={<><th className={TH}>บัญชีเดิม</th><th className={TH}>บัญชีใหม่</th><th className={`${TH} ${num}`}>จำนวนราย</th><th className={`${TH} ${num}`}>ค่ารักษา (บาท)</th></>}>
+              {moves.map(({ row, n, amount }) => (
+                <tr key={`${row.from}>${row.to}`} className="border-t border-line">
+                  <td className={TD}>{code(row.from)}</td>
+                  <td className={TD}>{code(row.to)}</td>
+                  <td className={`${TD} ${num}`}>{formatCount(n)}</td>
+                  <td className={`${TD} ${num}`}><Money value={amount} /></td>
+                </tr>
+              ))}
+            </Table>
+          )}
+          {diffs.length > 0 && (
+            <Table head={<><th className={TH}>บัญชี (ส่วนต่างตามเพดาน/สัดส่วน)</th><th className={`${TH} ${num}`}>จำนวนรายการ</th><th className={`${TH} ${num}`}>ส่วนต่าง (บาท)</th></>}>
+              {diffs.map(({ row, n, amount }) => (
+                <tr key={`${row.account}`} className="border-t border-line">
+                  <td className={TD}>{code(row.account)}</td>
+                  <td className={`${TD} ${num}`}>{formatCount(n)}</td>
+                  <td className={`${TD} ${num}`}><Money value={amount} /></td>
+                </tr>
+              ))}
+            </Table>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {changes === 0 ? (
+              <span className="text-muted">ไม่มีรายการที่ต้องปรับ</span>
+            ) : (
+              <button type="button" onClick={() => run(true)} disabled={pending} className={primary}>
+                {pending ? "กำลังปรับสมุด…" : "ยืนยันปรับสมุดลูกหนี้"}
+              </button>
+            )}
+            <button type="button" onClick={() => setPreview(undefined)} disabled={pending} className={btn}>ปิด</button>
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -583,7 +689,9 @@ export function ArAccounts() {
         <Skeleton rows={6} />
       ) : (
         <>
-          <Maps data={shown} reload={retry} />
+          <Recompute reload={retry} />
+          <Rules data={shown} reload={retry} />
+          <Pttypes data={shown} reload={retry} />
           <AccountSettings data={shown} reload={retry} />
         </>
       )}

@@ -33,3 +33,12 @@ test("settle ของ source fwf ลง Dr เงินรับล่วงห
     ["ส่วนต่าง", "diff_under", "4301020106.505", "1102050101.501", 40],
   ]);
 });
+
+test("diff ตามเพดาน/สัดส่วน (source HOSxP): ลบ Dr diff_under ; บวก (ยกเลิก) กลับข้างในบัญชีเดียวกัน ไม่ใช่ diff_over", () => {
+  const o = { account_code: "1102050101.203", revenue_code: "4301020105.203", diff_under_code: "4301020105.239", diff_over_code: "4301020105.240", source: "rcpt_debt" };
+  const lines = journalLines([g("diff", "-200", o), g("diff", "200", o)]);
+  assert.deepEqual(lines.map((l) => [l.dr_type, l.dr_code, l.cr_type, l.cr_code, l.amount]), [
+    ["ar", "1102050101.203", "diff_under", "4301020105.239", 200],
+    ["diff_under", "4301020105.239", "ar", "1102050101.203", 200],
+  ]);
+});
