@@ -15,7 +15,7 @@ import { loadSubfunds, subfundText } from "@/app/api/fund/_lib/subfund";
 import { subfundFilterLabel, subfundFilterValues } from "@/app/api/admin/ar-funds/rules";
 import { CLAIM_LABEL, claimCounts, claimText } from "@/app/api/fdh/claim-batch/claim";
 import { loadClaims, type ClaimCand } from "@/app/api/fdh/claim-batch/load";
-import { ADJRW_RATES, IPD_MAX_DAYS, buildRows, parseAdjrw, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
+import { IPD_MAX_DAYS, buildRows, rateCase, parseAdjrw, type AdmissionRow, type AdmissionsPage, type RawAdmission, type RawRep, type RepCand } from "./admissions";
 
 // key ที่ DataGrid ส่งเป็น sort -> SQL (allowlist จึงต่อเข้า ORDER BY ได้)
 const SORT_SQL = {
@@ -42,6 +42,10 @@ LEFT JOIN pttype t ON t.pttype = i.pttype
 LEFT JOIN ipt_summary_status ss ON ss.ipt_summary_status_id = i.ipt_summary_status_id`;
 const AUTH_SQL = "(SELECT NULLIF(TRIM(vp.auth_code), '') FROM visit_pttype vp WHERE vp.vn = i.vn ORDER BY vp.pttype = i.pttype DESC, vp.pttype LIMIT 1)";
 const CLAIM_SQL = "(SELECT NULLIF(TRIM(ip.claim_code), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)";
+// 1 = hospmain ของ ipt_pttype แถวแรกอยู่ต่างจังหวัด (chwpart ต่างจากโรงพยาบาล) ; ไม่มี/ไม่พบใน hospcode = 0 (อัตราปกติ)
+const OUT_PROV_SQL = `COALESCE((SELECT h.chwpart <> (SELECT hh.chwpart FROM hospcode hh WHERE hh.hospcode = (SELECT oc.hospitalcode FROM opdconfig oc LIMIT 1))
+          FROM hospcode h
+          WHERE h.hospcode = (SELECT NULLIF(TRIM(ip.hospmain), '') FROM ipt_pttype ip WHERE ip.an = i.an ORDER BY ip.ipt_pttype_id LIMIT 1)), 0)`;
 const SELECT = `SELECT i.an, i.hn,
        ${FULL_NAME_SQL} AS patient_name,
        p.sex,
@@ -57,15 +61,15 @@ const SELECT = `SELECT i.an, i.hn,
        i.finance_lock, i.ipt_summary_status_id, ss.ipt_summary_status_name AS summary_status_name,
        s.pdx, c.name AS pdx_name,
        i.drg, i.rw, i.adjrw,
+       ${OUT_PROV_SQL} AS out_prov,
        DATEDIFF(CAST(? AS DATE), i.dchdate) AS days_since_dch
 ${FROM}`;
 
 // จำนวนแถว + CMI + ยอดตาม AdjRW ของทั้งชุดที่ตรงตัวกรอง (ไม่ใช่แค่หน้าปัจจุบัน) CMI = ผลรวม AdjRW / จำนวนรายที่มี AdjRW
-// อัตราตามวันจำหน่ายจาก ADJRW_RATES (ส่งเป็น parameter) จำหน่ายก่อนอัตราเก่าสุด CASE ได้ NULL จึงไม่ถูกนับ
-const RATE_CASE = `CASE ${ADJRW_RATES.map(() => "WHEN i.dchdate >= ? THEN ?").join(" ")} END`;
-const RATE_PARAMS = ADJRW_RATES.flatMap((r) => [r.from, r.rate]);
+// อัตราเฉพาะสิทธิ UC ตามวันจำหน่ายจาก ADJRW_RATES (rateCase ส่งค่าเป็น parameter) สิทธิอื่น/จำหน่ายก่อนอัตราเก่าสุด CASE ได้ NULL จึงไม่ถูกนับ
+const RATE = rateCase(OUT_PROV_SQL);
 const COUNT_SELECT = `SELECT COUNT(*) AS total, SUM(i.adjrw) AS adjrw_sum, COUNT(i.adjrw) AS adjrw_n,
-       SUM(i.adjrw * ${RATE_CASE}) AS adjrw_amount, COUNT(i.adjrw * ${RATE_CASE}) AS adjrw_amount_n,
+       SUM(i.adjrw * ${RATE.sql}) AS adjrw_amount, COUNT(i.adjrw * ${RATE.sql}) AS adjrw_amount_n,
        SUM(s.pdx IS NULL OR s.pdx = '') AS no_pdx
 ${FROM}`;
 type CountRow = { total: number; adjrw_sum: number | string | null; adjrw_n: number; adjrw_amount: number | string | null; adjrw_amount_n: number; no_pdx: number | string | null };
@@ -274,7 +278,7 @@ export async function GET(request: NextRequest) {
   try {
     const [raws, count] = await Promise.all([
       hisQuery<RawAdmission>(`${SELECT}\n${where}\nORDER BY ${order}\nLIMIT ? OFFSET ?`, [todayIso(), ...whereParams, limit, offset]),
-      xlsx ? null : hisQuery<CountRow>(`${COUNT_SELECT} ${where}`, [...RATE_PARAMS, ...RATE_PARAMS, ...whereParams]),
+      xlsx ? null : hisQuery<CountRow>(`${COUNT_SELECT} ${where}`, [...RATE.params, ...RATE.params, ...whereParams]),
     ]);
 
     // ดู REP ทุก AN ไม่กรองกองทุน (กองทุนอื่นนำเข้า REP ภายหลังได้)

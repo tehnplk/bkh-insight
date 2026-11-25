@@ -14,16 +14,35 @@ export const PDX_SUMMARY_DAYS = 7;
 export const pdxMissing = (daysSinceDch: number | null) =>
   daysSinceDch != null && daysSinceDch <= PDX_SUMMARY_DAYS ? "pending" : "late";
 
+/** สิทธิ UC (pttype.hipdata_code) ที่คิดยอดตาม AdjRW ; สิทธิอื่นไม่คิดยอด */
+export const UC_HIPDATA = ["UCS", "WEL", "DIS"] as const;
 /**
- * อัตราบาทต่อ AdjRW ตามวันจำหน่าย (ผู้ใช้กำหนด 13 พ.ย. 2569) เรียงจากใหม่ไปเก่า ใช้ตัวแรกที่ dchdate >= from
- * จำหน่ายก่อนอัตราเก่าสุด = ไม่มีอัตรา (ไม่คำนวณยอด) ; route ใช้รายการเดียวกันสร้าง CASE ของยอดรวม
+ * อัตราบาทต่อ AdjRW ของสิทธิ UC ตามวันจำหน่าย (เกณฑ์จังหวัด ผู้ใช้อนุมัติ 25 พ.ย. 2569) เรียงจากใหม่ไปเก่า ใช้ตัวแรกที่ dchdate >= from
+ * outProvince = hospmain ของ ipt_pttype แถวแรกอยู่ต่างจังหวัด (ไม่มี/ไม่พบใน hospcode = normal) ; จำหน่ายก่อนอัตราเก่าสุด = ไม่มีอัตรา
+ * แหล่งเดียวของทั้ง rateFor (รายแถว) และ rateCase (ยอดรวมใน SQL)
  */
 export const ADJRW_RATES = [
-  { from: "2026-10-01", rate: 5119 },
-  { from: "2025-10-01", rate: 3505.14 },
+  { from: "2026-09-16", normal: 5100, outProvince: 9680 },
+  { from: "2025-10-01", normal: 3505.14, outProvince: 9600 },
 ] as const;
 
-export const rateFor = (dchdate: string | null) => (dchdate ? (ADJRW_RATES.find((r) => dchdate.slice(0, 10) >= r.from)?.rate ?? null) : null);
+export const isUcFund = (fund: string) => (UC_HIPDATA as readonly string[]).includes(fund);
+
+export function rateFor(dchdate: string | null, isUc: boolean, outProv: boolean) {
+  if (!dchdate || !isUc) return null;
+  const r = ADJRW_RATES.find((x) => dchdate.slice(0, 10) >= x.from);
+  return r ? (outProv ? r.outProvince : r.normal) : null;
+}
+
+/** CASE อัตราของ SQL จาก UC_HIPDATA/ADJRW_RATES (params เรียงตาม ? ใน sql) ; outProv = expr 0/1 ; สิทธิอื่น/ไม่มีอัตรา = NULL */
+export function rateCase(outProv: string) {
+  return {
+    sql: `CASE WHEN t.hipdata_code IN (${UC_HIPDATA.map(() => "?").join(", ")}) THEN
+  CASE ${ADJRW_RATES.map(() => `WHEN i.dchdate >= ? THEN IF(${outProv}, ?, ?)`).join(" ")} END
+END`,
+    params: [...UC_HIPDATA, ...ADJRW_RATES.flatMap((r) => [r.from, r.outProvince, r.normal])],
+  };
+}
 
 /** แถวจาก SQL รายการ (his) ตัวเลข DECIMAL อาจมาเป็น string */
 export type RawAdmission = {
@@ -58,6 +77,8 @@ export type RawAdmission = {
   drg: string | null;
   rw: number | string | null;
   adjrw: number | string | null;
+  /** 1 = hospmain ของ ipt_pttype แถวแรกอยู่ต่างจังหวัด */
+  out_prov: number | string | null;
   days_since_dch: number | string | null;
 };
 
@@ -102,7 +123,7 @@ export type AdmissionRow = {
   drg: string | null;
   rw: number | null;
   adjrw: number | null;
-  /** AdjRW × อัตราตามวันจำหน่าย (ADJRW_RATES) null = ไม่มี AdjRW หรือไม่มีอัตรา */
+  /** AdjRW × อัตราตามวันจำหน่าย (ADJRW_RATES) เฉพาะสิทธิ UC ; null = ไม่ใช่ UC ไม่มี AdjRW หรือไม่มีอัตรา */
   adjrw_amount: number | null;
   days_since_dch: number | null;
   /** undefined = ไม่มีสถานะ REP (กองทุนอื่นที่ไม่พบ REP หรือโหลด insight ไม่ได้), null = ยังไม่มี REP */
@@ -120,7 +141,7 @@ export type AdmissionsPage = GridPage<AdmissionRow> & {
   adjrw_n: number;
   /** Case Mix Index = adjrw_sum / adjrw_n (null = ไม่มีรายที่มี AdjRW) */
   cmi: number | null;
-  /** ผลรวม AdjRW × อัตรา และจำนวนรายที่คำนวณได้ (น้อยกว่า adjrw_n เมื่อมีรายที่จำหน่ายก่อนอัตราเก่าสุด) */
+  /** ผลรวม AdjRW × อัตรา และจำนวนรายที่คำนวณได้ (adjrw_n − adjrw_amount_n = รายที่ไม่ใช่ UC หรือจำหน่ายก่อนอัตราเก่าสุด) */
   adjrw_amount: number;
   adjrw_amount_n: number;
   /** จำนวนรายที่ไม่มี PDx (an_stat.pdx ว่าง/NULL ตรงกับตัวกรองหัวคอลัมน์ pdx = [""]) */
@@ -148,7 +169,7 @@ export function buildRows(raws: RawAdmission[], reps: RawRep[] | undefined, fund
     const rep = repByAn?.get(r.an) ?? (repByAn && fund === REP_FUND ? null : undefined);
     const days = num(r.days_since_dch);
     const adjrw = num(r.adjrw);
-    const rate = rateFor(r.dchdate);
+    const rate = rateFor(r.dchdate, isUcFund(fund), Number(r.out_prov) === 1);
     return {
       an: r.an,
       hn: r.hn,

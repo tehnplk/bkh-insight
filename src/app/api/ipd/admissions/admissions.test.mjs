@@ -55,18 +55,45 @@ test("REP: found = latest on any fund, missing = null only on UCS; other funds w
   assert.equal(buildRows([raw("6", "h", { days_since_dch: null })], [], fundOf)[0].overdue, false);
 });
 
-test("AdjRW amount: rate by discharge date, none before the oldest rate", async () => {
+test("AdjRW amount: UC only, rate by discharge date and out-of-province hospmain", async () => {
   const { rateFor } = await import("./admissions.ts");
-  assert.equal(rateFor("2026-10-01"), 5119);
-  assert.equal(rateFor("2026-09-30 10:00:00"), 3505.14);
-  assert.equal(rateFor("2025-10-01"), 3505.14);
-  assert.equal(rateFor("2025-09-30"), null);
-  assert.equal(rateFor(null), null);
-  const amount = (dchdate, adjrw) => buildRows([raw("1", "h", { dchdate, adjrw })], [], fundOf)[0].adjrw_amount;
-  assert.equal(amount("2026-10-15", "0.9067"), 4641.40); // 0.9067 × 5119 = 4641.3973
-  assert.equal(amount("2026-09-15", "1.0000"), 3505.14);
-  assert.equal(amount("2025-09-15", "1.0000"), null);
-  assert.equal(amount("2026-10-15", null), null);
+  // ขอบช่วง
+  assert.equal(rateFor("2026-09-16", true, false), 5100);
+  assert.equal(rateFor("2026-09-16", true, true), 9680);
+  assert.equal(rateFor("2026-09-15 23:59:59", true, false), 3505.14);
+  assert.equal(rateFor("2026-09-15", true, true), 9600);
+  assert.equal(rateFor("2025-10-01", true, false), 3505.14);
+  assert.equal(rateFor("2025-10-01", true, true), 9600);
+  assert.equal(rateFor("2025-09-30", true, false), null);
+  assert.equal(rateFor("2025-09-30", true, true), null);
+  assert.equal(rateFor(null, true, false), null);
+  // ไม่ใช่ UC = ไม่คิดยอดทุกช่วง
+  assert.equal(rateFor("2026-10-15", false, false), null);
+  assert.equal(rateFor("2026-01-15", false, true), null);
+
+  const FUNDS = { ...FUND, W1: "WEL", D1: "DIS" };
+  const amount = (extra) => buildRows([raw("1", "h", extra)], [], (p) => FUNDS[p] ?? "UNKNOWN")[0].adjrw_amount;
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "0.9067", out_prov: 0 }), 4624.17); // 0.9067 × 5100 = 4624.17
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "0.9067", out_prov: "1" }), 8776.86); // × 9680 = 8776.856
+  assert.equal(amount({ dchdate: "2026-09-15", adjrw: "1.0000", out_prov: 0 }), 3505.14);
+  assert.equal(amount({ dchdate: "2026-09-15", adjrw: "1.0000", out_prov: 1 }), 9600);
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "1.0000", pttype: "W1" }), 5100);
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "1.0000", pttype: "D1" }), 5100);
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "1.0000", pttype: "O1" }), null);
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "1.0000", pttype: "S1", out_prov: 1 }), null);
+  assert.equal(amount({ dchdate: "2025-09-15", adjrw: "1.0000" }), null);
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: null }), null);
+});
+
+test("rateCase: SQL params follow placeholders, built from ADJRW_RATES/UC_HIPDATA", async () => {
+  const { rateCase } = await import("./admissions.ts");
+  const { sql, params } = rateCase("OP");
+  assert.equal(sql.split("?").length - 1, params.length);
+  assert.deepEqual(params, ["UCS", "WEL", "DIS", "2026-09-16", 9680, 5100, "2025-10-01", 9600, 3505.14]);
+  assert.equal(
+    sql.replace(/\s+/g, " "),
+    "CASE WHEN t.hipdata_code IN (?, ?, ?) THEN CASE WHEN i.dchdate >= ? THEN IF(OP, ?, ?) WHEN i.dchdate >= ? THEN IF(OP, ?, ?) END END",
+  );
 });
 
 test("REP header filter value: latest status on any fund, none only on UCS, blank for other funds without REP", () => {
