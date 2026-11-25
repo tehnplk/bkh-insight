@@ -46,7 +46,23 @@ function Table({ head, children }: { head: ReactNode; children: ReactNode }) {
 
 export function Journal({ month, monthText }: { month: string; monthText: string }) {
   const { data, error, retry } = useJson<ArJournal>(`/api/fund/ar-journal?${new URLSearchParams({ month })}`);
-  const account = (code: string | null, name: string) => (
+  const [gl, setGl] = useState<{ month: string; busy: boolean; error?: string }>({ month, busy: false });
+  const glError = gl.month === month ? gl.error : undefined;
+  // zip สมุดขายผู้ป่วยนอกใบละวันสำหรับนำเข้าโปรแกรม GL (ตาราง TB1) ; fetch แทน <a download> เพื่อแสดง error ได้
+  const exportGl = async () => {
+    setGl({ month, busy: true });
+    const res = await fetch(`/api/fund/ar-gl?${new URLSearchParams({ month })}`).catch(() => null);
+    if (res?.ok) {
+      const url = URL.createObjectURL(await res.blob());
+      Object.assign(document.createElement("a"), { href: url, download: `gl-sales-op-${month}.zip` }).click();
+      URL.revokeObjectURL(url);
+      setGl({ month, busy: false });
+    } else {
+      const body = await res?.json().catch(() => null);
+      setGl({ month, busy: false, error: body?.error ?? `ไม่สำเร็จ${res ? ` (HTTP ${res.status})` : ""}` });
+    }
+  };
+  const account =(code: string | null, name: string) => (
     <>
       {code ? <span className="whitespace-nowrap tabular-nums">{code}</span> : name === CASH_NAME ? null : missing} <span className="text-muted">{name}</span>
     </>
@@ -56,11 +72,17 @@ export function Journal({ month, monthText }: { month: string; monthText: string
       <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
         <h2 className="text-title">สมุดรายวัน · {monthText}</h2>
         {data && data.lines.length > 0 && (
-          <a href={`/api/fund/ar-journal?${new URLSearchParams({ month, format: "xlsx" })}`} className={btn} download>
-            ส่งออก Excel
-          </a>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={`${btn} disabled:cursor-wait disabled:opacity-60`} onClick={exportGl} disabled={gl.busy}>
+              {gl.busy ? "กำลังสร้างไฟล์ GL…" : "ส่งออก GL (สมุดขาย OP)"}
+            </button>
+            <a href={`/api/fund/ar-journal?${new URLSearchParams({ month, format: "xlsx" })}`} className={btn} download>
+              ส่งออก Excel
+            </a>
+          </div>
         )}
       </div>
+      {glError && <Notice title={`ส่งออก GL ไม่สำเร็จ: ${glError}`} action={<button type="button" className={btn} onClick={exportGl}>ลองอีกครั้ง</button>} />}
       {error ? (
         <Notice title={`โหลดสมุดรายวันไม่สำเร็จ: ${error}`} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />
       ) : !data ? (
