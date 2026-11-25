@@ -75,6 +75,7 @@ export const navItems: NavItem[] = [
       { label: "ตัดลูกหนี้", href: "/fund/ar-settle" },
       { label: "ตัดหนี้เหมาจ่าย", href: "/fund/ar-capitation" },
       { label: "สถานที่เรียกเก็บ", href: "/fund/ar-collect" },
+      { label: "รายงานลูกหนี้", href: "/fund/ar-report" },
       { label: "บัตรประกันสุขภาพต่างด้าว", href: "/fund/fwf-card" },
     ],
   },
@@ -96,6 +97,11 @@ export const navItems: NavItem[] = [
       { label: "ผู้ป่วยในรายวัน", href: "/visit/ipd-visit" },
       { label: "ผู้รับบริการที่เข้าเกณฑ์ DM Type-2", href: "/visit/dm-remission" },
     ],
+  },
+  {
+    label: "คู่มือ",
+    icon: "book",
+    children: [{ label: "งานลูกหนี้ (การเงิน)", href: "/manual/ar-finance" }],
   },
 ];
 

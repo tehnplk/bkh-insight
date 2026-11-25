@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คู่มือลูกหนี้งานการเงิน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~46rem) with a ledger-like rhythm; account codes set in mono like a chart of accounts */
+:root {
+  --bg: #f6f7f6;
+  --surface: #ffffff;
+  --sunken: #eef1ef;
+  --line: #d6dcd8;
+  --fg: #1b2420;
+  --muted: #56625c;
+  --accent: #0f6b62;
+  --accent-soft: #e2f1ee;
+  --accent-text: #0b5650;
+  --danger: #a3271d;
+  --danger-soft: #fbecea;
+  --danger-line: #eab9b3;
+  --ok: #1f6b33;
+  --ok-soft: #e8f4ea;
+  --ok-line: #b5d8bd;
+  --info: #22507f;
+  --info-soft: #e9f0f8;
+  --info-line: #bacde3;
+  --warn: #8a5a00;
+  --warn-soft: #fbf2dc;
+  --font-body: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121715; --surface: #1a201d; --sunken: #212925; --line: #34403a; --fg: #e3e9e5; --muted: #a2b0a8;
+    --accent: #5cc2b4; --accent-soft: #173430; --accent-text: #8fd9cd;
+    --danger: #f0928a; --danger-soft: #3a1d1a; --danger-line: #6b302b;
+    --ok: #86d29a; --ok-soft: #18301f; --ok-line: #2f5a3a;
+    --info: #9cc3ec; --info-soft: #172636; --info-line: #2e4a66;
+    --warn: #e8c06a; --warn-soft: #33290f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121715; --surface: #1a201d; --sunken: #212925; --line: #34403a; --fg: #e3e9e5; --muted: #a2b0a8;
+  --accent: #5cc2b4; --accent-soft: #173430; --accent-text: #8fd9cd;
+  --danger: #f0928a; --danger-soft: #3a1d1a; --danger-line: #6b302b;
+  --ok: #86d29a; --ok-soft: #18301f; --ok-line: #2f5a3a;
+  --info: #9cc3ec; --info-soft: #172636; --info-line: #2e4a66;
+  --warn: #e8c06a; --warn-soft: #33290f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 1rem; line-height: 1.75;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 2rem 4rem;
+}
+.page { max-width: 48rem; margin: 0 auto; display: flex; flex-direction: column; gap: 2.5rem; }
+h1, h2, h3, h4 { line-height: 1.35; text-wrap: balance; margin: 0; }
+h1 { font-size: 1.75rem; font-weight: 700; }
+h2 { font-size: 1.375rem; font-weight: 700; padding-top: .5rem; border-top: 2px solid var(--fg); }
+h3 { font-size: 1.125rem; font-weight: 600; }
+h4 { font-size: 1rem; font-weight: 600; }
+p, ul, ol, dl { margin: 0; }
+section { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.task { display: flex; flex-direction: column; gap: 1rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.task > h3 .step { font-family: var(--font-mono); font-size: .875rem; color: var(--accent-text); background: var(--accent-soft); border-radius: 4px; padding: 0 .4rem; margin-right: .4rem; vertical-align: .1em; }
+a { color: var(--accent-text); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code, .acct { font-family: var(--font-mono); font-size: .875em; white-space: nowrap; }
+.ui { font-weight: 600; background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0 .35rem; white-space: nowrap; }
+.path { color: var(--muted); }
+.lede { color: var(--muted); }
+header.top { display: flex; flex-direction: column; gap: .5rem; }
+header.top .meta { color: var(--muted); font-size: .9375rem; }
+.small { font-size: .875rem; color: var(--muted); }
+
+nav.toc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; }
+nav.toc ol { padding-left: 1.25rem; display: grid; gap: .15rem; }
+nav.toc ol ol { margin-top: .15rem; font-size: .9375rem; }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .75rem 1rem; }
+.facts dt { font-weight: 600; color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; }
+@media (max-width: 520px) { .facts { grid-template-columns: 1fr; gap: 0 1rem; } .facts dd { margin-bottom: .5rem; } }
+
+ol.steps { padding-left: 1.5rem; display: flex; flex-direction: column; gap: .5rem; }
+ol.steps li::marker { font-weight: 700; color: var(--accent-text); }
+ul.plain { padding-left: 1.25rem; display: flex; flex-direction: column; gap: .25rem; }
+
+.checklist { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.checklist li { display: grid; grid-template-columns: 2rem 1fr; gap: .25rem .75rem; padding: .75rem 1rem; border-top: 1px solid var(--line); }
+.checklist li:first-child { border-top: 0; }
+.checklist li::before { content: attr(data-step); font-family: var(--font-mono); font-weight: 600; color: var(--accent-text); background: var(--accent-soft); border-radius: 4px; text-align: center; height: 1.6rem; line-height: 1.6rem; }
+.checklist .what { font-weight: 600; }
+.checklist .where { grid-column: 2; color: var(--muted); font-size: .9375rem; }
+
+.callout { border: 1px solid; border-left-width: 4px; border-radius: 6px; padding: .75rem 1rem; display: flex; flex-direction: column; gap: .35rem; }
+.callout > .label { font-weight: 700; font-size: .9375rem; }
+.callout ul { padding-left: 1.25rem; }
+.callout.danger { background: var(--danger-soft); border-color: var(--danger-line); border-left-color: var(--danger); }
+.callout.danger > .label { color: var(--danger); }
+.callout.ok { background: var(--ok-soft); border-color: var(--ok-line); border-left-color: var(--ok); }
+.callout.ok > .label { color: var(--ok); }
+.callout.info { background: var(--info-soft); border-color: var(--info-line); border-left-color: var(--info); }
+.callout.info > .label { color: var(--info); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { width: 100%; border-collapse: collapse; font-size: .9375rem; }
+th, td { text-align: left; vertical-align: top; padding: .5rem .75rem; border-top: 1px solid var(--line); }
+thead th { border-top: 0; background: var(--sunken); color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td .acct { display: inline-block; }
+tbody tr:first-child td, tbody tr:first-child th { border-top: 1px solid var(--line); }
+table.msgs td:first-child { width: 45%; }
+table.msgs td:first-child q { font-weight: 500; }
+q { quotes: "“" "”"; }
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .5rem; }
+figure img { max-width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+figure.narrow img { max-width: 260px; }
+figcaption { font-size: .875rem; color: var(--muted); }
+figcaption b { color: var(--fg); }
+
+.tag { display: inline-block; font-size: .8125rem; font-weight: 600; border-radius: 4px; padding: 0 .4rem; border: 1px solid var(--line); background: var(--sunken); color: var(--muted); white-space: nowrap; }
+.tag.admin { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.tag.all { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent); }
+
+footer { color: var(--muted); font-size: .875rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<header class="top">
+  <h1>คู่มือลูกหนี้ สำหรับงานการเงินและบัญชี</h1>
+  <p class="meta">ระบบ BKH Insight · เปิดที่ <code>https://10.10.10.159</code> · ฉบับวันที่ 25 พ.ย. 2569</p>
+  <p class="lede">คู่มือนี้อธิบายงานลูกหนี้ที่การเงินทำในระบบทุกเดือน ตั้งแต่นำเข้า STM จนถึงปิดงวด ชื่อปุ่ม ชื่อเมนู และข้อความเตือนในคู่มือตรงกับที่เห็นบนหน้าจอ รูปทุกรูปถ่ายจากระบบจริง ช่องที่เป็นเลข VN/AN/HN และชื่อผู้ป่วยถูกทำให้เบลอ</p>
+</header>
+
+<nav class="toc" aria-label="สารบัญ">
+  <h2 style="border:0;padding:0;font-size:1.125rem">สารบัญ</h2>
+  <ol>
+    <li><a href="#overview">ภาพรวมระบบลูกหนี้</a>
+      <ol>
+        <li><a href="#checklist">รายการตรวจงานประจำเดือน</a></li>
+        <li><a href="#roles">ใครทำอะไร</a></li>
+      </ol>
+    </li>
+    <li><a href="#monthly">งานประจำเดือน ตามลำดับ</a>
+      <ol>
+        <li><a href="#stm">ก. นำเข้า STM และ REP</a></li>
+        <li><a href="#transfer">ข. ดึงเงินโอนจาก SMT</a></li>
+        <li><a href="#settle">ค. ตัดลูกหนี้ด้วย STM</a></li>
+        <li><a href="#capitation">ง. ตัดหนี้เหมาจ่ายสิ้นเดือน .201/.209</a></li>
+        <li><a href="#fwf">จ. ตัดหนี้บัตรต่างด้าวสิ้นเดือน</a></li>
+        <li><a href="#receipt">ฉ. บันทึกรับเงินที่ไม่ได้มาจาก STM และคำขอปรับปรุงลูกหนี้</a></li>
+        <li><a href="#collect">ช. ตรวจสถานที่เรียกเก็บ</a></li>
+        <li><a href="#close">ซ. ตรวจสมุดรายวัน งบทดลอง แล้วปิดงวด</a></li>
+      </ol>
+    </li>
+    <li><a href="#rules">กติกาการลงบัญชี (ตารางอ้างอิง)</a></li>
+    <li><a href="#gotchas">ลำดับที่ต้องระวังและข้อผิดพลาดที่พบบ่อย</a></li>
+    <li><a href="#faq">คำถามที่พบบ่อยและการแก้ปัญหา</a></li>
+    <li><a href="#admin">ภาคผนวกสำหรับผู้ดูแลระบบ</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<section id="overview">
+  <h2>1. ภาพรวมระบบลูกหนี้</h2>
+  <p>ระบบตั้งลูกหนี้ให้เองทุกคืนเวลา 01:00 น. โดยอ่านจาก HOSxP</p>
+  <ul class="plain">
+    <li><b>ผู้ป่วยนอก</b> ตั้งหนี้จากใบลูกหนี้ที่ออกใน HOSxP ใบที่ถูกยกเลิกใน HOSxP จะลงเป็นรายการ "ยกเลิก"</li>
+    <li><b>ผู้ป่วยใน</b> ตั้งหนี้เมื่อการเงินล็อกรายการของ AN แล้ว ยอดเท่าลูกหนี้สิทธิของ AN นั้น</li>
+    <li>รายการที่ลงสมุดแล้วจะไม่ถูกแก้ทับ ถ้ายอดใน HOSxP เปลี่ยนภายหลัง ระบบลงส่วนต่างเป็นรายการใหม่ ("ปรับปรุง" "ยกเลิก" หรือ "กลับรายการ")</li>
+    <li>บัญชีลูกหนี้ของแต่ละราย ระบบเลือกจากกลุ่มสิทธิ ผู้ป่วยนอก/ใน และหน่วยบริการประจำ ตามกติกาที่ผู้ดูแลระบบตั้งไว้ (ดู<a href="#rules">ตารางกติกา</a>)</li>
+    <li>ต้องการยอดล่าสุดก่อนรอบกลางคืน กดปุ่ม <span class="ui">ดึงยอดล่าสุด</span> ที่หน้า "ลูกหนี้ตามผังบัญชี" กดซ้ำได้ รายการที่ลงแล้วจะไม่ลงซ้ำ</li>
+  </ul>
+  <p>งานของการเงินคือ <b>ตัดหนี้</b> เมื่อได้รับเงิน (จาก STM, เงินโอนเหมาจ่าย, เงินรับล่วงหน้าบัตรต่างด้าว หรือรับเงินเอง) และ <b>ตรวจบัญชี</b> ก่อนปิดงวดทุกเดือน</p>
+
+  <figure class="narrow">
+    <img src="img/01-menu.png" alt="เมนูด้านซ้าย หมวดลูกหนี้และหมวดรับเงินเปิดอยู่" width="240" height="1094" loading="lazy">
+    <figcaption><b>รูป 1</b> เมนูด้านซ้าย งานลูกหนี้อยู่ในหมวด "ลูกหนี้" และ "รับเงิน" ส่วนนำเข้า REP อยู่ในหมวด "ผลการเคลม" หน้าของผู้ดูแลระบบไม่อยู่ในเมนูนี้ เปิดจากเมนูโปรไฟล์ (กดชื่อผู้ใช้มุมล่างซ้าย) กลุ่ม "ผู้ดูแลระบบ"</figcaption>
+  </figure>
+
+  <section id="checklist">
+    <h3>รายการตรวจงานประจำเดือน</h3>
+    <p>ทำตามลำดับนี้ทุกเดือน ลำดับสำคัญ เพราะขั้นหลังใช้ผลของขั้นก่อน</p>
+    <ol class="checklist">
+      <li data-step="ก"><span class="what"><a href="#stm">นำเข้า STM</a> (และ REP)</span><span class="where">รับเงิน › นำเข้า STM · ผลการเคลม › นำเข้า REP · ทำทุกครั้งที่ได้ไฟล์ใหม่</span></li>
+      <li data-step="ข"><span class="what"><a href="#transfer">ดึงเงินโอนจาก SMT</a></span><span class="where">รับเงิน › เงินโอนที่ได้รับ · ต้องทำก่อนขั้น ง</span></li>
+      <li data-step="ค"><span class="what"><a href="#settle">ตัดลูกหนี้ด้วย STM</a> ทีละไฟล์</span><span class="where">ลูกหนี้ › ตัดลูกหนี้</span></li>
+      <li data-step="ง"><span class="what"><a href="#capitation">ตัดหนี้เหมาจ่ายสิ้นเดือน .201 และ .209</a></span><span class="where">ลูกหนี้ › ตัดหนี้เหมาจ่าย · หลังจบเดือน</span></li>
+      <li data-step="จ"><span class="what"><a href="#fwf">ตัดหนี้บัตรประกันสุขภาพต่างด้าวสิ้นเดือน</a></span><span class="where">ลูกหนี้ › บัตรประกันสุขภาพต่างด้าว › แท็บ "ตัดหนี้สิ้นเดือน" · หลังจบเดือน</span></li>
+      <li data-step="ฉ"><span class="what"><a href="#receipt">บันทึกรับเงินที่ไม่ได้มาจาก STM</a></span><span class="where">ลูกหนี้ › ลูกหนี้ตามผังบัญชี · ประกันสังคม อปท. พรบ. ชำระเอง ฯลฯ ทำเมื่อได้รับเงิน</span></li>
+      <li data-step="ช"><span class="what"><a href="#collect">ตรวจสถานที่เรียกเก็บ</a></span><span class="where">ลูกหนี้ › สถานที่เรียกเก็บ</span></li>
+      <li data-step="ซ"><span class="what"><a href="#close">ตรวจสมุดรายวันและงบทดลอง แล้วปิดงวด</a></span><span class="where">ลูกหนี้ › ลูกหนี้ตามผังบัญชี · ปิดงวดที่ เมนูโปรไฟล์ › ผู้ดูแลระบบ › ปิดงวดลูกหนี้ (ผู้ดูแลระบบ)</span></li>
+    </ol>
+  </section>
+
+  <section id="roles">
+    <h3>ใครทำอะไร</h3>
+    <p>ผู้ใช้ทุกคนที่ login ได้ทำงานประจำเดือนได้เกือบทั้งหมด งานที่เปลี่ยนกติกาหรือปิดบัญชีสงวนไว้ให้ผู้ดูแลระบบ (role admin)</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>งาน</th><th>ผู้ใช้ทั่วไป</th><th>ผู้ดูแลระบบ</th></tr></thead>
+        <tbody>
+          <tr><td>นำเข้า STM / REP, ดึงจาก SMT, เพิ่ม/แก้/ยกเลิกรายการเงินโอน</td><td><span class="tag all">ทำได้</span></td><td><span class="tag all">ทำได้</span></td></tr>
+          <tr><td>ตัดลูกหนี้ด้วย STM, ตัดหนี้เหมาจ่าย, ตัดหนี้บัตรต่างด้าว</td><td><span class="tag all">ทำได้</span></td><td><span class="tag all">ทำได้</span></td></tr>
+          <tr><td>บันทึกรับเงิน, ส่งคำขอปรับปรุงลูกหนี้</td><td><span class="tag all">ทำได้</span></td><td><span class="tag all">ทำได้</span></td></tr>
+          <tr><td>ลบไฟล์ STM ที่นำเข้าผิด</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+          <tr><td>จับคู่กองทุนใน SMT กับบัญชี</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+          <tr><td>อนุมัติ/ไม่อนุมัติคำขอปรับปรุงลูกหนี้ (ต้องไม่ใช่ผู้ขอ)</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+          <tr><td>กำหนดยอดเงินของชนิดบัตรต่างด้าว (แท็บ "ชนิดบัตร")</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+          <tr><td>กติกาบัญชี ตั้งค่าบัญชี กลุ่มเรียกเก็บ คำนวณบัญชีใหม่</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+          <tr><td>ปิดงวด / เปิดงวด</td><td>–</td><td><span class="tag admin">เท่านั้น</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+
+<!-- ============================================================ -->
+<section id="monthly">
+  <h2>2. งานประจำเดือน ตามลำดับ</h2>
+  <p class="lede">แต่ละหัวข้อบอก เมื่อไร ใครทำ ต้องทำอะไรก่อน ขั้นตอน สิ่งที่ต้องตรวจ ข้อความที่อาจเจอ สิ่งที่ห้ามทำ และการลงบัญชี</p>
+
+  <!-- ก -->
+  <article class="task" id="stm">
+    <h3><span class="step">ก</span>นำเข้า STM (และ REP)</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>ทุกครั้งที่ได้ไฟล์ Statement (STM) หรือ REP ใหม่จาก e-Claim</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป</dd>
+      <dt>ต้องทำก่อน</dt><dd>ดาวน์โหลดไฟล์ STM นามสกุล <code>.xls</code> และรู้วันที่ออก Statement ของไฟล์</dd>
+    </dl>
+    <h4>ขั้นตอน นำเข้า STM</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">รับเงิน › นำเข้า STM</span></li>
+      <li>เลือก <span class="ui">วันที่ออก STM</span> ทุกครั้งก่อนนำเข้า ค่าที่ขึ้นมาตอนเปิดหน้า (วันนี้) ยังไม่นับว่าเลือก ปุ่มเลือกไฟล์จะกดไม่ได้และมีข้อความ <q>เลือกวันที่ออก STM ก่อนนำเข้า</q></li>
+      <li>กด <span class="ui">เลือกไฟล์ STM</span> เลือกได้หลายไฟล์พร้อมกัน หรือลากไฟล์ <code>.xls</code> มาวางในกรอบเส้นประ</li>
+      <li>ระบบนำเข้าทีละไฟล์และแสดงผลรายไฟล์: <span class="tag">นำเข้าแล้ว</span> <span class="tag">ซ้ำ</span> <span class="tag">ไม่รองรับ</span> <span class="tag">ไม่สำเร็จ</span> ไฟล์ที่สำเร็จบอกจำนวนรายการและยอดโอนสุทธิ</li>
+      <li>วันที่ออก STM ใช้กับทุกไฟล์ในรอบนั้น ถ้าไฟล์มีวันที่ออกต่างกัน ให้นำเข้าเป็นรอบแยก หลังนำเข้าเสร็จ ระบบล้างวันที่ให้เลือกใหม่</li>
+    </ol>
+    <figure>
+      <img src="img/02-stm-import.png" alt="หน้านำเข้า STM มีช่องวันที่ออก STM ปุ่มเลือกไฟล์ และตารางงวดที่นำเข้าแล้ว" width="1175" height="760" loading="lazy">
+      <figcaption><b>รูป 2</b> หน้านำเข้า STM (1) ช่องวันที่ออก STM (2) ปุ่มเลือกไฟล์ STM ซึ่งยังกดไม่ได้จนกว่าจะเลือกวันที่ (3) ตาราง "งวดที่นำเข้าแล้ว" ต่อปีงบ วงกลมตัวเลขคือครั้งที่ของงวดในเดือนนั้น ช่องสีเหลือง "ขาด" คือเดือนที่ผ่านไปแล้วแต่ยังไม่มีไฟล์ (4) ตารางไฟล์ที่นำเข้า กดไอคอนหน้าแถวเพื่อดูรายละเอียด</figcaption>
+    </figure>
+
+    <h4>นำเข้า REP</h4>
+    <p>เปิด <span class="path">ผลการเคลม › นำเข้า REP</span> กด <span class="ui">เลือกไฟล์ REP</span> หรือลากไฟล์มาวาง ไม่ต้องเลือกวันที่ REP ใช้ดูสถานะเคลมและรหัสติด C เท่านั้น <b>ไม่ได้ใช้ตัดหนี้</b> แต่ช่วยให้หน้าตัดลูกหนี้จับคู่ราย STM กับ VN/AN ได้ครบขึ้น และบอกรายที่ REP ผ่านแต่ STM ยังไม่จ่าย</p>
+    <figure>
+      <img src="img/03-rep-import.png" alt="หน้านำเข้า REP มีปุ่มนำเข้าอัตโนมัติมุมขวาบน" width="1175" height="330" loading="lazy">
+      <figcaption><b>รูป 3</b> หน้านำเข้า REP ปุ่ม <b>นำเข้าอัตโนมัติ</b> (มุมขวาบน) ดึงทั้ง REP และ STM จาก e-Claim ให้ในครั้งเดียว</figcaption>
+    </figure>
+    <div class="callout info">
+      <span class="label">หมายเหตุ: นำเข้าอัตโนมัติ</span>
+      <p>ปุ่ม <span class="ui">นำเข้าอัตโนมัติ</span> ใช้ส่วนขยาย (extension) ของ Chrome ที่ต้องติดตั้งครั้งแรกตามคำแนะนำในหน้าต่างที่เปิดขึ้น ทุกครั้งที่ใช้ต้องเปิดแท็บ e-Claim ที่ login ด้วย ThaiD ไว้ใน Chrome เดียวกัน เลือกช่วงเดือน กด <span class="ui">ตรวจรายการ</span> แล้วกด <span class="ui">นำเข้า</span> ระบบข้ามไฟล์ที่นำเข้าแล้ว STM ที่ดึงอัตโนมัติมีเฉพาะสิทธิ UC และ OFC STM ของ OFC ใช้วันที่ "ออกรายงานวันที่" ในไฟล์เป็นวันที่ออก STM</p>
+    </div>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ทุกไฟล์ขึ้น "นำเข้าแล้ว" หรือ "ซ้ำ" ไม่มี "ไม่สำเร็จ"</li>
+        <li>ในตาราง "งวดที่นำเข้าแล้ว" ไม่มีช่อง "ขาด" ของเดือนที่ควรได้ไฟล์แล้ว</li>
+        <li>ยอดโอนสุทธิของไฟล์ตรงกับเอกสาร Statement</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>เลขที่เอกสารนี้นำเข้าไว้แล้ว</q> (ซ้ำ)</td><td>ไฟล์นี้มีในระบบแล้ว ไม่ต้องทำอะไร</td></tr>
+        <tr><td><q>ไม่ใช่ไฟล์ .xls</q> (ไม่รองรับ)</td><td>เลือกไฟล์ผิดชนิด ใช้ไฟล์ STM ต้นฉบับ <code>.xls</code></td></tr>
+        <tr><td><q>ไฟล์ใหญ่เกิน 30 MB</q></td><td>ไฟล์ใหญ่ผิดปกติ ตรวจว่าเป็นไฟล์ STM จริง</td></tr>
+        <tr><td><q>วันที่ออก STM ไม่ถูกต้อง</q></td><td>เลือกวันที่ออก STM ใหม่ (ห้ามเป็นวันในอนาคต)</td></tr>
+        <tr><td><q>บันทึกลงฐานข้อมูลไม่สำเร็จ</q></td><td>ลองนำเข้าไฟล์นั้นอีกครั้ง ถ้ายังไม่ได้ แจ้งทีมพัฒนา</td></tr>
+        <tr><td><q>ไฟล์นี้ใช้ตัดหนี้แล้ว ลบไม่ได้</q></td><td>ผู้ดูแลระบบกดลบไฟล์ที่เคยใช้ตัดหนี้ไปแล้ว ลบไม่ได้ ถ้าตัดผิดให้แก้ด้วย<a href="#adjust">คำขอปรับปรุงลูกหนี้</a></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li>ห้ามนำเข้าโดยไม่เปลี่ยนวันที่ออก STM ให้ตรงกับเอกสาร วันที่นี้ใช้เป็นวันที่ของ STM ในรายงานทุกหน้า</li>
+        <li>ผู้ดูแลระบบ: ปุ่ม <span class="ui">ลบ</span> ท้ายแถวต้องกด <span class="ui">ยืนยันลบ</span> อีกครั้ง ลบแล้วกู้คืนไม่ได้ (นำเข้าใหม่ได้) ลบเฉพาะไฟล์ที่นำเข้าผิดเท่านั้น</li>
+      </ul>
+    </div>
+    <p><b>การลงบัญชี:</b> การนำเข้า STM และ REP ไม่ลงบัญชี ลงบัญชีเมื่อกดตัดลูกหนี้ในขั้น ค</p>
+  </article>
+
+  <!-- ข -->
+  <article class="task" id="transfer">
+    <h3><span class="step">ข</span>ดึงเงินโอนจาก SMT (เงินโอนที่ได้รับ)</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>อย่างน้อยเดือนละครั้งหลังมีเงินโอนเข้า และ <b>ทุกครั้งก่อนตัดหนี้เหมาจ่าย</b> (ขั้น ง)</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป ส่วนการจับคู่กองทุนกับบัญชีเป็นของผู้ดูแลระบบ</dd>
+      <dt>ต้องทำก่อน</dt><dd>ไม่มี ระบบดึงจากรายงานเงินโอนของ SMT สปสช. โดยตรง ไม่ต้องดาวน์โหลดไฟล์</dd>
+    </dl>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">รับเงิน › เงินโอนที่ได้รับ</span></li>
+      <li>เลือก <span class="ui">ปีงบ (วันที่โอน)</span> ที่มุมขวาบน</li>
+      <li>กด <span class="ui">ดึงจาก SMT</span> รอจนข้อความสรุปขึ้น เช่น <q>ดึงจาก SMT ปีงบ 2570 … รายการ · เพิ่มใหม่ … · อัปเดตตาม SMT … · เหมือนเดิม …</q></li>
+      <li>ตรวจตาราง <b>ยอดรับต่อบัญชี</b> ว่ายอดรายเดือนของ <code class="acct">4301020105.214</code> (เหมาจ่ายรายหัว UC OP) และ <code class="acct">4301020105.217</code> (P&amp;P) ตรงกับเงินที่เข้าธนาคาร</li>
+      <li>ถ้าหัวข้อ <b>กองทุนใน SMT</b> แสดง "ยังไม่จับคู่ … กองทุน" ให้แจ้งผู้ดูแลระบบจับคู่บัญชี (ดู<a href="#admin-fundmap">ภาคผนวก</a>) แล้วกด <span class="ui">ดึงจาก SMT</span> อีกครั้ง</li>
+    </ol>
+    <figure>
+      <img src="img/04-transfer.png" alt="หน้าเงินโอนที่ได้รับ ตารางยอดรับต่อบัญชีปีงบ 2570" width="1175" height="330" loading="lazy">
+      <figcaption><b>รูป 4</b> (1) ปีงบ (2) ปุ่ม <b>เพิ่มเอง</b> (3) ปุ่ม <b>ดึงจาก SMT</b> (4) ตารางยอดรับต่อบัญชีต่อเดือน แถว <code class="acct">3102010102.201</code> คือเงินโอนของงบปีก่อนที่ระบบแยกให้อัตโนมัติ</figcaption>
+    </figure>
+    <ul class="plain">
+      <li>กดดึงซ้ำได้ ไม่เกิดรายการซ้ำ รายการที่การเงินแก้หรือยกเลิกไว้แล้วจะไม่ถูกทับ (นับเป็น "แก้/ยกเลิกแล้ว ไม่ทับ")</li>
+      <li>รายการที่ SMT ยังเป็น "รอโอน" ไม่ถูกนำเข้า และรายการยอด 0 ถูกข้าม</li>
+      <li>รายการที่เป็นงบของปีงบก่อนวันโอน (เช่น OP REFER หรือ P&amp;P งวดปีก่อน) ระบบลงบัญชี <code class="acct">3102010102.201</code> กำไร/ขาดทุนสะสมจากข้อผิดพลาดเงินกองทุน UC ปีก่อน แทนบัญชีรายได้ เพื่อไม่ให้นับเป็นรายได้เหมาจ่ายของปีนี้</li>
+    </ul>
+    <h4>เพิ่มรายการเอง แก้ และยกเลิก</h4>
+    <ol class="steps">
+      <li>เงินโอนที่ไม่มีใน SMT: กด <span class="ui">เพิ่มเอง</span> กรอก <span class="ui">วันที่โอน</span> <span class="ui">เลขที่เอกสาร</span> <span class="ui">บัญชี (เครดิต)</span> <span class="ui">จำนวนเงิน (บาท) ถูกหักคืนใส่ลบ</span> <span class="ui">หมายเหตุ</span> แล้วกด <span class="ui">เพิ่มรายการ</span></li>
+      <li>แก้รายการ: ในตาราง "รายการโอน" กดไอคอนหน้าแถว ส่วน "แก้รายการ" แก้แล้วกด <span class="ui">บันทึกการแก้ไข</span> รายการที่แก้จะมีป้าย "แก้แล้ว" (ชี้ที่ป้ายเพื่อดูยอดเดิมจาก SMT)</li>
+      <li>ยกเลิกรายการ: ส่วน "ยกเลิกรายการ" กรอก <span class="ui">เหตุผลที่ยกเลิก</span> แล้วกด <span class="ui">ยกเลิกรายการ</span></li>
+    </ol>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ข้อความสรุปไม่มี "กองทุนยังไม่จับคู่" ถ้ามี รายการของกองทุนนั้นยังไม่ถูกนำเข้า ยอดจะขาด</li>
+        <li>ยอดรับต่อบัญชีของเดือนตรงกับ Statement ธนาคาร</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>ดึงข้อมูล SMT ไม่สำเร็จ: หมดเวลารอ</q></td><td>เว็บ SMT ตอบช้าหรือล่ม รอสักครู่แล้วกดใหม่</td></tr>
+        <tr><td><q>กองทุนยังไม่จับคู่ …</q> ในสรุป และรายชื่อกองทุนพร้อมยอด</td><td>ผู้ดูแลระบบต้องจับคู่บัญชีของกองทุนนั้นก่อน แล้วกดดึงใหม่</td></tr>
+        <tr><td><q>อยู่ในงวดที่ปิดแล้ว …</q> ในสรุป</td><td>รายการที่วันที่โอนอยู่ในงวดที่ปิดแล้วไม่ถูกเพิ่มหรือแก้ ต้องให้ผู้ดูแลเปิดงวดก่อน หรือเพิ่มเองในงวดที่เปิด</td></tr>
+        <tr><td><q>งวดถึงเดือน … ปิดแล้ว แก้หรือเพิ่มรายการในงวดที่ปิดไม่ได้</q></td><td>เลือกวันที่โอนในงวดที่ยังเปิด</td></tr>
+        <tr><td><q>งวดของวันที่โอนนี้ปิดแล้ว แก้หรือยกเลิกไม่ได้</q></td><td>รายการอยู่ในงวดที่ปิดแล้ว ต้องให้ผู้ดูแลเปิดงวด</td></tr>
+        <tr><td><q>รหัสบัญชีต้องเป็นรูปแบบ 4301020105.214 …</q></td><td>เลือกบัญชีจากรายการ หรือพิมพ์ให้ครบ 10 หลัก จุด และเลขท้าย</td></tr>
+        <tr><td><q>จำนวนเงินต้องไม่เป็น 0 และมีทศนิยมไม่เกิน 2 ตำแหน่ง</q></td><td>แก้จำนวนเงิน</td></tr>
+        <tr><td><q>วันที่โอนต้องอยู่ระหว่างวันเริ่มสมุดลูกหนี้ถึงวันนี้</q></td><td>สมุดลูกหนี้เริ่ม 1 ต.ค. 2568 เลือกวันที่ไม่เกินวันนี้</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li>ห้ามเพิ่มเองซ้ำกับรายการที่ SMT มีอยู่แล้ว ยอดจะนับสองครั้ง</li>
+        <li>ห้ามยกเลิกรายการ SMT เพื่อ "ลบ" เงินที่ถูกหักคืน ให้เพิ่มรายการยอดติดลบแทน</li>
+      </ul>
+    </div>
+    <p><b>การลงบัญชี:</b> รับเงินโอน Dr เงินฝากธนาคาร / Cr บัญชีของรายการ (เช่น <code class="acct">4301020105.214</code>) ยอดติดลบ (ถูกหักคืน) กลับข้าง เงินในบัญชี .214 และ .217 เป็นวงเงินที่ขั้น ง ใช้ตัดหนี้เหมาจ่าย</p>
+  </article>
+
+  <!-- ค -->
+  <article class="task" id="settle">
+    <h3><span class="step">ค</span>ตัดลูกหนี้ด้วย STM</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>หลังนำเข้า STM แต่ละไฟล์ ทำทีละไฟล์</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป</dd>
+      <dt>ต้องทำก่อน</dt><dd>นำเข้า STM (ขั้น ก) และมีเลขที่ใบเสร็จรับเงินของยอดนั้นแล้ว ควรนำเข้า REP งวดเดียวกันด้วย</dd>
+    </dl>
+    <p>ระบบตัดเฉพาะบัญชีที่ตั้งค่า "ตัดหนี้ด้วย STM" ไว้ ปัจจุบันคือ <code class="acct">1102050101.202</code> UC IP, <code class="acct">.216</code> UC OP บริการเฉพาะ (CR), <code class="acct">.217</code> UC IP บริการเฉพาะ, <code class="acct">.222</code> OP Refer, <code class="acct">.401</code> เบิกจ่ายตรงกรมบัญชีกลาง OP และ <code class="acct">.402</code> กรมบัญชีกลาง IP บัญชีอื่นตัดด้วยวิธีอื่น (ขั้น ง จ ฉ)</p>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › ตัดลูกหนี้</span> ตารางแสดงไฟล์ STM ทุกไฟล์ คอลัมน์ <span class="ui">ตัดแล้ว (รายการ)</span> บอกว่าตัดไปแล้วกี่รายการจากที่ STM จ่าย</li>
+      <li>กดไอคอนหน้าแถวของไฟล์ที่จะตัด หน้าต่าง "ตัดลูกหนี้ &lt;เลขที่เอกสาร&gt;" เปิดขึ้น แสดงหนึ่งแถวต่อหนี้หนึ่งราย</li>
+      <li>ดูปุ่มสรุปด้านบน กดปุ่มเพื่อกรองตาราง: <span class="tag">ตรงยอด</span> <span class="tag">มีส่วนต่าง</span> <span class="tag">ไม่พบหนี้ที่ตัดได้</span> <span class="tag">REP งวดนี้ STM ไม่จ่าย</span> <span class="tag">ตัดแล้ว</span></li>
+      <li>ในกลุ่ม "มีส่วนต่าง" เลือกว่าจะปิดส่วนต่างรายใดในคอลัมน์ <span class="ui">ปิดส่วนต่าง</span>
+        <ul class="plain">
+          <li><b>ได้รับต่ำกว่า</b> ค่าเริ่มต้นไม่ติ๊ก ระบบรับชำระตามที่ STM จ่าย คงเหลือเก็บไว้รอ STM งวดถัดไป (สถานะเป็น "รับบางส่วน") ติ๊กเมื่อแน่ใจว่าจะไม่ได้รับเพิ่ม</li>
+          <li><b>ได้รับสูงกว่า</b> ค่าเริ่มต้นติ๊ก ระบบปิดยอดที่รับเกินเป็นส่วนต่าง</li>
+        </ul>
+      </li>
+      <li>ด้านล่างหน้าต่าง เลือก <span class="ui">วันที่ออกใบเสร็จ</span> และกรอก <span class="ui">เลขที่ใบเสร็จ</span> (บังคับเมื่อมีรายการรับชำระ) ข้อความถัดไปบอกยอดที่จะลง เช่น <q>รับชำระ 449 ราย 823,590.37 บาท · ปิดส่วนต่าง 0 ราย 0.00 บาท</q></li>
+      <li>กด <span class="ui">ตัดลูกหนี้</span> ระบบยังไม่บันทึก แต่แสดงข้อความยืนยันสีส้ม ตรวจวันที่ เลขที่ใบเสร็จ และยอด</li>
+      <li>กด <span class="ui">ยืนยันตัดลูกหนี้</span> เพื่อบันทึก หรือ <span class="ui">แก้ไข</span> เพื่อกลับไปแก้ ผลจะขึ้นเป็น <q>ชุด #… : รับชำระ … รายการ … บาท · ปิดส่วนต่าง … รายการ … บาท</q></li>
+    </ol>
+    <figure>
+      <img src="img/07-settle-preview.png" alt="หน้าต่างตัดลูกหนี้ของไฟล์ STM แสดงปุ่มสรุปกลุ่ม ตารางรายหนี้ และแถบวันที่ใบเสร็จด้านล่าง" width="1372" height="940" loading="lazy">
+      <figcaption><b>รูป 5</b> หน้าต่างตัดลูกหนี้ (1) ปุ่มสรุปกลุ่ม กดเพื่อกรอง (2) สถานะรายหนี้ (3) คอลัมน์หนี้คงเหลือ STM จ่าย และคงเหลือหลังตัด (4) ช่องติ๊กปิดส่วนต่าง (5) แถบล่าง: วันที่ออกใบเสร็จ เลขที่ใบเสร็จ ยอดที่จะลง และปุ่มตัดลูกหนี้ ช่อง VN HN และเลข REP ถูกเบลอ</figcaption>
+    </figure>
+    <figure>
+      <img src="img/08-settle-confirm.png" alt="แถบยืนยันการตัดลูกหนี้ มีปุ่มแก้ไขและยืนยันตัดลูกหนี้" width="1058" height="76" loading="lazy">
+      <figcaption><b>รูป 6</b> หลังกด "ตัดลูกหนี้" ระบบแสดงข้อความยืนยันพร้อมปุ่ม <b>แก้ไข</b> และ <b>ยืนยันตัดลูกหนี้</b> (เลขที่ใบเสร็จในรูปเป็นตัวอย่าง)</figcaption>
+    </figure>
+    <figure>
+      <img src="img/06-settle-list.png" alt="ตารางไฟล์ STM ในหน้าตัดลูกหนี้" width="1175" height="560" loading="lazy">
+      <figcaption><b>รูป 7</b> ตารางไฟล์ STM ในหน้าตัดลูกหนี้ คอลัมน์ "ตัดแล้ว (รายการ)" เช่น 477 / 606 หมายถึงตัดแล้ว 477 จาก 606 รายการที่ STM จ่าย</figcaption>
+    </figure>
+    <h4>ความหมายของสถานะรายหนี้</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>สถานะ</th><th>ความหมาย</th><th>ต้องทำอะไร</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag">ตรงยอด</span></td><td>STM จ่ายเท่าหนี้คงเหลือ</td><td>ตัดได้เลย</td></tr>
+        <tr><td><span class="tag">ได้รับต่ำกว่า</span></td><td>STM จ่ายน้อยกว่าหนี้</td><td>เลือกว่าจะปิดส่วนต่างหรือรอ STM งวดถัดไป</td></tr>
+        <tr><td><span class="tag">ได้รับสูงกว่า</span></td><td>STM จ่ายมากกว่าหนี้</td><td>ปกติปิดส่วนต่าง (ติ๊กไว้ให้แล้ว)</td></tr>
+        <tr><td><span class="tag">ถูกเรียกคืน</span></td><td>STM งวดนี้หักเงินคืน</td><td>ตรวจกับ Statement ก่อนตัด</td></tr>
+        <tr><td><span class="tag">ยังไม่ลงสมุด</span></td><td>หนี้ของ VN/AN นี้ยังไม่ถูกตั้ง (เช่น การเงินยังไม่ล็อกรายการผู้ป่วยใน หรือยังไม่ออกใบลูกหนี้)</td><td>ให้ตั้งหนี้ใน HOSxP แล้วรอรอบกลางคืน (หรือกด "ดึงยอดล่าสุด") แล้วเปิดไฟล์นี้ตัดอีกครั้ง</td></tr>
+        <tr><td><span class="tag">ไม่พบ VN/AN</span></td><td>จับคู่บรรทัด STM กับ VN/AN ไม่ได้</td><td>นำเข้า REP งวดที่ตรงกันแล้วเปิดดูใหม่</td></tr>
+        <tr><td><span class="tag">บัญชีไม่ตัดด้วย STM</span></td><td>หนี้อยู่ในบัญชีที่ไม่ได้ตั้งให้ตัดด้วย STM</td><td>ตรวจว่าบัญชีถูกต้องไหม ถ้าบัญชีผิดแจ้งผู้ดูแลระบบ</td></tr>
+        <tr><td><span class="tag">ยังไม่ระบุบัญชี</span></td><td>หนี้ยังไม่มีรหัสบัญชี</td><td>แจ้งผู้ดูแลระบบกำหนดกติกาบัญชี</td></tr>
+        <tr><td><span class="tag">STM จ่าย 0</span></td><td>บรรทัด STM ยอด 0</td><td>ไม่มีอะไรให้ตัด</td></tr>
+        <tr><td><span class="tag">STM ไม่จ่าย</span></td><td>REP งวดนี้ผ่าน แต่ไม่มีใน STM</td><td>ติดตามกับ สปสช. หรือรอ STM งวดถัดไป</td></tr>
+        <tr><td><span class="tag">ตัดครบ</span> <span class="tag">รับบางส่วน</span></td><td>ตัดไปแล้วจนคงเหลือ 0 / ตัดแล้วยังเหลือ</td><td>รายที่รับบางส่วนปิดส่วนต่างภายหลังได้ โดยติ๊กในแถวที่ตัดแล้วและกดตัดอีกครั้ง</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ข้อความผลขึ้นเลขชุด และยอดรับชำระรวมตรงกับยอดโอนสุทธิของ STM (ยกเว้นรายที่ยังไม่ลงสมุดหรือไม่พบ VN/AN)</li>
+        <li>เปิดหัวข้อ "ประวัติการตัด … ชุด" ใต้แถบล่าง เห็นชุดที่เพิ่งตัด พร้อมวันที่และเลขที่ใบเสร็จ</li>
+        <li>กลุ่ม "ไม่พบหนี้ที่ตัดได้" ที่เหลือ มีเหตุผลอธิบายได้ทุกราย</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td>ปุ่ม <span class="ui">ตัดลูกหนี้</span> กดไม่ได้ ชี้แล้วขึ้น <q>กรอกเลขที่ใบเสร็จ</q></td><td>กรอกเลขที่ใบเสร็จก่อน</td></tr>
+        <tr><td><q>วันที่ใบเสร็จอยู่ในงวดที่ปิดแล้ว รายการจะลงวันที่ …</q></td><td>งวดของวันที่เลือกปิดแล้ว ระบบจะลงวันแรกของงวดที่เปิด ตรวจว่ายอมรับได้</td></tr>
+        <tr><td><q>ไม่มีรายการที่ตัดหรือปิดส่วนต่างได้ (ตัดไปแล้ว หรือยังไม่พบหนี้)</q></td><td>ไฟล์นี้ตัดครบแล้ว หรือหนี้ยังไม่ลงสมุด</td></tr>
+        <tr><td><q>รายการถูกตัดไปแล้ว</q></td><td>มีคนอื่นตัดไฟล์เดียวกันพร้อมกัน ปิดหน้าต่างแล้วเปิดใหม่</td></tr>
+        <tr><td><q>วันที่ออกใบเสร็จต้องอยู่ระหว่างวันเริ่มสมุดลูกหนี้ถึงวันนี้</q></td><td>เลือกวันที่ตั้งแต่ 1 ต.ค. 2568 ถึงวันนี้</td></tr>
+        <tr><td><q>เลขที่ใบเสร็จยาวได้ไม่เกิน … ตัวอักษร</q></td><td>ย่อเลขที่ใบเสร็จ</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li>ห้ามกดยืนยันก่อนตรวจเลขที่ใบเสร็จและวันที่ ชุดที่ตัดแล้ว <b>ยกเลิกไม่ได้</b> แก้ได้ทางเดียวคือ<a href="#adjust">คำขอปรับปรุงลูกหนี้</a>ทีละราย</li>
+        <li>ห้ามติ๊กปิดส่วนต่างของรายที่ได้รับต่ำกว่า ถ้ายังมีโอกาสได้รับเพิ่มจาก STM อุทธรณ์หรืองวดถัดไป</li>
+      </ul>
+    </div>
+    <h4>การลงบัญชี</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th>เดบิต</th><th>เครดิต</th></tr></thead>
+      <tbody>
+        <tr><td>รับชำระตาม STM</td><td>เงินฝากธนาคาร</td><td>ลูกหนี้ (บัญชีของหนี้)</td></tr>
+        <tr><td>ปิดส่วนต่าง กรณีได้รับต่ำกว่า</td><td>ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง ของบัญชีนั้น</td><td>ลูกหนี้</td></tr>
+        <tr><td>ปิดส่วนต่าง กรณีได้รับสูงกว่า</td><td>ลูกหนี้</td><td>ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง ของบัญชีนั้น</td></tr>
+      </tbody>
+    </table></div>
+    <p class="small">บัญชีส่วนต่างของแต่ละบัญชีลูกหนี้ดูได้ที่<a href="#rules-stm">ตาราง STM</a> ในหัวข้อ 3</p>
+  </article>
+
+  <!-- ง -->
+  <article class="task" id="capitation">
+    <h3><span class="step">ง</span>ตัดหนี้เหมาจ่ายสิ้นเดือน .201 / .209</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>หลังจบเดือน ทำเดือนละครั้ง เรียงจากเดือนเก่าไปใหม่</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป</dd>
+      <dt>ต้องทำก่อน</dt><dd><b>กดดึงจาก SMT (ขั้น ข) ให้ได้เงินโอนของเดือนนั้นครบก่อน</b> และเดือนก่อนหน้าตัดไปแล้ว</dd>
+    </dl>
+    <p>หนี้ UC ผู้ป่วยนอกใน CUP (<code class="acct">1102050101.201</code>) และหนี้ P&amp;P (<code class="acct">1102050101.209</code>) ไม่ได้รับเป็นรายราย แต่ได้เป็นเงินเหมาจ่าย ระบบจึงตัดหนี้ด้วยเงินโอนสะสมของปีงบที่อยู่ในบัญชีรายได้ <code class="acct">4301020105.214</code> และ <code class="acct">4301020105.217</code></p>
+    <ul class="plain">
+      <li>วงเงินที่ใช้ตัดได้ = เงินโอนเข้าบัญชีรายได้นั้นตั้งแต่ต้นปีงบถึงสิ้นเดือน − ที่ใช้ตัดไปแล้วในปีงบ</li>
+      <li>ระบบเรียงหนี้ที่ยังคงเหลือตามวันที่ตั้งหนี้ (ตั้งแต่ต้นปีงบถึงสิ้นเดือน) ตัดไปจนวงเงินหมด ส่วนที่วงเงินไม่พอลงส่วนต่างทันที หนี้ทุกรายในรอบจึงเหลือ 0</li>
+      <li>รายการลงวันที่สิ้นเดือนที่เลือก</li>
+    </ul>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › ตัดหนี้เหมาจ่าย</span></li>
+      <li>เลือก <span class="ui">สิ้นเดือน</span> (ค่าเริ่มต้นคือเดือนก่อน)</li>
+      <li>อ่านกรอบของแต่ละบัญชี: <span class="ui">รับโอนในปีงบถึง …</span> <span class="ui">ตัดหนี้ไปแล้วในปีงบ</span> <span class="ui">ใช้ตัดได้</span> <span class="ui">หนี้คงเหลือ … ราย</span> <span class="ui">ตัดด้วยเหมาจ่าย</span> <span class="ui">ลงส่วนต่าง</span> (ตัวแดงเมื่อมากกว่า 0) และ <span class="ui">เหมาจ่ายคงเหลือหลังตัด</span></li>
+      <li>กด <span class="ui">ดูรายหนี้ … ราย</span> เพื่อดูรายหนี้ที่จะตัด (ข้อมูลผู้ป่วย ห้ามส่งต่อ)</li>
+      <li>กด <span class="ui">ตัดหนี้สิ้นเดือน &lt;เดือน&gt;</span> ระบบแสดง <q>ยืนยันตัดหนี้ … สิ้นเดือน …: ตัดด้วยเหมาจ่าย … บาท และลงส่วนต่าง … บาท</q></li>
+      <li>กด <span class="ui">ยืนยันตัดหนี้</span> หรือ <span class="ui">ยังไม่ตัด</span> ทำแยกทีละบัญชี (.201 และ .209)</li>
+    </ol>
+    <figure>
+      <img src="img/09-capitation.png" alt="หน้าตัดหนี้เหมาจ่าย เดือน ต.ค. 2569 กรอบบัญชี .201 และ .209" width="1175" height="520" loading="lazy">
+      <figcaption><b>รูป 8</b> ตัดหนี้เหมาจ่ายสิ้นเดือน ต.ค. 2569 (1) เลือกสิ้นเดือน (2) บรรทัดหัวกรอบบอกบัญชีที่ใช้ตัด (.214) และบัญชีส่วนต่าง (.229) (3) ยอดลงส่วนต่างตัวแดง: เงินโอนเหมาจ่ายไม่พอกับหนี้ (4) ปุ่มดูรายหนี้และปุ่มตัดหนี้สิ้นเดือน ในตัวอย่าง .209 ยังเหลือวงเงิน 2,082,960.00 บาทไว้ใช้เดือนถัดไปในปีงบเดียวกัน</figcaption>
+    </figure>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ข้อความผล <q>ชุด #… …: ตัดด้วยเหมาจ่าย … ราย … บาท · ลงส่วนต่าง … ราย … บาท</q></li>
+        <li>ชุดใหม่ขึ้นในตาราง "ชุดที่ตัดแล้ว" ด้านล่าง</li>
+        <li>ในหน้า ลูกหนี้ตามผังบัญชี บัญชี .201/.209 ของเดือนนั้นมียอด "ลดหนี้" เท่ายอดตัดรวมส่วนต่าง</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ (แทนปุ่มตัดหนี้)</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>เดือนนี้ยังไม่จบ แสดงตัวอย่างถึงวันนี้ ยืนยันได้เมื่อจบเดือน</q> / <q>ยืนยันได้เมื่อจบเดือนแล้ว</q></td><td>ดูตัวอย่างได้ ตัดจริงได้หลังจบเดือน</td></tr>
+        <tr><td><q>งวดถึงเดือน … ปิดแล้ว ตัดหนี้ของเดือนที่ปิดไม่ได้</q></td><td>เดือนนั้นปิดงวดแล้ว ต้องตัดก่อนปิดงวด ถ้าลืมให้ผู้ดูแลเปิดงวด</td></tr>
+        <tr><td><q>ยังไม่กำหนดบัญชีส่วนต่างของ …</q></td><td>ผู้ดูแลระบบยังไม่ตั้งบัญชีส่วนต่าง แจ้งทีมพัฒนา (หน้าจอยังไม่มีช่องแก้ค่านี้)</td></tr>
+        <tr><td><q>ไม่มีหนี้คงเหลือที่ต้องตัด</q></td><td>ตัดครบแล้ว</td></tr>
+        <tr><td><q>รายการถูกตัดไปแล้ว กดดูตัวอย่างใหม่</q></td><td>มีคนตัดพร้อมกัน โหลดหน้าใหม่</td></tr>
+        <tr><td><q>ยังไม่มีบัญชีลูกหนี้ที่กำหนดบัญชีตัดเหมาจ่าย</q></td><td>ผู้ดูแลระบบยังไม่ตั้ง "ตัดอัตโนมัติ (Dr)" ของบัญชี</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li><b>ห้ามตัดก่อนดึงเงินโอนของเดือนนั้นจาก SMT</b> ส่วนที่วงเงินไม่พอจะลงส่วนต่าง .229/.257 ทันทีและหนี้กลายเป็น 0 เงินที่ดึงมาทีหลังจะใช้ได้กับหนี้ของเดือนถัดไปเท่านั้น</li>
+        <li><b>ห้ามตัดข้ามเดือน</b> ต้องตัดเดือนเก่าก่อน เพราะรอบของเดือนหลังรวมหนี้ตั้งแต่ต้นปีงบที่ยังคงเหลือ ถ้าตัดเดือนหลังก่อน หนี้ของเดือนก่อนจะถูกตัดในวันสิ้นเดือนหลังแทน</li>
+      </ul>
+    </div>
+    <h4>การลงบัญชี</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th>เดบิต</th><th>เครดิต</th></tr></thead>
+      <tbody>
+        <tr><td>ตัดด้วยเหมาจ่าย .201</td><td><code class="acct">4301020105.214</code> รายได้เหมาจ่าย</td><td><code class="acct">1102050101.201</code></td></tr>
+        <tr><td>ส่วนต่างเมื่อเหมาจ่ายไม่พอ .201</td><td><code class="acct">4301020105.229</code></td><td><code class="acct">1102050101.201</code></td></tr>
+        <tr><td>ตัดด้วยเหมาจ่าย .209</td><td><code class="acct">4301020105.217</code></td><td><code class="acct">1102050101.209</code></td></tr>
+        <tr><td>ส่วนต่างเมื่อเหมาจ่ายไม่พอ .209</td><td><code class="acct">4301020105.257</code></td><td><code class="acct">1102050101.209</code></td></tr>
+      </tbody>
+    </table></div>
+  </article>
+
+  <!-- จ -->
+  <article class="task" id="fwf">
+    <h3><span class="step">จ</span>ตัดหนี้บัตรประกันสุขภาพต่างด้าวสิ้นเดือน</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>หลังจบเดือน เรียงจากเดือนเก่าไปใหม่</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป ส่วนการกำหนดยอดเงินของชนิดบัตรเป็นของผู้ดูแลระบบ</dd>
+      <dt>ต้องทำก่อน</dt><dd>ทะเบียนบัตรของเดือนนั้นครบ (ระบบดึงรายการขายบัตรจาก HOSxP เองเมื่อเปิดหน้า) และชนิดบัตรทุกชนิดกำหนดยอดเงินรับล่วงหน้าแล้ว</dd>
+    </dl>
+    <p>ค่าบริการทางการแพทย์ของบัตรที่ขายเข้าเป็นเงินรับล่วงหน้า <code class="acct">2103010103.502</code> ก้อนเดียว ใช้ตัดหนี้ผู้ถือบัตรสิทธิ 99 ในบัญชี <code class="acct">1102050101.501</code> (OP) และ <code class="acct">.502</code> (IP)</p>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › บัตรประกันสุขภาพต่างด้าว</span> แล้วกดแท็บ <span class="ui">ตัดหนี้สิ้นเดือน</span></li>
+      <li>เลือก <span class="ui">สิ้นเดือน</span></li>
+      <li>ตรวจยอด <span class="ui">เงินรับล่วงหน้า ณ …</span> <span class="ui">ตัดด้วยเงินรับล่วงหน้า</span> <span class="ui">ลงส่วนต่าง</span> <span class="ui">คงเหลือหลังตัด</span> และป้าย <span class="tag">ต้องตรวจ … ราย ไม่ตัด</span> <span class="tag">บัตรชนิดที่ยังไม่กำหนดยอด … ใบ</span></li>
+      <li>ตรวจตาราง "แผนตัดหนี้" คอลัมน์ <span class="ui">ผล</span>: ตัดเต็มยอด / ตัดบางส่วน + ส่วนต่าง / pool หมด ลงส่วนต่าง / ต้องตรวจ / ชนิดบัตรยังไม่กำหนดยอด และหัวข้อ "ต้องตรวจ" ด้านล่าง แก้รายที่ต้องตรวจใน HOSxP ก่อน</li>
+      <li>กด <span class="ui">ตัดหนี้สิ้นเดือน &lt;เดือน&gt;</span> แล้ว <span class="ui">ยืนยันตัดหนี้</span> (หรือ <span class="ui">ยังไม่ตัด</span>) ปุ่มนี้ไม่แสดงถ้ามีบัตรชนิดที่ยังไม่กำหนดยอด</li>
+    </ol>
+    <figure>
+      <img src="img/10-fwf-month-end.png" alt="แท็บตัดหนี้สิ้นเดือนของบัตรต่างด้าว เดือน ต.ค. 2569" width="1175" height="640" loading="lazy">
+      <figcaption><b>รูป 9</b> แท็บตัดหนี้สิ้นเดือน (1) แท็บ (2) ยอดเงินรับล่วงหน้าและยอดที่จะตัด (3) ป้ายต้องตรวจและบัตรที่ยังไม่กำหนดยอด (4) ข้อความสีส้มบอกว่าทำไมยังยืนยันไม่ได้ ในตัวอย่างมีบัตร 9 ใบเป็นชนิดที่ยังไม่กำหนดยอด ปุ่มตัดหนี้จึงไม่แสดง (5) แผนตัดหนี้รายราย ช่อง HN ชื่อ และ VN ถูกเบลอ</figcaption>
+    </figure>
+    <h4>เหตุที่รายหนี้ "ต้องตรวจ" (ระบบไม่ตัดให้)</h4>
+    <ul class="plain">
+      <li><q>ไม่พบ HN หรือวันรับบริการใน HOSxP</q></li>
+      <li><q>สิทธิของ visit ใน HOSxP เป็น … ไม่ใช่ 99 แล้ว แก้สิทธิหรือบัญชีลูกหนี้</q></li>
+      <li><q>ไม่มีบัตรที่ใช้ได้ในวันรับบริการ ตรวจสิทธิใน HOSxP</q> (ผู้ป่วยในใช้วัน admit หาบัตร)</li>
+    </ul>
+    <div class="callout info">
+      <span class="label">หมายเหตุ: งานอื่นในหน้าบัตรต่างด้าว</span>
+      <ul>
+        <li>แท็บ <b>ทะเบียนบัตร</b>: ปุ่ม <span class="ui">ดึงใหม่</span> ดึงรายการขายบัตรของเดือนที่เลือกจาก HOSxP กดซ้ำได้ ไม่ลงซ้ำ ป้าย "ไม่มีใบเสร็จ" "paidst 02" "ไม่พบใน HOSxP" คือบัตรที่ควรตรวจ แก้วันใช้ได้หรือยกเลิกบัตร (ต้องมีเหตุผล) ได้ในรายละเอียดบัตร</li>
+        <li>แท็บ <b>เงินรับล่วงหน้า</b>: บัตรหมดอายุที่ยังมีเงินคงเหลือ กด <span class="ui">บันทึกโอน</span> เพื่อโอนคงเหลือไปเงินบำรุง</li>
+        <li>แท็บ <b>ใช้สิทธิต่อคน</b>: ยอดใช้ต่อผู้ถือบัตร และยอดที่ใช้เกิน</li>
+      </ul>
+    </div>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ข้อความผล <q>ชุด #…: ตัดด้วยเงินรับล่วงหน้า … ราย … บาท · ส่วนต่าง … ราย … บาท · ต้องตรวจ … ราย</q></li>
+        <li>ชุดใหม่ขึ้นในตาราง "ชุดที่ตัดแล้ว"</li>
+        <li>รายที่ต้องตรวจถูกแก้ใน HOSxP แล้ว และกลับมาตัดในเดือนเดียวกันอีกครั้งได้</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>บัตร … ใบของหนี้ … รายเป็นชนิดที่ยังไม่กำหนดค่าบริการทางการแพทย์ ให้ผู้ดูแลกำหนดที่แท็บชนิดบัตรก่อน</q></td><td>แจ้งผู้ดูแลระบบกำหนดยอด "เงินรับล่วงหน้าต่อใบ" ที่แท็บชนิดบัตร</td></tr>
+        <tr><td><q>ไม่มีหนี้ที่ตัดได้ในเดือนนี้ (ตัดไปแล้ว หรือทุกรายต้องตรวจ)</q></td><td>ตัดครบแล้ว หรือต้องแก้รายที่ต้องตรวจก่อน</td></tr>
+        <tr><td><q>ยืนยันได้เมื่อจบเดือนแล้ว</q></td><td>รอจบเดือน</td></tr>
+        <tr><td><q>รายการถูกตัดไปแล้ว กดดูตัวอย่างใหม่</q></td><td>มีคนตัดพร้อมกัน โหลดหน้าใหม่</td></tr>
+        <tr><td><q>ดึงรายการขายบัตรจาก HOSxP ไม่สำเร็จ: … · กดดึงใหม่อีกครั้งได้ รายการที่มีแล้วไม่ลงซ้ำ</q></td><td>กด <span class="ui">ดึงใหม่</span> ในแท็บทะเบียนบัตร</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li>ห้ามตัดก่อนทะเบียนบัตรของเดือนนั้นครบ หนี้ที่หาบัตรไม่เจอจะเป็น "ต้องตรวจ" และวงเงินจะผิด</li>
+        <li>ห้ามยกเลิกบัตรโดยไม่ตรวจกับ HOSxP ว่าไม่ได้ขายจริง</li>
+      </ul>
+    </div>
+    <h4>การลงบัญชี</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th>เดบิต</th><th>เครดิต</th></tr></thead>
+      <tbody>
+        <tr><td>ตัดด้วยเงินรับล่วงหน้า</td><td><code class="acct">2103010103.502</code> รายได้ค่ารักษาแรงงานต่างด้าวรับล่วงหน้า</td><td><code class="acct">1102050101.501</code> / <code class="acct">.502</code></td></tr>
+        <tr><td>ส่วนต่างเมื่อเงินรับล่วงหน้าไม่พอ</td><td>ส่วนต่างที่สูงกว่าข้อตกลงของบัญชี (ตั้งค่าปัจจุบัน .501 → <code class="acct">4301020106.505</code>, .502 → <code class="acct">4301020106.507</code>)</td><td><code class="acct">1102050101.501</code> / <code class="acct">.502</code></td></tr>
+      </tbody>
+    </table></div>
+    <p class="small">บัญชี 2103010103.502 เป็นบัญชีงบดุล ยอดยกไปข้ามปีงบ ไม่ปิดทุก 1 ต.ค.</p>
+  </article>
+
+  <!-- ฉ -->
+  <article class="task" id="receipt">
+    <h3><span class="step">ฉ</span>บันทึกรับเงินที่ไม่ได้มาจาก STM</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>เมื่อได้รับเงินของหนี้ที่ไม่ตัดด้วย STM เช่น ประกันสังคม อปท. พรบ.รถ ชำระเงินเอง เบิกต้นสังกัด ตรวจสุขภาพ</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป</dd>
+      <dt>ต้องทำก่อน</dt><dd>หนี้รายนั้นลงสมุดแล้ว และมีเลขที่ใบเสร็จ</dd>
+    </dl>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › ลูกหนี้ตามผังบัญชี</span></li>
+      <li>เลือก <span class="ui">งวด</span> ที่ตั้งหนี้รายนั้น (มุมขวาบน)</li>
+      <li>ในตารางยอดลูกหนี้ กดรหัสบัญชีของหนี้ ตารางรายการของบัญชีนั้นจะแสดงด้านล่าง</li>
+      <li>หารายด้วยช่องค้นหาหรือตัวกรองหัวคอลัมน์ แล้วกดไอคอนหน้าแถวที่เป็น "ตั้งหนี้"</li>
+      <li>ในหน้าต่างรายละเอียด ส่วน <b>บันทึกรับเงิน</b> กรอก <span class="ui">จำนวนเงิน (บาท)</span> <span class="ui">วันที่รับเงิน</span> <span class="ui">เลขที่ใบเสร็จ</span></li>
+      <li>ถ้ารับไม่เต็มและจะไม่ได้รับเพิ่ม ติ๊ก <span class="ui">ปิดส่วนต่าง</span> ถ้ายังรอรับส่วนที่เหลือ ไม่ต้องติ๊ก</li>
+      <li>กด <span class="ui">บันทึกรับเงิน</span> <b>ระบบบันทึกทันที ไม่มีขั้นยืนยัน</b> ผลขึ้นเป็น <q>บันทึกรับเงิน … บาท · ปิดส่วนต่าง … บาท · คงเหลือ … บาท</q></li>
+    </ol>
+    <figure>
+      <img src="img/11-ledger.png" alt="หน้าลูกหนี้ตามผังบัญชี ตารางยอดลูกหนี้ตามรหัสบัญชี งวด พ.ย. 2569" width="1175" height="860" loading="lazy">
+      <figcaption><b>รูป 10</b> หน้าลูกหนี้ตามผังบัญชี (1) เลือกงวด (2) ปุ่มดึงยอดล่าสุดจาก HOSxP (3) บรรทัดบอกความสดของข้อมูล: ลูกหนี้จาก HOSxP ดึงล่าสุดเมื่อไร REP และ STM ล่าสุดของแต่ละกลุ่ม (4) ตารางยอดลูกหนี้ ยกมา ตั้งเพิ่ม ลดหนี้ คงเหลือ กดรหัสบัญชีเพื่อดูรายการ</figcaption>
+    </figure>
+    <figure>
+      <img src="img/12-ledger-detail.png" alt="หน้าต่างรายละเอียดรายการลูกหนี้ มีส่วนบันทึกรับเงินและขอปรับปรุงลูกหนี้รายนี้" width="900" height="1043" loading="lazy">
+      <figcaption><b>รูป 11</b> รายละเอียดหนี้หนึ่งราย (บัญชี .106 ชำระเงิน OP) (1) ข้อมูลหนี้และปุ่ม <b>ดึงใหม่</b> (2) รายการค่าใช้จ่ายของ visit (3) ส่วน <b>บันทึกรับเงิน</b> (แสดงเฉพาะบัญชีที่ไม่ตัดด้วย STM) (4) ส่วน <b>ขอปรับปรุงลูกหนี้รายนี้</b> หัวหน้าต่างและเลขที่ลูกหนี้ถูกเบลอ</figcaption>
+    </figure>
+    <div class="callout info">
+      <span class="label">หมายเหตุ</span>
+      <ul>
+        <li>รับได้ไม่เกินคงเหลือของหนี้ ระบบไม่รองรับการรับเกิน</li>
+        <li>บันทึกได้ทีละราย ยังไม่มีหน้าบันทึกรับเงินก้อนเดียวหลายราย (เช่น เงินโอนประกันสังคมทั้งงวด)</li>
+        <li>หนี้ประกันสังคมในเครือข่ายตั้งไว้แล้วเพียง 45% (OP) / 55% (IP) ของค่ารักษา ส่วนที่เหลือระบบลงส่วนต่างให้ตอนตั้งหนี้ (ดู<a href="#rules">กติกา</a>)</li>
+        <li>ปุ่ม <span class="ui">ดึงใหม่</span> อ่านยอดของรายนี้จาก HOSxP ทันทีและลงส่วนต่าง ใช้ได้เฉพาะหนี้ที่ยังไม่เคยตัด</li>
+      </ul>
+    </div>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ข้อความผลบอกคงเหลือตามที่คาด</li>
+        <li>ตารางยอดลูกหนี้ของงวดที่ลงวันที่รับเงิน คอลัมน์ "ลดหนี้" ของบัญชีนั้นเพิ่มขึ้น (โหลดหน้าใหม่)</li>
+      </ul>
+    </div>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td>ไม่มีส่วน "บันทึกรับเงิน" ในหน้าต่าง</td><td>บัญชีนี้ตัดด้วย STM ให้ตัดที่หน้า ตัดลูกหนี้ (ขั้น ค)</td></tr>
+        <tr><td><q>บัญชีนี้ตัดด้วย STM ให้ตัดที่หน้าตัดลูกหนี้</q></td><td>เหมือนข้อบน</td></tr>
+        <tr><td><q>รับได้ไม่เกินคงเหลือ … บาท</q></td><td>ลดจำนวนเงิน ถ้าได้รับเกินจริง ให้ส่งคำขอปรับปรุงลูกหนี้</td></tr>
+        <tr><td><q>หนี้นี้ไม่มีคงเหลือแล้ว</q></td><td>ตัดครบแล้ว ตรวจว่าบันทึกซ้ำหรือไม่</td></tr>
+        <tr><td><q>หนี้นี้ยังไม่ระบุบัญชี</q></td><td>แจ้งผู้ดูแลระบบกำหนดบัญชี</td></tr>
+        <tr><td><q>กรอกเลขที่ใบเสร็จ ไม่เกิน … ตัวอักษร</q></td><td>กรอกเลขที่ใบเสร็จ</td></tr>
+        <tr><td><q>จำนวนเงินต้องมากกว่า 0 และมีทศนิยมไม่เกิน 2 ตำแหน่ง</q></td><td>แก้จำนวนเงิน</td></tr>
+        <tr><td><q>วันที่รับเงินต้องอยู่ระหว่างวันเริ่มสมุดลูกหนี้ถึงวันนี้</q></td><td>เลือกวันที่ไม่เกินวันนี้</td></tr>
+        <tr><td><q>… · งวดของวันที่นี้ปิดแล้ว ลงวันแรกของงวดที่เปิด</q></td><td>บันทึกแล้ว แต่ลงวันแรกของงวดที่ยังเปิด</td></tr>
+        <tr><td><q>รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า, เหมาจ่าย หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้</q></td><td>ตอบจากปุ่ม "ดึงใหม่" ใช้คำขอปรับปรุงลูกหนี้แทน</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li>ห้ามกด <span class="ui">บันทึกรับเงิน</span> ซ้ำเมื่อหน้าจอช้า ทุกครั้งที่กดคือการรับเงินหนึ่งครั้ง</li>
+        <li>ห้ามใช้บันทึกรับเงินเพื่อ "ลดหนี้" ที่ไม่ได้รับเงินจริง ให้ใช้คำขอปรับปรุงลูกหนี้</li>
+      </ul>
+    </div>
+    <h4>การลงบัญชี</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th>เดบิต</th><th>เครดิต</th></tr></thead>
+      <tbody>
+        <tr><td>รับเงิน</td><td>เงินฝากธนาคาร</td><td>ลูกหนี้</td></tr>
+        <tr><td>ปิดส่วนต่างหลังรับเงิน</td><td>ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง ของบัญชีนั้น</td><td>ลูกหนี้</td></tr>
+      </tbody>
+    </table></div>
+
+    <h4 id="adjust">คำขอปรับปรุงลูกหนี้</h4>
+    <p>ใช้แก้ยอดหนี้ที่ผิด รวมถึงแก้การตัดหนี้ที่ผิด เพราะชุดตัดหนี้ทุกแบบยกเลิกไม่ได้</p>
+    <ol class="steps">
+      <li>เปิดรายละเอียดหนี้แบบเดียวกับการบันทึกรับเงิน ส่วน <b>ขอปรับปรุงลูกหนี้รายนี้</b></li>
+      <li>กรอก <span class="ui">จำนวนเงิน (บาท) เพิ่มหนี้ใส่บวก ลดหนี้ใส่ลบ</span> และ <span class="ui">เหตุผล</span> แล้วกด <span class="ui">ส่งคำขอ</span> ขึ้น <q>ส่งคำขอแล้ว รอผู้ดูแลระบบอนุมัติ</q></li>
+      <li>คำขอแสดงในหัวข้อ <b>คำขอปรับปรุงลูกหนี้</b> ท้ายหน้า ลูกหนี้ตามผังบัญชี สถานะ รออนุมัติ / อนุมัติแล้ว / ไม่อนุมัติ</li>
+      <li>ผู้ดูแลระบบ <b>ที่ไม่ใช่ผู้ขอ</b> กด <span class="ui">อนุมัติ</span> หรือ <span class="ui">ไม่อนุมัติ</span> (กรอกเหตุผล) หรือติ๊กหลายรายการแล้วกด <span class="ui">อนุมัติที่เลือก … รายการ</span> (ครั้งละไม่เกิน 200) อนุมัติแล้วระบบลงสมุดทันที</li>
+    </ol>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>อนุมัติคำขอของตัวเองไม่ได้ ต้องให้ผู้ดูแลคนอื่นตัดสิน</q></td><td>ให้ผู้ดูแลระบบอีกคนอนุมัติ</td></tr>
+        <tr><td><q>คงเหลือตอนนี้ … บาท ลดตามคำขอแล้วจะติดลบ ให้ไม่อนุมัติแล้วขอใหม่ตามยอดปัจจุบัน</q></td><td>ยอดหนี้เปลี่ยนหลังส่งคำขอ (เช่น ตัดด้วย STM แล้ว) ไม่อนุมัติ แล้วผู้ขอส่งใหม่</td></tr>
+        <tr><td><q>คำขอนี้ตัดสินไปแล้ว</q></td><td>มีผู้ดูแลอีกคนตัดสินแล้ว โหลดหน้าใหม่</td></tr>
+        <tr><td><q>ไม่พบลูกหนี้นี้ในสมุดลูกหนี้แล้ว</q> / <q>ต้องระบุเหตุผล ไม่เกิน 500 ตัวอักษร</q></td><td>ตรวจรายการและกรอกเหตุผล</td></tr>
+      </tbody>
+    </table></div>
+    <p><b>การลงบัญชีเมื่ออนุมัติ:</b> เพิ่มหนี้ Dr ลูกหนี้ / Cr รายได้คู่ของบัญชี ลดหนี้กลับข้าง</p>
+    <p class="small">ใบลูกหนี้ผู้ป่วยนอกที่ค้างหลัง admit (HOSxP ย้ายรายการไป AN แต่ไม่ยกเลิกใบ) ขอปรับปรุงหลายรายพร้อมกันได้จากหน้า <span class="path">ลูกหนี้ › ตรวจค่ารักษาก่อนตั้งหนี้</span> ติ๊กแถวสถานะ "ใบลูกหนี้ค้างหลัง admit" แล้วส่งคำขอ อนุมัติแล้วสถานะเปลี่ยนเป็น "ปรับปรุงในสมุดแล้ว"</p>
+  </article>
+
+  <!-- ช -->
+  <article class="task" id="collect">
+    <h3><span class="step">ช</span>ตรวจสถานที่เรียกเก็บ</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>ทุกเดือน ก่อนส่งหนังสือเรียกเก็บ และก่อนปิดงวด</dd>
+      <dt>ใครทำ</dt><dd>ผู้ใช้ทั่วไป</dd>
+      <dt>ต้องทำก่อน</dt><dd>ขั้น ค ถึง ฉ ของเดือนนั้น ยอด "รับแล้ว" จึงจะครบ</dd>
+    </dl>
+    <h4>ขั้นตอน</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › สถานที่เรียกเก็บ</span></li>
+      <li>เลือกช่วงวันที่รับบริการ/จำหน่าย ที่มุมขวาบน (เลือกได้ไม่เกิน 31 วัน เช่น ทั้งเดือน)</li>
+      <li>อ่านตารางกลุ่มเรียกเก็บ: จำนวนราย เรียกเก็บ (ราย) รับเงิน (ราย) แยก OPD/IPD และยอด ค่ารักษา ลูกหนี้สุทธิ ส่วนต่าง รับแล้ว คงเหลือ</li>
+      <li>กดชื่อกลุ่ม ตารางด้านล่างแยกตามโรงพยาบาลเจ้าของบัตรและกองทุน สลับ <span class="ui">ผู้ป่วยนอก</span> / <span class="ui">ผู้ป่วยใน</span> ได้</li>
+      <li>กดชื่อโรงพยาบาลเพื่อดูรายหนี้ (มีข้อมูลผู้ป่วย ใช้ภายในเท่านั้น) และส่งออก Excel ได้</li>
+    </ol>
+    <figure>
+      <img src="img/15-collect.png" alt="ตารางลูกหนี้ตามกลุ่มเรียกเก็บ ช่วง 1–31 ต.ค. 2569" width="1175" height="560" loading="lazy">
+      <figcaption><b>รูป 12</b> ตารางกลุ่มเรียกเก็บ ต.ค. 2569 (1) ช่วงวันที่ (2) จำนวนราย แยก OPD/IPD (3) เรียกเก็บ (ราย) (4) รับเงิน (ราย) คือรายที่คงเหลือ ≤ 0 (5) แถว "ไม่ระบุกลุ่ม" คือบัญชีที่ผู้ดูแลระบบยังไม่กำหนดกลุ่มเรียกเก็บ</figcaption>
+    </figure>
+    <figure>
+      <img src="img/16-collect-group.png" alt="ตารางกลุ่ม 2 เรียกเก็บในจังหวัด แยกตามโรงพยาบาลเจ้าของบัตรและกองทุน" width="1111" height="468" loading="lazy">
+      <figcaption><b>รูป 13</b> กลุ่ม 2 เรียกเก็บในจังหวัด/รพ.ต้นสังกัด แยกตามโรงพยาบาลเจ้าของบัตรและกองทุน ใช้เป็นรายการที่ต้องส่งหนังสือเรียกเก็บแต่ละแห่ง ส่วนต่างติดลบคือส่วนที่เกินเพดานหรือสัดส่วนที่ตั้งไว้</figcaption>
+    </figure>
+    <h4>ความหมายของคอลัมน์ "เรียกเก็บ (ราย)" ตามชนิดกลุ่ม</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ชนิดกลุ่ม</th><th>กลุ่ม</th><th>นับว่าเรียกเก็บแล้วเมื่อ</th></tr></thead>
+      <tbody>
+        <tr><td>ส่งทาง e-Claim</td><td>4 eclaim สปสช. / สกส.</td><td>สถานะเคลมตั้งแต่ "ส่งออกแล้ว" ขึ้นไป</td></tr>
+        <tr><td>ตัดอัตโนมัติ</td><td>6 ตัดเงินเหมาจ่ายรายหัว, 7 ตัดเงินกองทุน PP</td><td>นับทุกราย (ส่งและตัดตอนตั้งหนี้)</td></tr>
+        <tr><td>ค้างชำระ</td><td>10 ค้างชำระ</td><td>ไม่ได้ส่งเรียกเก็บ</td></tr>
+        <tr><td>ส่งหนังสือ</td><td>กลุ่มอื่นทั้งหมด</td><td>ยังไม่มีบันทึกส่งหนังสือในระบบ ค่าจึงเป็น 0 เสมอ</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout ok">
+      <span class="label">ตรวจหลังทำ</span>
+      <ul>
+        <li>ไม่มีแถว "ไม่ระบุกลุ่ม" ที่มียอดคงเหลือ ถ้ามี แจ้งผู้ดูแลระบบกำหนดกลุ่มของบัญชี</li>
+        <li>กลุ่ม 4 ยอด "เรียกเก็บ (ราย)" ใกล้เคียง "จำนวน (ราย)" รายที่ยังไม่ส่งเคลมให้ตามที่หน้า OP/IP แยกรายสิทธิ</li>
+        <li>รวมคงเหลือของช่วงเดือน สอดคล้องกับงบทดลอง</li>
+      </ul>
+    </div>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>โหลดสถานะเคลมไม่สำเร็จ คอลัมน์เรียกเก็บของกลุ่ม eclaim แสดงขีด</q></td><td>โหลดหน้าใหม่ ถ้ายังไม่ได้ ยอดเงินอื่นยังใช้ได้</td></tr>
+        <tr><td><q>ไม่มีหนี้ในช่วงที่เลือก</q></td><td>เปลี่ยนช่วงวันที่</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul><li>ห้ามส่งไฟล์ Excel รายหนี้ออกนอกหน่วยงาน มีชื่อ HN และ VN/AN ของผู้ป่วย</li></ul>
+    </div>
+    <p><b>การลงบัญชี:</b> หน้านี้อ่านอย่างเดียว ไม่ลงบัญชี</p>
+  </article>
+
+  <!-- ซ -->
+  <article class="task" id="close">
+    <h3><span class="step">ซ</span>ตรวจสมุดรายวัน งบทดลอง แล้วปิดงวด</h3>
+    <dl class="facts">
+      <dt>เมื่อไร</dt><dd>หลังทำขั้น ก ถึง ช ของเดือนครบ</dd>
+      <dt>ใครทำ</dt><dd>ตรวจ: ผู้ใช้ทั่วไป · ปิดงวด: ผู้ดูแลระบบ</dd>
+      <dt>ต้องทำก่อน</dt><dd>ตัดหนี้ทุกแบบของเดือนนั้นเสร็จ ไม่มีรายการ "ยังไม่ระบุบัญชี"</dd>
+    </dl>
+    <h4>ขั้นตอน ตรวจ</h4>
+    <ol class="steps">
+      <li>เปิด <span class="path">ลูกหนี้ › ลูกหนี้ตามผังบัญชี</span> เลือกงวดที่จะปิด เลื่อนลงไปหัวข้อ <b>สมุดรายวัน · &lt;เดือน&gt;</b></li>
+      <li>ตรวจแต่ละบรรทัด: รายการ (ตั้งหนี้ ปรับปรุง ยกเลิก กลับรายการ รับชำระ ส่วนต่าง รับเงินโอน) เดบิต เครดิต จำนวนรายการ จำนวนเงิน กด <span class="ui">ส่งออก Excel</span> เพื่อนำไปลงโปรแกรมบัญชี</li>
+      <li>ถ้ามีข้อความ <q>… รายการยังไม่มีบัญชีคู่ …</q> หาบรรทัดที่มีคำว่า "ยังไม่กำหนด" แจ้งผู้ดูแลระบบกำหนดบัญชี</li>
+      <li>เลื่อนลงไป <b>งบทดลอง · &lt;เดือน&gt;</b> ตรวจยอดยกมา ระหว่างงวด ยกไป ฝั่งเดบิตและเครดิตรวมต้องเท่ากัน กด <span class="ui">ส่งออก Excel</span> เก็บไว้</li>
+      <li>ตรวจหัวข้อ <b>คำขอปรับปรุงลูกหนี้</b> ว่าไม่มีคำขอของเดือนนั้นค้าง "รออนุมัติ"</li>
+    </ol>
+    <figure>
+      <img src="img/13-journal.png" alt="สมุดรายวัน ต.ค. 2569 มีข้อความเตือน 4 รายการยังไม่มีบัญชีคู่" width="1096" height="560" loading="lazy">
+      <figcaption><b>รูป 14</b> สมุดรายวัน ต.ค. 2569 ข้อความสีส้มบนตารางเตือนว่ามี 4 บรรทัดที่ยังไม่มีบัญชีคู่</figcaption>
+    </figure>
+    <figure>
+      <img src="img/14-trial-balance.png" alt="งบทดลอง ต.ค. 2569 ยกมา ระหว่างงวด ยกไป" width="1096" height="520" loading="lazy">
+      <figcaption><b>รูป 15</b> งบทดลอง ต.ค. 2569 คอลัมน์ยกมา ระหว่างงวด ยกไป ฝั่งเดบิตและเครดิต</figcaption>
+    </figure>
+    <div class="callout info">
+      <span class="label">หมายเหตุ: ตัวอย่างจริงของ ต.ค. 2569</span>
+      <p>4 บรรทัดที่ยังไม่มีบัญชีคู่คือ (1–2) ตั้งหนี้และกลับรายการของ "ลูกหนี้ไม่ระบุบัญชี" 12 รายการ ยอด 6,490 บาท ซึ่งหักกันเป็น 0 และ (3–4) ส่วนต่างของ <code class="acct">1102050101.402</code> กรมบัญชีกลาง IP ทั้งได้รับต่ำกว่าและสูงกว่า เพราะบัญชี .402 ยังไม่ได้ตั้งบัญชีส่วนต่าง ผู้ดูแลระบบต้องตั้งที่ ตั้งค่าบัญชี ก่อนปิดงวด</p>
+    </div>
+    <h4>ขั้นตอน ปิดงวด (ผู้ดูแลระบบ)</h4>
+    <ol class="steps">
+      <li>กดชื่อผู้ใช้มุมล่างซ้าย เลือก <span class="path">ผู้ดูแลระบบ › ปิดงวดลูกหนี้</span></li>
+      <li>เลือก <span class="ui">ปิดถึง</span> เดือนที่ต้องการ (เลือกได้เฉพาะเดือนที่จบแล้ว ระบบปิดต่อเนื่องจากเดือนแรกที่ยังไม่ปิด)</li>
+      <li>ตรวจข้อความบนปุ่ม เช่น <span class="ui">ปิดงวด ต.ค. 2569</span> หรือ <span class="ui">ปิดงวด ต.ค. 2568 ถึง ต.ค. 2569</span> แล้วกด <b>ระบบปิดทันที ไม่มีขั้นยืนยัน</b></li>
+      <li>ผลขึ้น <q>ปิดงวด … แล้ว</q> และงวดเพิ่มในตาราง "ประวัติการปิดงวด" พร้อมยอดยกไป (ยอดรวมเดบิตของงบทดลอง ณ เวลาปิด)</li>
+    </ol>
+    <figure>
+      <img src="img/17-periods.png" alt="หน้าปิดงวดลูกหนี้ ยังไม่เคยปิดงวด" width="1175" height="250" loading="lazy">
+      <figcaption><b>รูป 16</b> หน้าปิดงวดลูกหนี้ ณ วันที่ทำคู่มือยังไม่เคยปิดงวด ปุ่มจึงเสนอให้ปิด ต.ค. 2568 ถึงเดือนที่เลือกในครั้งเดียว</figcaption>
+    </figure>
+    <h4>หลังปิดงวด</h4>
+    <ul class="plain">
+      <li>รายการใหม่ที่วันที่ตกในงวดที่ปิดแล้ว (เช่น ปรับปรุงจาก HOSxP รับเงินย้อนหลัง) ถูกเลื่อนไปลงวันแรกของงวดที่เปิด ในรายละเอียดจะเห็น <q>เลื่อนจาก … เพราะงวดนั้นปิดแล้ว</q></li>
+      <li>เงินโอนที่อยู่ในงวดปิดแล้ว แก้หรือยกเลิกไม่ได้ ตัดหนี้เหมาจ่ายของเดือนที่ปิดไม่ได้</li>
+      <li>งบทดลองของงวดที่ปิดแสดง <q>ปิดงวดแล้ว โดย … เมื่อ …</q> ถ้ามีข้อความ <q>ยอดปัจจุบันต่างจากตอนปิดงวด … บัญชี เพราะบัญชีคู่ถูกแก้หลังปิด</q> แปลว่ามีการแก้บัญชีคู่หลังปิด ให้ตรวจกับผู้ดูแลระบบ</li>
+      <li>เปิดงวดได้เฉพาะงวดล่าสุด: กด <span class="ui">เปิดงวด</span> ในแถวของงวดนั้น กรอก <span class="ui">เหตุผล</span> แล้วกด <span class="ui">เปิดงวด</span> รายการที่ถูกเลื่อนวันที่เข้างวดถัดไปตอนที่ปิดอยู่จะไม่ถูกเลื่อนกลับ</li>
+    </ul>
+    <h4>ข้อความที่อาจเจอ</h4>
+    <div class="table-wrap"><table class="msgs">
+      <thead><tr><th>ข้อความ</th><th>ความหมายและวิธีแก้</th></tr></thead>
+      <tbody>
+        <tr><td><q>ยังมี … รายการ (… บาท) ที่ลงบัญชีถึง … แต่ยังไม่ระบุบัญชี กำหนดบัญชีที่หน้า บัญชีลูกหนี้ตามสิทธิ ก่อนปิดงวด</q></td><td>ปิดไม่ได้จนกว่าทุกรายการมีบัญชี กดลิงก์ "ไปหน้า บัญชีลูกหนี้ตามสิทธิ" ข้างข้อความ</td></tr>
+        <tr><td><q>… บัญชียังไม่มีรหัส …</q> (งบทดลอง)</td><td>บัญชีรายได้หรือส่วนต่างของบางบัญชียังไม่ได้ตั้ง แจ้งผู้ดูแลระบบ</td></tr>
+        <tr><td><q>ปิดงวดถึง … แล้ว</q></td><td>เดือนที่เลือกปิดไปแล้ว</td></tr>
+        <tr><td><q>ปิดได้เฉพาะเดือนที่จบแล้ว ตั้งแต่ ต.ค. 2568</q></td><td>เลือกเดือนที่จบแล้ว</td></tr>
+        <tr><td><q>งวดนี้ถูกปิดไปแล้ว โหลดหน้าใหม่</q> / <q>เปิดได้เฉพาะงวดล่าสุดที่ปิดอยู่ โหลดหน้าใหม่</q></td><td>มีคนทำพร้อมกัน โหลดหน้าใหม่</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout danger">
+      <span class="label">ห้ามทำ</span>
+      <ul>
+        <li><b>ห้ามกดปิดงวดก่อนตรวจสมุดรายวันและงบทดลอง</b> ปุ่มปิดงวดไม่มีขั้นยืนยัน</li>
+        <li>ห้ามปิดงวดก่อนตัดหนี้เหมาจ่ายและบัตรต่างด้าวของเดือนนั้น เพราะตัดย้อนเข้าเดือนที่ปิดไม่ได้</li>
+        <li>ห้ามเปิดงวดเพื่อแก้เล็กน้อย ใช้คำขอปรับปรุงลูกหนี้ลงในงวดที่เปิดแทน</li>
+      </ul>
+    </div>
+  </article>
+</section>
+
+<!-- ============================================================ -->
+<section id="rules">
+  <h2>3. กติกาการลงบัญชี (ตารางอ้างอิง)</h2>
+  <p>ค่าที่แสดงคือการตั้งค่าในระบบ ณ วันที่ 25 พ.ย. 2569 ผู้ดูแลระบบแก้ได้ที่หน้า บัญชีลูกหนี้ตามสิทธิ ค่าปัจจุบันให้ยึดตามหน้านั้น</p>
+
+  <h3>ตั้งหนี้และกติกาเพดาน/สัดส่วน</h3>
+  <p>ตั้งหนี้ทุกบัญชีลง Dr ลูกหนี้ / Cr รายได้คู่ของบัญชี บางกลุ่มสิทธิมีเพดานหรือสัดส่วน ส่วนที่เกินระบบลงส่วนต่างให้ตอนตั้งหนี้</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>กรณี</th><th>บัญชีลูกหนี้</th><th>กติกา</th><th>ส่วนที่เกินลง (Dr)</th></tr></thead>
+    <tbody>
+      <tr><td>UC ผู้ป่วยนอก หน่วยบริการประจำนอก CUP ในจังหวัด สังกัด สธ.</td><td><code class="acct">1102050101.203</code></td><td>ลูกหนี้ไม่เกิน 700 บาทต่อครั้ง</td><td><code class="acct">4301020105.239</code></td></tr>
+      <tr><td>UC ผู้ป่วยนอก หน่วยบริการประจำในจังหวัด นอกสังกัด สธ.</td><td><code class="acct">1102050102.201</code></td><td>ลูกหนี้ไม่เกิน 700 บาทต่อครั้ง</td><td><code class="acct">4301020105.239</code></td></tr>
+      <tr><td>ประกันสังคม ผู้ป่วยนอก โรงพยาบาลหลัก (เครือข่าย)</td><td><code class="acct">1102050101.301</code></td><td>ลูกหนี้ 45% ของค่ารักษา</td><td><code class="acct">4301020106.315</code></td></tr>
+      <tr><td>ประกันสังคม ผู้ป่วยใน โรงพยาบาลหลัก (เครือข่าย)</td><td><code class="acct">1102050101.302</code></td><td>ลูกหนี้ 55% ของค่ารักษา</td><td><code class="acct">4301020106.317</code></td></tr>
+      <tr><td>UC ผู้ป่วยนอกใน CUP ที่มีรายการ HC หรือ INST</td><td>แยกจาก <code class="acct">.201</code> ไป <code class="acct">1102050101.216</code></td><td>ยอด HC/INST ตั้งเป็นหนี้แยก (เลขที่ลูกหนี้ลงท้าย :CR)</td><td>–</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>ตัดหนี้ด้วยเงินโอนและเงินรับล่วงหน้า</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>บัญชีลูกหนี้</th><th>ตัดด้วย (Dr)</th><th>ไม่พอ ลงส่วนต่าง (Dr)</th><th>หน้า</th></tr></thead>
+    <tbody>
+      <tr><td><code class="acct">1102050101.201</code> UC OP ใน CUP</td><td><code class="acct">4301020105.214</code></td><td><code class="acct">4301020105.229</code></td><td>ตัดหนี้เหมาจ่าย</td></tr>
+      <tr><td><code class="acct">1102050101.209</code> P&amp;P</td><td><code class="acct">4301020105.217</code></td><td><code class="acct">4301020105.257</code></td><td>ตัดหนี้เหมาจ่าย</td></tr>
+      <tr><td><code class="acct">1102050101.501</code> / <code class="acct">.502</code> ต่างด้าว (สิทธิ 99)</td><td><code class="acct">2103010103.502</code> เงินรับล่วงหน้า</td><td><code class="acct">4301020106.505</code> / <code class="acct">.507</code></td><td>บัตรประกันสุขภาพต่างด้าว</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="plain">
+    <li>เงินโอนจาก SMT ที่เป็นงบปีก่อนวันโอน ลง <code class="acct">3102010102.201</code> กำไร/ขาดทุนสะสมจากข้อผิดพลาดเงินกองทุน UC ปีก่อน (Dr เงินฝากธนาคาร / Cr 3102010102.201)</li>
+    <li>บัญชีรายได้และส่วนต่างปิดเข้า "ผลสะสมปีงบก่อน" ทุก 1 ต.ค. ในงบทดลอง บัญชีลูกหนี้ เงินฝาก และเงินรับล่วงหน้ายกยอดสะสม</li>
+  </ul>
+
+  <h3 id="rules-stm">บัญชีที่ตัดด้วย STM และบัญชีส่วนต่าง</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>บัญชีลูกหนี้</th><th>รายได้คู่</th><th>ได้รับต่ำกว่า (Dr)</th><th>ได้รับสูงกว่า (Cr)</th></tr></thead>
+    <tbody>
+      <tr><td><code class="acct">1102050101.202</code> UC IP</td><td><code class="acct">4301020105.202</code></td><td><code class="acct">4301020105.231</code></td><td><code class="acct">4301020105.232</code></td></tr>
+      <tr><td><code class="acct">1102050101.216</code> UC OP บริการเฉพาะ (CR)</td><td><code class="acct">4301020105.244</code></td><td><code class="acct">4301020105.258</code></td><td><code class="acct">4301020105.260</code></td></tr>
+      <tr><td><code class="acct">1102050101.217</code> UC IP บริการเฉพาะ (CR)</td><td><code class="acct">4301020105.245</code></td><td><code class="acct">4301020105.251</code></td><td><code class="acct">4301020105.252</code></td></tr>
+      <tr><td><code class="acct">1102050101.222</code> OP Refer</td><td><code class="acct">4301020105.263</code></td><td>ยังไม่กำหนด</td><td>ยังไม่กำหนด</td></tr>
+      <tr><td><code class="acct">1102050101.401</code> กรมบัญชีกลาง OP</td><td><code class="acct">4301020104.401</code></td><td><code class="acct">4301020104.405</code></td><td>ยังไม่กำหนด</td></tr>
+      <tr><td><code class="acct">1102050101.402</code> กรมบัญชีกลาง IP</td><td><code class="acct">4301020104.402</code></td><td>ยังไม่กำหนด</td><td>ยังไม่กำหนด</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">"ยังไม่กำหนด" ทำให้สมุดรายวันเตือน "ยังไม่มีบัญชีคู่" เมื่อมีส่วนต่างของบัญชีนั้น ผู้ดูแลระบบควรตั้งให้ครบก่อนปิดงวด</p>
+
+  <h3>กลุ่มเรียกเก็บของแต่ละบัญชี</h3>
+  <p>ค่าตั้งต้นมาจากโปรแกรม Claim ของการเงิน ใช้ในหน้า สถานที่เรียกเก็บ</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>กลุ่ม</th><th>บัญชีลูกหนี้</th></tr></thead>
+    <tbody>
+      <tr><td>2 เรียกเก็บในจังหวัด/รพ.ต้นสังกัด</td><td><code class="acct">1102050101.203</code> <code class="acct">.301</code> <code class="acct">.302</code> <code class="acct">.503</code> <code class="acct">.504</code> · <code class="acct">1102050102.110</code> <code class="acct">.111</code> <code class="acct">.201</code></td></tr>
+      <tr><td>3 สนง.ประกันสังคม</td><td><code class="acct">1102050101.303</code> <code class="acct">.304</code> <code class="acct">.307</code> <code class="acct">.308</code> <code class="acct">.309</code> <code class="acct">.310</code> · <code class="acct">1102050102.301</code> <code class="acct">.302</code></td></tr>
+      <tr><td>4 eclaim สปสช. / สกส.</td><td><code class="acct">1102050101.202</code> <code class="acct">.204</code> <code class="acct">.216</code> <code class="acct">.217</code> <code class="acct">.222</code> <code class="acct">.223</code> <code class="acct">.224</code> <code class="acct">.401</code> <code class="acct">.402</code> · <code class="acct">1102050102.801</code>–<code class="acct">.804</code></td></tr>
+      <tr><td>5 กระทรวงสาธารณสุข</td><td><code class="acct">1102050101.505</code> <code class="acct">.506</code> <code class="acct">.701</code>–<code class="acct">.704</code></td></tr>
+      <tr><td>6 ตัดเงินเหมาจ่ายรายหัว</td><td><code class="acct">1102050101.201</code> <code class="acct">.501</code> <code class="acct">.502</code></td></tr>
+      <tr><td>7 ตัดเงินกองทุน PP</td><td><code class="acct">1102050101.209</code></td></tr>
+      <tr><td>8 เบิกต้นสังกัด</td><td><code class="acct">1102050102.108</code> <code class="acct">.109</code></td></tr>
+      <tr><td>9 เคลมบริษัทประกัน</td><td><code class="acct">1102050102.602</code> <code class="acct">.603</code> (พรบ.รถ)</td></tr>
+      <tr><td>10 ค้างชำระ</td><td><code class="acct">1102050102.106</code> <code class="acct">.107</code> (ชำระเงินเอง)</td></tr>
+      <tr><td>12 ตรวจสุขภาพประจำปี</td><td><code class="acct">1102050101.103</code> · <code class="acct">1102050102.103</code></td></tr>
+      <tr><td>14 อื่นๆ</td><td><code class="acct">1102050101.109</code></td></tr>
+      <tr><td>13 กองทุนไต, 15 กรณีซื้อบริการ</td><td>ไม่มีบัญชีที่มีรายการอยู่ในกลุ่มนี้ ณ วันที่ทำคู่มือ (บัญชีที่ยังไม่มีรายการ ดูได้โดยติ๊ก "แสดงทุกบัญชี" ที่ตั้งค่าบัญชี)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">.501/.502 อยู่ในกลุ่ม 6 แต่ตัดด้วยเงินรับล่วงหน้าบัตรต่างด้าว ไม่ได้ตัดในหน้าตัดหนี้เหมาจ่าย</p>
+
+  <h3>บัญชีลูกหนี้ตามกลุ่มสิทธิ (ค่าตั้งต้น)</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>กลุ่มสิทธิ</th><th>ผู้ป่วยนอก</th><th>ผู้ป่วยใน</th></tr></thead>
+    <tbody>
+      <tr><td>UC (รวม WEL)</td><td>ใน CUP <code class="acct">.201</code> · ในจังหวัด สธ. <code class="acct">.203</code> · ในจังหวัดนอก สธ. <code class="acct">1102050102.201</code> · ต่างจังหวัด/ไม่พบหน่วยบริการ <code class="acct">.216</code></td><td><code class="acct">.202</code></td></tr>
+      <tr><td>P&amp;P</td><td><code class="acct">.209</code></td><td>–</td></tr>
+      <tr><td>ข้าราชการ กรมบัญชีกลาง</td><td><code class="acct">.401</code></td><td><code class="acct">.402</code></td></tr>
+      <tr><td>ประกันสังคม</td><td>เครือข่าย <code class="acct">.301</code> (45%) · อื่น <code class="acct">.309</code></td><td>เครือข่าย <code class="acct">.302</code> (55%) · อื่น <code class="acct">.308</code></td></tr>
+      <tr><td>อปท.</td><td><code class="acct">1102050102.801</code></td><td><code class="acct">1102050102.802</code></td></tr>
+      <tr><td>พรบ.รถ</td><td><code class="acct">1102050102.602</code></td><td><code class="acct">1102050102.603</code></td></tr>
+      <tr><td>ต่างด้าว</td><td>ใน CUP <code class="acct">.501</code> · อื่น <code class="acct">.503</code></td><td>ใน CUP <code class="acct">.502</code> · อื่น <code class="acct">.504</code></td></tr>
+      <tr><td>ชำระเงินเอง</td><td><code class="acct">1102050102.106</code></td><td><code class="acct">1102050102.107</code></td></tr>
+      <tr><td>สวัสดิการ (pttype 26, 29, 32)</td><td colspan="2">ไม่ตั้งลูกหนี้</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">รหัสที่ขึ้นด้วยจุดคือ <code>1102050101.xxx</code> รายการเต็มและกลุ่มอื่น (เบิกต้นสังกัด BKK BMT STP ฯลฯ) ดูที่หน้า บัญชีลูกหนี้ตามสิทธิ</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="gotchas">
+  <h2>4. ลำดับที่ต้องระวังและข้อผิดพลาดที่พบบ่อย</h2>
+  <ol class="steps">
+    <li><b>ดึงจาก SMT ก่อนตัดหนี้เหมาจ่ายเสมอ</b> วงเงินตัด .201/.209 มาจากเงินโอนที่ดึงไว้ ถ้ายังไม่ได้ดึง ยอดที่ขาดจะลงส่วนต่าง .229/.257 ทันทีและแก้กลับไม่ได้นอกจากคำขอปรับปรุงทีละราย</li>
+    <li><b>ตัดเรียงเดือน เก่าไปใหม่</b> ทั้งตัดหนี้เหมาจ่ายและบัตรต่างด้าว</li>
+    <li><b>อย่าปิดงวดก่อนตรวจ</b> ปุ่มปิดงวดบันทึกทันที และหลังปิดจะตัดหนี้เหมาจ่ายหรือแก้เงินโอนของเดือนนั้นไม่ได้</li>
+    <li><b>ตัดผิดแก้ด้วยคำขอปรับปรุงลูกหนี้</b> ชุดตัดด้วย STM ตัดเหมาจ่าย และตัดบัตรต่างด้าว ไม่มีปุ่มยกเลิก ไฟล์ STM ที่ใช้ตัดแล้วก็ลบไม่ได้</li>
+    <li><b>HOSxP เปลี่ยนหลังตัดหนี้แล้ว</b> รอบกลางคืนยังลงรายการปรับปรุงตามยอดใหม่ของ HOSxP ทำให้หนี้ที่ตัดครบแล้วกลับมามีคงเหลือ (บวกหรือติดลบ) ปุ่ม "ดึงใหม่" ใช้กับรายที่ตัดแล้วไม่ได้ ตรวจรายเหล่านี้แล้วแก้ด้วยการบันทึกรับเงินเพิ่มหรือคำขอปรับปรุงลูกหนี้</li>
+    <li><b>"ยังไม่มีบัญชีคู่"</b> (สมุดรายวัน) แปลว่าบรรทัดนั้นขาดรหัสบัญชีรายได้คู่ หรือบัญชีส่วนต่าง ของบัญชีลูกหนี้นั้น บนหน้าจอเห็นเป็น "ยังไม่กำหนด" ผู้ดูแลระบบแก้ที่ บัญชีลูกหนี้ตามสิทธิ › ตั้งค่าบัญชี</li>
+    <li><b>"บัญชียังไม่มีรหัส"</b> (งบทดลอง) คือเรื่องเดียวกันที่นับเป็นจำนวนบัญชี และ <b>"ไม่ระบุบัญชี"</b> (ตารางยอดลูกหนี้) คือหนี้ที่ระบบหาบัญชีลูกหนี้ไม่ได้ เพราะ pttype ยังไม่จับคู่กลุ่มสิทธิหรือไม่มีกติกา ผู้ดูแลระบบแก้ที่หัวข้อ "ยังไม่มีบัญชี" ในหน้าเดียวกัน แล้ว "คำนวณบัญชีใหม่"</li>
+    <li><b>บัตรต่างด้าว</b> บัตรชนิดที่ยังไม่กำหนดยอดทำให้ตัดหนี้สิ้นเดือนไม่ได้ทั้งเดือน ให้ผู้ดูแลระบบกำหนดยอดก่อน</li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<section id="faq">
+  <h2>5. คำถามที่พบบ่อยและการแก้ปัญหา</h2>
+  <dl class="facts" style="grid-template-columns:1fr">
+    <dt>หนี้ของ visit เมื่อวานยังไม่ขึ้นในสมุด</dt>
+    <dd>รอบตั้งหนี้คือ 01:00 น. ผู้ป่วยนอกต้องมีใบลูกหนี้ ผู้ป่วยในต้องล็อกรายการการเงินแล้ว ต้องการทันทีกด "ดึงยอดล่าสุด" ดูเวลาดึงล่าสุดที่บรรทัด "ลูกหนี้จาก HOSxP ดึงล่าสุด" ถ้าเวลานี้ไม่เปลี่ยนเกิน 1 วัน หรือมีข้อความ "ดึงยอดเมื่อ … ไม่สำเร็จ" ซ้ำ <b>แจ้งทีมพัฒนา</b></dd>
+    <dt>STM จ่ายแต่หน้าตัดลูกหนี้ขึ้น "ยังไม่ลงสมุด"</dt>
+    <dd>หนี้ยังไม่ถูกตั้ง ตรวจใน HOSxP ว่าออกใบลูกหนี้/ล็อกรายการแล้ว รอรอบกลางคืนแล้วเปิดไฟล์ STM ตัดอีกครั้ง ระบบตัดเฉพาะรายที่ยังไม่ตัด</dd>
+    <dt>ตัดหนี้ด้วยวันที่หรือเลขที่ใบเสร็จผิด</dt>
+    <dd>ยกเลิกชุดไม่ได้ ส่งคำขอปรับปรุงลูกหนี้ของรายที่ผิด ถ้าผิดทั้งไฟล์หลายร้อยราย <b>แจ้งทีมพัฒนา</b>ก่อนทำ</dd>
+    <dt>ตัดหนี้เหมาจ่ายไปแล้ว แต่เงินโอนเพิ่งเข้า</dt>
+    <dd>เงินโอนที่ดึงทีหลังเป็นวงเงินของเดือนถัดไปในปีงบเดียวกัน หนี้ที่ลงส่วนต่างไปแล้วไม่ถูกตัดซ้ำ ถ้าต้องการย้ายยอดกลับ ต้องทำคำขอปรับปรุงลูกหนี้</dd>
+    <dt>กด "ดึงจาก SMT" แล้วยอดไม่ครบ</dt>
+    <dd>ดูสรุปว่ามี "กองทุนยังไม่จับคู่" หรือ "รอโอน" ไหม กองทุนยังไม่จับคู่ให้ผู้ดูแลระบบจับคู่แล้วดึงใหม่ รอโอนจะเข้าเมื่อ SMT โอนแล้ว ถ้าเงินเข้าธนาคารแต่ไม่มีใน SMT ใช้ "เพิ่มเอง"</dd>
+    <dt>ต้องการแก้เพดาน 700 บาท สัดส่วนประกันสังคม หรือบัญชีของสิทธิ</dt>
+    <dd>ผู้ดูแลระบบแก้กติกาที่ บัญชีลูกหนี้ตามสิทธิ แล้วกด "ดูผลก่อนปรับ" และยืนยัน (ภาคผนวก)</dd>
+    <dt>ต้องการเปลี่ยนบัญชีส่วนต่างเหมาจ่าย .229 / .257</dt>
+    <dd>หน้าจอยังไม่มีช่องแก้ค่านี้ <b>แจ้งทีมพัฒนา</b></dd>
+    <dt>หน้าแสดง "โหลดข้อมูลไม่สำเร็จ" หรือปุ่มตอบ "ไม่สำเร็จ (HTTP 500)"</dt>
+    <dd>กด "ลองอีกครั้ง" หรือโหลดหน้าใหม่ ถ้าเกิดซ้ำ <b>แจ้งทีมพัฒนา</b> พร้อมชื่อหน้า เวลา และข้อความที่เห็น</dd>
+    <dt>นำเข้าอัตโนมัติขึ้นว่าไม่พบ extension หรือ "มีเวอร์ชันใหม่"</dt>
+    <dd>ทำตามขั้นตอนติดตั้งในหน้าต่าง (ดาวน์โหลด zip แตกไฟล์ไว้ในโฟลเดอร์ถาวร แล้ว Load unpacked ที่ chrome://extensions) เวอร์ชันใหม่ให้ติดตั้งทับแบบเดียวกัน</dd>
+  </dl>
+</section>
+
+<!-- ============================================================ -->
+<section id="admin">
+  <h2>6. ภาคผนวกสำหรับผู้ดูแลระบบ</h2>
+  <p>เปิดจากเมนูโปรไฟล์ › ผู้ดูแลระบบ › <b>บัญชีลูกหนี้ตามสิทธิ</b> หน้านี้มีหัวข้อเรียงตามนี้</p>
+
+  <h3>ดึงยอดย้อนหลัง</h3>
+  <p>เลือกช่วงเดือน <span class="ui">ตั้งแต่</span> <span class="ui">ถึง</span> แล้วกด <span class="ui">ดึงย้อนหลัง</span> ระบบดึงทีละเดือนจากเก่าไปใหม่ และหยุดที่เดือนแรกที่ไม่สำเร็จ เดือนที่ปิดงวดแล้วดึงไม่ได้ ใช้เมื่อเริ่มระบบหรือหลังแก้ข้อมูลย้อนหลังใน HOSxP จำนวนมาก</p>
+
+  <h3>คำนวณบัญชีใหม่: ดูผลก่อนปรับ แล้วยืนยัน</h3>
+  <ol class="steps">
+    <li>หลังแก้กติกาบัญชีหรือกลุ่มสิทธิ กด <span class="ui">ดูผลก่อนปรับ</span> ระบบคำนวณอย่างเดียว ยังไม่เปลี่ยนสมุด</li>
+    <li>อ่านสรุป: ย้ายบัญชี … ราย · ส่วนต่างตามเพดาน/สัดส่วน · กลับรายการสิทธิที่ไม่ตั้งลูกหนี้ · ไม่มีกติกา คงบัญชีเดิม · แยก HC/INST จาก .201 ไป .216 · ตัดหนี้แล้ว ไม่ลงส่วนต่าง/ไม่แยก · ข้อมูลสิทธิเปลี่ยนตาม HOSxP และตารางบัญชีเดิม → บัญชีใหม่</li>
+    <li>กด <span class="ui">ยืนยันปรับสมุดลูกหนี้</span> เมื่อผลถูกต้อง (หรือ <span class="ui">ปิด</span>) ผลขึ้น <q>ปรับสมุดแล้ว · ย้ายบัญชี … แถว · ลงรายการใหม่ … แถว</q> ถ้าขึ้น "ไม่มีรายการที่ต้องปรับ" ไม่ต้องทำอะไร</li>
+  </ol>
+  <figure>
+    <img src="img/18-accounts-recompute.png" alt="หัวข้อคำนวณบัญชีใหม่ หลังกดดูผลก่อนปรับ ไม่มีรายการที่ต้องปรับ" width="1096" height="152" loading="lazy">
+    <figcaption><b>รูป 17</b> ผลของ "ดูผลก่อนปรับ" ณ วันที่ทำคู่มือ ไม่มีรายการที่ต้องปรับ จึงไม่มีปุ่มยืนยัน</figcaption>
+  </figure>
+  <div class="callout danger">
+    <span class="label">ห้ามทำ</span>
+    <ul><li>ห้ามกดยืนยันปรับสมุดโดยไม่อ่านตาราง "บัญชีเดิม → บัญชีใหม่" ผลกระทบทุกเดือนที่ยังเปิดอยู่ ควรทำก่อนปิดงวด</li></ul>
+  </div>
+
+  <h3>บัญชีตามกลุ่มสิทธิ (กติกาบัญชี)</h3>
+  <p>หนึ่งแถวต่อ กลุ่มสิทธิ × ประเภท (OP/IP) × หน่วยบริการประจำ เพิ่มหรือแก้ด้วยฟอร์มด้านบน: <span class="ui">กลุ่มสิทธิ</span> <span class="ui">ประเภท</span> <span class="ui">หน่วยบริการประจำ</span> (ทุกที่ / หน่วยหลัก / ในจังหวัด สธ. / ในจังหวัดอื่น / ต่างจังหวัด / ไม่พบ) <span class="ui">บัญชี</span> และใส่ <span class="ui">เพดานลูกหนี้ (บาท)</span> หรือ <span class="ui">ลูกหนี้ (%)</span> อย่างใดอย่างหนึ่ง แล้วกด <span class="ui">บันทึก</span> แก้แล้วต้องกดคำนวณบัญชีใหม่ หนี้เดิมจึงจะย้าย</p>
+  <figure>
+    <img src="img/19-accounts-rules.png" alt="ตารางบัญชีตามกลุ่มสิทธิ" width="1096" height="560" loading="lazy">
+    <figcaption><b>รูป 18</b> บัญชีตามกลุ่มสิทธิ คอลัมน์ "ลูกหนี้" บอกว่าเต็มจำนวน มีเพดาน หรือเป็นสัดส่วน ช่องผู้แก้ไขล่าสุดถูกเบลอ</figcaption>
+  </figure>
+  <p>หัวข้อย่อย <b>ยังไม่มีบัญชี</b> แสดงหนี้ที่หาบัญชีไม่ได้พร้อมสาเหตุและปุ่ม <span class="ui">จับคู่</span> หรือ <span class="ui">เพิ่มกติกา</span> ณ วันที่ทำคู่มือขึ้นว่า "ทุกรายการในสมุดลูกหนี้มีบัญชีแล้ว"</p>
+
+  <h3>กลุ่มสิทธิของ pttype</h3>
+  <p>ทุก pttype ต้องจับคู่กับกลุ่มสิทธิ เลือกในช่องท้ายแถว (ติ๊ก "เฉพาะที่ยังไม่จับคู่" เพื่อดูเฉพาะที่ขาด) pttype ใหม่ใน HOSxP ที่ยังไม่จับคู่จะทำให้หนี้เป็น "ไม่ระบุบัญชี"</p>
+
+  <h3>ตั้งค่าบัญชี</h3>
+  <p>ต่อบัญชีลูกหนี้: <span class="ui">รายได้คู่</span> <span class="ui">ส่วนต่างค่ารักษาสูงกว่าข้อตกลง (Dr)</span> <span class="ui">ส่วนต่างค่ารักษาต่ำกว่าข้อตกลง (Cr)</span> <span class="ui">ตัดหนี้ด้วย STM</span> <span class="ui">กลุ่มเรียกเก็บ</span> <span class="ui">ตัดอัตโนมัติ (Dr)</span> กด <span class="ui">แก้ไข</span> ท้ายแถว แก้แล้วกด <span class="ui">บันทึก</span> ติ๊ก "แสดงทุกบัญชี" เพื่อดูบัญชีที่ยังไม่มีรายการ</p>
+  <figure>
+    <img src="img/20-accounts-settings.png" alt="ตารางตั้งค่าบัญชี" width="1096" height="560" loading="lazy">
+    <figcaption><b>รูป 19</b> ตั้งค่าบัญชี เช่น .201 ไม่ตัดด้วย STM แต่ตัดอัตโนมัติด้วย <code>4301020105.214</code> ส่วน .202 ตัดด้วย STM และมีบัญชีส่วนต่างทั้งสองข้าง</figcaption>
+  </figure>
+  <div class="callout info">
+    <span class="label">หมายเหตุ</span>
+    <p>บัญชีส่วนต่างของการตัดเหมาจ่าย (.229 ของ .201 และ .257 ของ .209) ไม่อยู่ในตารางนี้ เปลี่ยนต้องแจ้งทีมพัฒนา</p>
+  </div>
+
+  <h3 id="admin-fundmap">จับคู่กองทุนใน SMT</h3>
+  <p>ที่หน้า <span class="path">รับเงิน › เงินโอนที่ได้รับ</span> หัวข้อ <b>กองทุนใน SMT</b> กองทุนที่ "ยังไม่จับคู่" กด <span class="ui">จับคู่บัญชี</span> เลือกบัญชี (ค่าเริ่มต้นคือบัญชีที่ SMT ระบุ) แล้วกด <span class="ui">บันทึก</span> หรือกด <span class="ui">ไม่ใช้กองทุนนี้</span> สำหรับกองทุนที่ไม่ใช่รายได้ของสมุดนี้ จากนั้นกด <span class="ui">ดึงจาก SMT</span> อีกครั้ง</p>
+  <figure>
+    <img src="img/05-transfer-fundmap.png" alt="ตารางกองทุนใน SMT ยังไม่จับคู่ 23 กองทุน" width="1096" height="430" loading="lazy">
+    <figcaption><b>รูป 20</b> กองทุนใน SMT ณ วันที่ทำคู่มือยังไม่จับคู่ 23 กองทุน รายการโอนของกองทุนเหล่านี้จึงยังไม่อยู่ในยอดรับต่อบัญชี</figcaption>
+  </figure>
+
+  <h3>ปิดงวดลูกหนี้</h3>
+  <p>ดูขั้นตอนที่<a href="#close">หัวข้อ ซ</a> ปิดได้เฉพาะเดือนที่จบแล้ว ต่อเนื่องจากเดือนแรก ปิดไม่ได้ถ้ายังมีรายการที่ไม่ระบุบัญชีในช่วงนั้น เปิดงวดได้เฉพาะงวดล่าสุดพร้อมเหตุผล</p>
+
+  <h3>ชนิดบัตรต่างด้าว</h3>
+  <p>หน้า บัตรประกันสุขภาพต่างด้าว แท็บ <b>ชนิดบัตร</b> (เห็นเฉพาะผู้ดูแลระบบ) ต่อชนิด: ชื่อ อายุ (เดือน) <span class="ui">เงินรับล่วงหน้าต่อใบ (บาท)</span> ใช้งาน หมายเหตุ แล้วกด <span class="ui">บันทึก</span> ตั้งยอดแล้วบัตรชนิดนั้นที่ยังไม่มียอดจะได้ยอดตามจำนวนใบ บัตรที่มียอดแล้วไม่เปลี่ยน</p>
+</section>
+
+<footer>
+  คู่มือนี้จัดทำจากหน้าจอและข้อมูลของระบบ ณ วันที่ 25 พ.ย. 2569 ยอดเงินในรูปเป็นยอดรวมจริงของโรงพยาบาล ใช้ภายในหน่วยงาน ถ้าหน้าจอเปลี่ยนจากคู่มือ ให้ยึดข้อความบนหน้าจอและแจ้งผู้ดูแลระบบให้ปรับคู่มือ
+</footer>
+
+</div>
+</body>
+</html>
