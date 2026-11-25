@@ -37,6 +37,7 @@ export const navItems: NavItem[] = [
       { label: "มูลค่าตามกองทุน", href: "/fund/opd-fund" },
       { label: "มูลค่าตามแผนก", href: "/fund/opd-department" },
       { label: "แนวโน้มค่าใช้จ่ายตามแผนก", href: "/fund/dept-trend" },
+      { label: "การใช้ยาสมุนไพร", href: "/drug/herbal-usage" },
       { label: "ภาพรวมกองทุน", href: "/fund/dashboard" },
     ],
   },
