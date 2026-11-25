@@ -30,7 +30,7 @@ test("accountFor: pttype override > UCS OP by hospmain > fund map > null", () =>
 });
 
 const debt = (id, amount, o = {}) => ({
-  debt_id: id, vn: `6810010000${id}`, debt_date: "2025-10-02", pttype: "10", hipdata_code: "SSS", amount, hospmain: "", hospmain_chwpart: null, ...o,
+  debt_id: id, vn: `6810010000${id}`, debt_date: "2025-10-02", vstdate: "2025-10-02", pttype: "10", hipdata_code: "SSS", amount, hospmain: "", hospmain_chwpart: null, ...o,
 });
 const state = (ref, balance, o = {}) => ({
   source: "rcpt_debt", ref, vn: `vn${ref}`, an: null, ref_date: "2025-10-02", patient_type: "OP", pttype: "10", hipdata_code: "SSS",
@@ -52,6 +52,17 @@ test("planOpd: set on debt_date, adjust by difference on sync date, idempotent, 
   assert.equal(out[1].account_code, "1102050101.301"); // คัดลอกจากแถว set
 });
 
+test("planOpd set: dated by service date, falls back to debt_date, entry_date clamped to LEDGER_START", () => {
+  const set = (o) => planOpd([debt(1, 10, o)], new Map(), rules, "2026-11-09")[0];
+  const later = set({ vstdate: "2026-10-20", debt_date: "2026-11-02 08:00:00" });
+  assert.deepEqual([later.ref_date, later.entry_date], ["2026-10-20", "2026-10-20"]);
+  const noOvst = set({ vstdate: null, debt_date: "2026-11-02 08:00:00" });
+  assert.deepEqual([noOvst.ref_date, noOvst.entry_date], ["2026-11-02", "2026-11-02"]);
+  // หนี้ตั้งในช่วงสมุด แต่รับบริการก่อนวันเริ่มสมุด: ref_date คงวันจริง entry_date = LEDGER_START
+  const early = set({ vstdate: "2025-09-28", debt_date: "2025-10-03" });
+  assert.deepEqual([early.ref_date, early.entry_date], ["2025-09-28", LEDGER_START]);
+});
+
 test("planCancels: minus the ledger balance on cancel date, skip never-set, dedupe", () => {
   const states = new Map([["2", state("2", 12000)], ["4", state("4", 7000, { cancelled: true })]]);
   const { entries, skipped } = planCancels(
@@ -63,14 +74,14 @@ test("planCancels: minus the ledger balance on cancel date, skip never-set, dedu
     ],
     states,
   );
-  assert.deepEqual(entries.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["cancel", "2", "-120.00", "2025-10-05"]]);
+  assert.deepEqual(entries.map((e) => [e.kind, e.ref, e.amount, e.entry_date, e.ref_date]), [["cancel", "2", "-120.00", "2025-10-05", "2025-10-02"]]);
   assert.equal(skipped, 1);
 });
 
 const ipd = (an, uc_money, o = {}) => ({ an, dchdate: "2025-10-03", pttype: "10", hipdata_code: "UCS", uc_money, ...o });
 const ist = (an, balance, ref_date = "2025-10-03") => ({ ...state(an, balance), source: "ipt", ref: an, vn: null, an, ref_date, patient_type: "IP", account_code: "1102050101.202" });
 
-test("planIpd: set date by mode, adjust, re-lock, reverse only inside the window", () => {
+test("planIpd: set on dchdate, adjust/reverse on sync date, re-lock, reverse only inside the window", () => {
   const w = { from: "2025-10-01", to: "2025-10-31" };
   const states = new Map([
     ["A2", ist("A2", 10000)], // ยอดเปลี่ยน
@@ -80,7 +91,7 @@ test("planIpd: set date by mode, adjust, re-lock, reverse only inside the window
     ["A6", ist("A6", 0)], // กลับรายการแล้ว: ไม่ซ้ำ
   ]);
   const rows = [ipd("A1", "1000.50"), ipd("A2", 150), ipd("A3", 80), ipd("A7", 0)];
-  const back = planIpd(rows, states, rules, w, "backfill", "2026-11-09");
+  const back = planIpd(rows, states, rules, w, "2026-11-09");
   assert.deepEqual(back.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [
     ["set", "A1", "1000.50", "2025-10-03"],
     ["adjust", "A2", "50.00", "2026-11-09"],
@@ -88,7 +99,7 @@ test("planIpd: set date by mode, adjust, re-lock, reverse only inside the window
     ["reverse", "A4", "-50.00", "2026-11-09"],
   ]);
   assert.equal(back[0].account_code, "1102050101.202");
-  assert.equal(planIpd(rows.slice(0, 1), new Map(), rules, w, "daily", "2026-11-09")[0].entry_date, "2026-11-09");
+  assert.equal(back[0].ref_date, "2025-10-03");
 });
 
 test("date windows: ≤31-day chunks, daily windows clamp to ledger start, month range", () => {
@@ -148,13 +159,13 @@ test("case resync IPD: whole-ledger window reverses an old AN whose finance_lock
   const w = { from: LEDGER_START, to: today };
   // จำหน่ายเกิน 120 วัน รายวันไม่เห็นแล้ว ; his ไม่คืนแถว (finance_lock <> 'Y') states มาจาก [an]
   let states = new Map([["A9", ist("A9", 5000, "2026-01-02")]]);
-  const out = planIpd([], states, rules, w, "daily", today);
+  const out = planIpd([], states, rules, w, today);
   assert.deepEqual(out.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["reverse", "A9", "-50.00", today]]);
   states = applied(states, out);
-  assert.deepEqual(planIpd([], states, rules, w, "daily", today), []);
+  assert.deepEqual(planIpd([], states, rules, w, today), []);
   // ปิดสิทธิอีกครั้งด้วยยอดใหม่ แล้วกดซ้ำ
   const rows = [ipd("A9", 70, { dchdate: "2026-01-02" })];
-  const again = planIpd(rows, states, rules, w, "daily", today);
+  const again = planIpd(rows, states, rules, w, today);
   assert.deepEqual(again.map((e) => [e.kind, e.amount]), [["adjust", "70.00"]]);
-  assert.deepEqual(planIpd(rows, applied(states, again), rules, w, "daily", today), []);
+  assert.deepEqual(planIpd(rows, applied(states, again), rules, w, today), []);
 });

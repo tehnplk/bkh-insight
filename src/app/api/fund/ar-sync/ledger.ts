@@ -53,6 +53,8 @@ export type HisDebt = {
   debt_id: string | number;
   vn: string;
   debt_date: string;
+  /** ovst.vstdate (null เมื่อไม่มีแถว ovst ซึ่งพบน้อย ใช้ debt_date แทน) */
+  vstdate: string | null;
   pttype: string | null;
   hipdata_code: string | null;
   amount: string | number | null;
@@ -94,8 +96,9 @@ const follow = (s: RefState, kind: Kind, entry_date: string, cents: number, note
 const changed = (from: number, to: number) => `ยอดใน HOSxP เปลี่ยน ${fromCents(from)} → ${fromCents(to)}`;
 
 /**
- * OPD (rcpt_debt) หนึ่ง debt_id = หนึ่ง ref: ยังไม่มี = ตั้งตาม debt_date, มีแล้วยอดต่าง = ปรับปรุงส่วนต่างลงวันที่ sync (today)
- * ยกเลิกแล้วไม่ปรับอีก ยอด 0 ที่ยังไม่เคยตั้งไม่ต้องตั้ง
+ * OPD (rcpt_debt) หนึ่ง debt_id = หนึ่ง ref: ยังไม่มี = ตั้งลงวันรับบริการ (vstdate, ไม่มีใช้ debt_date) ทั้ง ref_date และ entry_date
+ * แต่ entry_date ไม่ก่อน LEDGER_START (สมุดไม่มียอดยกมาก่อนวันนั้น ref_date คงวันรับบริการจริง) ; แถวถัดไปคัดลอก ref_date จากแถว set
+ * มีแล้วยอดต่าง = ปรับปรุงส่วนต่างลงวันที่ sync (today) ยกเลิกแล้วไม่ปรับอีก ยอด 0 ที่ยังไม่เคยตั้งไม่ต้องตั้ง
  */
 export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: AccountRules, today: string): Entry[] {
   const out: Entry[] = [];
@@ -112,8 +115,9 @@ export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: 
         patient_type: "OP", pttype: blank(d.pttype), hipdata_code: blank(d.hipdata_code),
         hospmain: blank(d.hospmain), hospmain_chwpart: blank(d.hospmain_chwpart),
       };
+      const svc = day(d.vstdate ?? d.debt_date);
       out.push({
-        ...cov, source: "rcpt_debt", kind: "set", ref, vn: d.vn, an: null, ref_date: day(d.debt_date), entry_date: day(d.debt_date),
+        ...cov, source: "rcpt_debt", kind: "set", ref, vn: d.vn, an: null, ref_date: svc, entry_date: svc < LEDGER_START ? LEDGER_START : svc,
         account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
       });
     } else if (!s.cancelled && target !== s.balance) {
@@ -123,7 +127,7 @@ export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: 
   return out;
 }
 
-/** ยกเลิกหนี้: ลดเท่ายอดที่ ledger ตั้งไว้ ลงวันที่ cancel_datetime ไม่เคยตั้ง (ก่อน 1 ต.ค. 2568) = ข้าม debt_id ซ้ำนับครั้งแรก */
+/** ยกเลิกหนี้: ลดเท่ายอดที่ ledger ตั้งไว้ ลงวันที่ cancel_datetime (ref_date ตามแถว set) ไม่เคยตั้ง (ก่อน 1 ต.ค. 2568) = ข้าม debt_id ซ้ำนับครั้งแรก */
 export function planCancels(cancels: HisCancel[], states: Map<string, RefState>): { entries: Entry[]; skipped: number } {
   const entries: Entry[] = [];
   const seen = new Set<string>();
@@ -145,13 +149,13 @@ export function planCancels(cancels: HisCancel[], states: Map<string, RefState>)
 
 /**
  * IPD ที่ปิดสิทธิแล้ว (finance_lock = 'Y') ในช่วง from..to ของ dchdate
- * - ยังไม่มี: ตั้งเมื่อ uc_money > 0 วันที่ = dchdate (backfill) หรือวันที่ sync (รายวัน = วันที่เจอครั้งแรก)
+ * - ยังไม่มี: ตั้งเมื่อ uc_money > 0 ลงวันจำหน่าย (dchdate) ทุกโหมด ให้หนี้อยู่ในเดือนที่เกิด ไม่ใช่เดือนที่ปิดสิทธิ
  * - มีแล้วยอดต่าง (รวมปิดสิทธิอีกครั้งหลังกลับรายการ): ปรับปรุงส่วนต่างลงวันที่ sync
  * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ
  */
 export function planIpd(
   rows: HisIpd[], states: Map<string, RefState>, rules: AccountRules,
-  window: { from: string; to: string }, mode: "daily" | "backfill", today: string,
+  window: { from: string; to: string }, today: string,
 ): Entry[] {
   const out: Entry[] = [];
   const seen = new Set<string>();
@@ -165,7 +169,7 @@ export function planIpd(
       const cov: Coverage = { patient_type: "IP", pttype: blank(r.pttype), hipdata_code: blank(r.hipdata_code), hospmain: null, hospmain_chwpart: null };
       out.push({
         ...cov, source: "ipt", kind: "set", ref: r.an, vn: null, an: r.an, ref_date: day(r.dchdate),
-        entry_date: mode === "backfill" ? day(r.dchdate) : today, account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
+        entry_date: day(r.dchdate), account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
       });
     } else if (target !== s.balance) {
       out.push(follow(s, "adjust", today, target - s.balance, s.balance === 0 ? "ปิดสิทธิอีกครั้ง" : changed(s.balance, target)));

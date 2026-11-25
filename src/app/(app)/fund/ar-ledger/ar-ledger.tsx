@@ -146,7 +146,7 @@ const columns = col.columns([
   col.accessor("patient_type", { header: "OP/IP", meta: filterable }),
   col.accessor("vn", { header: "VN/AN", cell: (c) => c.getValue() ?? c.row.original.an, meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
   col.accessor("ref", { header: "เลขที่ลูกหนี้", cell: (c) => (c.row.original.patient_type === "OP" ? c.getValue() : dash), meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
-  col.accessor("ref_date", { header: "วันตั้งหนี้/จำหน่าย", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateFilter }),
+  col.accessor("ref_date", { header: "วันรับบริการ/จำหน่าย", cell: (c) => formatThaiDate(c.getValue()) || dash, meta: dateFilter }),
   col.accessor("pttype", { header: "สิทธิ", cell: (c) => c.getValue() ?? dash, meta: filterable }),
   col.accessor("hipdata_code", { header: "กองทุน", cell: (c) => c.getValue() ?? dash, meta: filterable }),
   col.accessor("hospmain", { header: "หน่วยบริการประจำ", cell: (c) => c.getValue() ?? dash, meta: filterable }),
@@ -176,7 +176,7 @@ function LedgerDetail({ row, account, canReceive, onResync }: { row: LedgerEntry
         </Fact>
         <Fact label="ประเภท">{KIND_LABEL[row.kind]}</Fact>
         {row.patient_type === "OP" && <Fact label="เลขที่ลูกหนี้">{row.ref}</Fact>}
-        <Fact label="วันตั้งหนี้/จำหน่าย">{formatThaiDate(row.ref_date)}</Fact>
+        <Fact label="วันรับบริการ/จำหน่าย">{formatThaiDate(row.ref_date)}</Fact>
         <Fact label="สิทธิ">{row.pttype}</Fact>
         <Fact label="กองทุน">{row.hipdata_code}</Fact>
         <Fact label="หน่วยบริการประจำ">{row.hospmain}</Fact>
