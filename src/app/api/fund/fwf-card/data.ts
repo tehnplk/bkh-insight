@@ -234,12 +234,12 @@ export async function attachPatients(debts: Omit<PlanDebt, "hn" | "service_date"
 
 /* ---------- pool และแผนตัดหนี้ ---------- */
 
-// หนี้ .501/.502 ที่คงเหลือ > 0 ตั้งหนี้ถึง $2 ; คงเหลือ = HOSxP + stm + manual + fwf ของหนี้เดียวกัน
+// หนี้ .501/.502 ที่คงเหลือ > 0 ตั้งหนี้ถึง $2 ; คงเหลือ = HOSxP + stm + manual + fwf + capitation ของหนี้เดียวกัน
 const DEBTS_SQL = `SELECT s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date::text AS ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart,
   s.account_code, b.balance
 FROM ar_ledger s
 CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
-  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf')) b
+  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf', 'capitation')) b
 WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt') AND s.account_code = ANY($1::text[]) AND s.ref_date <= $2 AND b.balance > 0
 ORDER BY s.ref_date, s.ref`;
 // ยอดที่ตัดด้วย pool แล้ว (fwf_batch_id ไม่ว่าง = source fwf ตาม constraint) และยอดที่โอนไปเงินบำรุง

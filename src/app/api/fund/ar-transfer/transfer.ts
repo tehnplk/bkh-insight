@@ -61,11 +61,24 @@ export const fundKey = (r: Pick<SmtTransferRow, "budgetSource" | "mophId" | "mou
 export const smtKey = (r: SmtTransferRow) =>
   [trim(r.budgetSource), r.postingDate, trim(r.batchNo), trim(r.refDocNo), trim(r.mouGrpCode), trim(r.mophId)].join("|");
 
+/** ปีงบ พ.ศ. ของงบ = 2 หลักแรกของ mouGrpCode ("69010101" -> 2569) ; null = ไม่ใช่ 8 หลัก */
+export const budgetYear = (mouGrpCode: string | null | undefined) => (/^\d{8}$/.test(trim(mouGrpCode)) ? 2500 + +trim(mouGrpCode).slice(0, 2) : null);
+/** ปีงบของแถวที่นำเข้าแล้ว จาก smt_key (mouGrpCode คือช่องรองสุดท้าย ; ช่องท้ายเป็น mophId ไม่มี "|") */
+export const keyBudgetYear = (smtKey: string | null) => (smtKey ? budgetYear(smtKey.split("|").at(-2)) : null);
+/** ปีงบ พ.ศ. ของวันโอน "25691009" -> 2570 */
+const transferFy = (be: string) => +be.slice(0, 4) + (+be.slice(4, 6) >= 10 ? 1 : 0);
+
+/**
+ * รายการโอนของงบปีงบก่อนวันโอน (เช่น OP REFER/P&P fee schedule งวดปีก่อน) ไม่นับในรายได้เหมาจ่ายของปีที่โอน
+ * การเงินให้ลงบัญชีนี้แทนบัญชีของกองทุน ; จัดสรรพลางก่อนต้นปีงบ (8 ต.ค.) ใช้ mouGrpCode ของปีงบใหม่ จึงไม่ย้าย
+ */
+export const PRIOR_YEAR_ACCOUNT = { code: "3102010102.201", name: "กำไร/ขาดทุนสะสมจากข้อผิดพลาดเงินกองทุน UC ปีก่อน" };
+
 export const fundName = (r: Pick<SmtTransferRow, "efundDesc" | "fundDescr">) => trim(r.efundDesc) || trim(r.fundDescr);
 
 /**
  * แผนนำเข้า: ข้ามรอโอน ยอด 0 และกองทุนที่ยังไม่จับคู่/ไม่ใช้ (กองทุนที่ไม่เคยเห็นได้แถว mapping ว่างใน newFunds)
- * แถวเดิมที่การเงินแก้หรือยกเลิกไม่แตะ ; closedThrough = เดือนล่าสุดที่ปิดงวด YYYY-MM (null = ไม่มี)
+ * งบปีก่อนวันโอนลง PRIOR_YEAR_ACCOUNT ; แถวเดิมที่การเงินแก้หรือยกเลิกไม่แตะ ; closedThrough = เดือนล่าสุดที่ปิดงวด YYYY-MM (null = ไม่มี)
  */
 export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>, closedThrough: string | null): ImportPlan {
   const counts: ImportCounts = { new: 0, updated: 0, unchanged: 0, kept: 0, unmapped: 0, ignored: 0, pending: 0, closed: 0 };
@@ -83,12 +96,12 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
       plan.newFunds.push({ fund_key: fk, fund_name: fundName(r), smt_account_name: trim(r.mophDesc) || null });
       map.set(fk, { account_code: null, ignore: false }); // กองทุนเดียวกันแถวถัดไปไม่เพิ่มซ้ำ
     }
-    const account = m?.account_code ?? null;
+    const mapped = m?.account_code ?? null;
     if (m?.ignore) {
       counts.ignored++;
       continue;
     }
-    if (!account) {
+    if (!mapped) {
       counts.unmapped++;
       const u = unmapped.get(fk) ?? { fund_key: fk, fund_name: fundName(r), n: 0, total: 0 };
       u.n++;
@@ -96,6 +109,8 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
       unmapped.set(fk, u);
       continue;
     }
+    const by = budgetYear(r.mouGrpCode);
+    const account = by !== null && by < transferFy(r.postingDate) ? PRIOR_YEAR_ACCOUNT.code : mapped;
     const key = smtKey(r);
     const date = smtIso(r.postingDate);
     const amount = cents(r.total) / 100;

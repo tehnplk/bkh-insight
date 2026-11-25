@@ -1,7 +1,7 @@
 // งบทดลองรายเดือนของสมุดลูกหนี้ ต่อบัญชี: ยกมา / ระหว่างงวด / ยกไป ฝั่งเดบิตและเครดิต (test: trial-balance.test.mjs)
 // กติกา Dr/Cr มาจาก journalLines() ที่เดียว แยกทีละ bucket ตามวันที่ลงบัญชี:
 //   prior = ก่อนต้นปีงบของเดือนนี้, ytd = ต้นปีงบถึงก่อนต้นเดือน, month = ในเดือน (ไม่เกินวันนี้)
-// บัญชีจริง (ลูกหนี้, เงินฝาก, เงินรับล่วงหน้า) ยกมาสะสมทุกปี ; บัญชีรายได้/ส่วนต่างปิดทุก 1 ต.ค. ยอดก่อนปีงบรวมเป็นแถว "ผลสะสมปีงบก่อน"
+// บัญชีจริง (ลูกหนี้, เงินฝาก, เงินรับล่วงหน้า, ทุน/กำไรสะสมปีก่อน) ยกมาสะสมทุกปี ; บัญชีรายได้/ส่วนต่างปิดทุก 1 ต.ค. ยอดก่อนปีงบรวมเป็นแถว "ผลสะสมปีงบก่อน"
 import { journalLines, type AccountType, type JournalGroup } from "../ar-journal/journal";
 
 export type TbBucket = "prior" | "ytd" | "month";
@@ -18,7 +18,7 @@ export type TrialBalance = { rows: TbRow[]; totals: TbTotals; missing: number };
 
 export const RETAINED_NAME = "ผลสะสมปีงบก่อน";
 const NOMINAL = new Set<TbType>(["revenue", "diff_under", "diff_over"]);
-const ORDER: TbType[] = ["ar", "cash", "pool", "revenue", "diff_under", "diff_over", "retained"];
+const ORDER: TbType[] = ["ar", "cash", "pool", "revenue", "diff_under", "diff_over", "equity", "retained"];
 const LAST = "￿";
 const BUCKETS: TbBucket[] = ["prior", "ytd", "month"];
 
@@ -69,13 +69,13 @@ export function snapshotChanges(live: TrialBalance, snap: TrialBalance): number 
 
 type Query = <T>(sql: string, params: unknown[]) => Promise<T[]>;
 
-// S1 (prove-query ผ่าน): $1 ต้นปีงบ, $2 ต้นเดือน, $3 สิ้นเดือนไม่เกินวันนี้ ; GROUP BY sign ให้ Dr/Cr เป็นยอดรวมแต่ละข้าง
+// S1 (prove-query ผ่าน ; เพิ่ม JOIN ar_capitation_batch 25 พ.ย. 2569): $1 ต้นปีงบ, $2 ต้นเดือน, $3 สิ้นเดือนไม่เกินวันนี้ ; GROUP BY sign ให้ Dr/Cr เป็นยอดรวมแต่ละข้าง
 const TB_SQL = `SELECT CASE WHEN l.entry_date < $1 THEN 'prior' WHEN l.entry_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
   l.account_code, a.name AS account_name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code,
-  count(*)::int AS n, SUM(l.amount) AS amount
-FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code
+  cb.clear_code, cb.clear_short_code, count(*)::int AS n, SUM(l.amount) AS amount
+FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code LEFT JOIN ar_capitation_batch cb ON cb.id = l.capitation_batch_id
 WHERE l.entry_date <= $3
-GROUP BY 1, l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, sign(l.amount)`;
+GROUP BY 1, l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, cb.clear_code, cb.clear_short_code, sign(l.amount)`;
 // เงินโอนที่ได้รับ (ar_transfer ไม่ยกเลิก) ตาม transfer_date ; ส่ง amount ติดลบ = เครดิต account_code (journalLines kind transfer)
 const TB_TRANSFER_SQL = `SELECT CASE WHEN t.transfer_date < $1 THEN 'prior' WHEN t.transfer_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
   t.account_code, a.name AS account_name, 'transfer' AS kind, 'transfer' AS source, NULL AS revenue_code, NULL AS diff_under_code, NULL AS diff_over_code,

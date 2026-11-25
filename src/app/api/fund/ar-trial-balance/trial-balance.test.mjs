@@ -92,3 +92,30 @@ test("เงินรับล่วงหน้า (fwf) เป็นบัญ�
   });
   assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
 });
+
+test("เหมาจ่าย: เงินโอนเข้า .214 กับ settle ของ capitation หักกันในแถวรายได้เดียว ส่วนต่างลง .229 ; Dr = Cr", () => {
+  const cap = { account_code: "1102050101.201", revenue_code: "4301020105.201", diff_under_code: null, diff_over_code: null, source: "capitation", clear_code: "4301020105.214", clear_short_code: "4301020105.229" };
+  const tb = trialBalance([
+    g("month", "set", "1500", cap),
+    g("month", "transfer", "-1000", { account_code: "4301020105.214", account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" }),
+    g("month", "settle", "-900", cap),
+    g("month", "diff", "-600", cap),
+  ]);
+  assert.deepEqual([row(tb, "revenue", "4301020105.214").dr, row(tb, "revenue", "4301020105.214").cr, row(tb, "revenue", "4301020105.214").closing_cr], [900, 1000, 100]);
+  assert.equal(row(tb, "diff_under", "4301020105.229").closing_dr, 600);
+  assert.equal(row(tb, "ar", "1102050101.201").closing_dr, null);
+  assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
+  assert.equal(tb.missing, 0);
+});
+
+test("เงินโอนงบปีก่อน (equity 3102010102.201) เป็นบัญชีงบดุล ยกมาข้ามปีงบ ไม่เข้าผลสะสมปีงบก่อน ; เรียงก่อนแถว retained", () => {
+  const t = { account_code: "3102010102.201", account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" };
+  const tb = trialBalance([g("prior", "set", "1000"), g("prior", "transfer", "-300", t), g("month", "transfer", "-200", t)]);
+  assert.deepEqual(row(tb, "equity", "3102010102.201"), {
+    type: "equity", code: "3102010102.201", name: "กำไร/ขาดทุนสะสมจากข้อผิดพลาดเงินกองทุน UC ปีก่อน", opening_dr: null, opening_cr: 300, dr: 0, cr: 200, closing_dr: null, closing_cr: 500,
+  });
+  const types = tb.rows.map((r) => r.type);
+  assert.ok(types.indexOf("equity") < types.indexOf("retained"));
+  assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
+  assert.equal(tb.missing, 0);
+});

@@ -1,7 +1,20 @@
 // รัน: node --test src/app/api/fund/ar-journal/journal.test.mjs
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import test from "node:test";
-import { journalLines } from "./journal.ts";
+
+// journal.ts import "../ar-transfer/transfer" แบบไม่มีนามสกุล (ตามที่ Next/TS ต้องการ) จึงเติม .ts ให้
+registerHooks({
+  resolve(spec, ctx, next) {
+    try {
+      return next(spec, ctx);
+    } catch (e) {
+      if (spec.startsWith(".")) return next(`${spec}.ts`, ctx);
+      throw e;
+    }
+  },
+});
+const { journalLines } = await import("./journal.ts");
 
 const g = (kind, amount, o = {}) => ({ account_code: "1102050101.202", account_name: "UC-IP", kind, revenue_code: "4301020105.202", diff_under_code: "4301020105.231", diff_over_code: "4301020105.232", n: 1, amount, ...o });
 const pick = (l) => [l.kind, l.dr_code, l.cr_code, l.amount];
@@ -54,5 +67,22 @@ test("transfer (ar_transfer ติดลบ = รับ): Dr เงินฝา�
     ["รับเงินโอน", "revenue", "4301020105.214", "รายได้", "cash", null, "เงินฝากธนาคาร", 27931.75],
     ["รับเงินโอน", "cash", null, "เงินฝากธนาคาร", "ar", "1102050101.222", "OP REFER", 100],
     ["รับเงินโอน", "cash", null, "เงินฝากธนาคาร", "revenue", "4301020105.214", "รายได้", 7224700],
+  ]);
+});
+
+test("transfer งบปีก่อน (3102010102.201 ไม่อยู่ใน ar_account): Cr บัญชีทุน equity ชื่อจาก PRIOR_YEAR_ACCOUNT", () => {
+  const o = { account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer", account_code: "3102010102.201" };
+  const lines = journalLines([g("transfer", "-500", o)]);
+  assert.deepEqual(lines.map((l) => [l.dr_type, l.dr_code, l.cr_type, l.cr_code, l.cr_name, l.amount]), [
+    ["cash", null, "equity", "3102010102.201", "กำไร/ขาดทุนสะสมจากข้อผิดพลาดเงินกองทุน UC ปีก่อน", 500],
+  ]);
+});
+
+test("capitation: settle Dr clear_code (รายได้) / Cr ลูกหนี้ ; diff Dr clear_short_code / Cr ลูกหนี้ ; ไม่ใช่เงินฝากหรือ diff_under ของบัญชี", () => {
+  const o = { account_code: "1102050101.201", revenue_code: "4301020105.201", diff_under_code: null, diff_over_code: null, source: "capitation", clear_code: "4301020105.214", clear_short_code: "4301020105.229" };
+  const lines = journalLines([g("settle", "-7245901.67", o), g("diff", "-6925267.64", { ...o, n: 3 })]);
+  assert.deepEqual(lines.map((l) => [l.kind, l.dr_type, l.dr_code, l.cr_type, l.cr_code, l.n, l.amount]), [
+    ["รับชำระ", "revenue", "4301020105.214", "ar", "1102050101.201", 1, 7245901.67],
+    ["ส่วนต่าง", "diff_under", "4301020105.229", "ar", "1102050101.201", 3, 6925267.64],
   ]);
 });

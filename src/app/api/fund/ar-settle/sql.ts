@@ -17,13 +17,13 @@ FROM stm_row r JOIN stm_file f ON f.id = r.stm_file_id
 LEFT JOIN rep_row rr ON rr.tran_id = r.tran_id AND rr.scheme = f.scheme
 WHERE r.stm_file_id = $1
 ORDER BY r.id`;
-// S3 หนี้ของ VN/AN ($1 = vns, $2 = ans) ยอดคงเหลือรวม HOSxP + stm + manual + fwf ของหนี้เดียวกัน ; settles_by_stm ให้ route กรองบัญชีที่ตัดได้
+// S3 หนี้ของ VN/AN ($1 = vns, $2 = ans) ยอดคงเหลือรวม HOSxP + stm + manual + fwf + capitation ของหนี้เดียวกัน ; settles_by_stm ให้ route กรองบัญชีที่ตัดได้
 const DEBTS_SQL = `SELECT s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date::text AS ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart,
   s.account_code, COALESCE(a.settles_by_stm, false) AS settles_by_stm, b.balance
 FROM ar_ledger s
 LEFT JOIN ar_account a ON a.code = s.account_code
 CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
-  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf')) b
+  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf', 'capitation')) b
 WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt')
   AND ((s.patient_type = 'OP' AND s.vn = ANY($1::text[])) OR (s.patient_type = 'IP' AND s.an = ANY($2::text[])))`;
 // S4 หนี้ใน REP ที่ STM ไฟล์นี้จ่าย (stm_summary.rep_no) REP ผ่านแล้ว แต่ไม่มีบรรทัดในไฟล์ และยังคงเหลือ ($1 = stm_file_id) แยก OP/IP ให้ใช้ index vn/an
@@ -40,7 +40,7 @@ FROM rep_row rr
 JOIN ar_ledger s ON s.kind = 'set' AND ${src} = ${rep}
 JOIN ar_account a ON a.code = s.account_code AND a.settles_by_stm
 CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
-  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf')) b
+  WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf', 'capitation')) b
 WHERE rr.scheme = (SELECT scheme FROM f)
   AND rr.rep_no IN (SELECT rep_no FROM stm_summary WHERE stm_file_id = $1)
   AND rr.patient_type = '${pt}' AND cardinality(rr.error_codes) = 0
