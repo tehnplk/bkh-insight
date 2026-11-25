@@ -13,7 +13,12 @@ export type ArAccount = {
   diff_over_code: string | null;
   /** ตัดหนี้ด้วย STM ได้ (บัญชีที่จ่ายรายครั้ง) */
   settles_by_stm: boolean;
+  /** กลุ่มเรียกเก็บ (ar_collect_group) ตามโปรแกรม Claim ของการเงิน */
+  collect_group: number | null;
+  /** บัญชี Dr เมื่อตัดหนี้อัตโนมัติ เช่น .201 ตัดด้วยเงินเหมาจ่ายรายหัว */
+  clear_code: string | null;
 };
+export type CollectGroup = { id: number; name: string; send_mode: "book" | "claim" | "auto" | "none" };
 export type ArAccountMap = {
   id: string;
   hipdata_code: string | null;
@@ -30,6 +35,7 @@ export type Option = { code: string; name: string };
 /** response ของ GET /api/admin/ar-accounts */
 export type ArAccountsData = {
   accounts: ArAccount[];
+  groups: CollectGroup[];
   maps: ArAccountMap[];
   unassigned: Unassigned[];
   funds: Option[];
@@ -50,8 +56,9 @@ const bad = (error: string) => Response.json({ error }, { status: 400 });
 export async function GET() {
   const { error } = await adminSession();
   if (error) return error;
-  const [accounts, maps, unassigned, lk, used] = await Promise.all([
-    insightQuery<ArAccount>("SELECT code, name, revenue_code, diff_under_code, diff_over_code, settles_by_stm FROM ar_account ORDER BY code"),
+  const [accounts, groups, maps, unassigned, lk, used] = await Promise.all([
+    insightQuery<ArAccount>("SELECT code, name, revenue_code, diff_under_code, diff_over_code, settles_by_stm, collect_group, clear_code FROM ar_account ORDER BY code"),
+    insightQuery<CollectGroup>("SELECT id, name, send_mode FROM ar_collect_group ORDER BY sort"),
     insightQuery<ArAccountMap>(
       `SELECT id, hipdata_code, pttype, patient_type, account_code, updated_by, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at
 FROM ar_account_map ORDER BY hipdata_code NULLS LAST, pttype, patient_type DESC`,
@@ -67,6 +74,7 @@ GROUP BY patient_type, pttype, hipdata_code HAVING SUM(amount) <> 0 ORDER BY SUM
   const fundCodes = [...new Set([...lk.pttype.values()].map((p) => p.fund))].filter((f) => f !== UNKNOWN_FUND).sort();
   const body: ArAccountsData = {
     accounts,
+    groups,
     maps,
     unassigned,
     funds: fundCodes.map((code) => ({ code, name: lk.fundName(code) })),

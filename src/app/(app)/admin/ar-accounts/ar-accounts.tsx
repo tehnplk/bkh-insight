@@ -467,18 +467,20 @@ function UnassignedList({ data, reload, onPick }: { data: ArAccountsData; reload
   );
 }
 
-/* ---------- บัญชีคู่ (สมุดรายวัน) และการตัดหนี้ด้วย STM ---------- */
+/* ---------- ตั้งค่าบัญชี: บัญชีคู่ (สมุดรายวัน), การตัดหนี้ด้วย STM, กลุ่มเรียกเก็บ ---------- */
 
-type SettingDraft = Pick<ArAccount, "code" | "revenue_code" | "diff_under_code" | "diff_over_code" | "settles_by_stm">;
+type SettingDraft = Pick<ArAccount, "code" | "revenue_code" | "diff_under_code" | "diff_over_code" | "clear_code" | "settles_by_stm" | "collect_group">;
 const INPUT = `h-8 w-36 rounded-md border border-line bg-surface px-2 tabular-nums ${focusRing}`;
 
 function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () => void }) {
   const [draft, setDraft] = useState<SettingDraft>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
+  const [all, setAll] = useState(false);
   const used = new Set(data.used);
-  // บัญชีที่มีรายการใน ledger หรือตั้งค่าไว้แล้ว (ผังบัญชีมี ~70 บัญชี ส่วนใหญ่ไม่ได้ใช้)
-  const rows = data.accounts.filter((a) => used.has(a.code) || a.revenue_code || a.settles_by_stm);
+  const groupName = new Map(data.groups.map((g) => [g.id, g.name]));
+  // ค่าเริ่มต้นแสดงบัญชีที่มีรายการใน ledger หรือตั้งบัญชีคู่ไว้แล้ว (ผังบัญชีมี ~90 บัญชี ส่วนใหญ่ไม่ได้ใช้)
+  const rows = all ? data.accounts : data.accounts.filter((a) => used.has(a.code) || a.revenue_code || a.clear_code || a.settles_by_stm);
 
   function save() {
     if (!draft) return;
@@ -491,12 +493,21 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
     });
   }
   const code = (v: string | null) => (v ? <span className="tabular-nums">{v}</span> : <span className="text-warning">ยังไม่กำหนด</span>);
-  const input = (k: "revenue_code" | "diff_under_code" | "diff_over_code", label: string) => (
+  const dash = <span className="text-muted">–</span>;
+  const input = (k: "revenue_code" | "diff_under_code" | "diff_over_code" | "clear_code", label: string) => (
     <input aria-label={label} value={draft?.[k] ?? ""} onChange={(e) => setDraft({ ...draft!, [k]: e.target.value })} className={INPUT} />
   );
 
   return (
-    <Section title="บัญชีคู่และการตัดหนี้ด้วย STM">
+    <Section
+      title="ตั้งค่าบัญชี"
+      aside={
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} className="size-4 accent-accent" />
+          แสดงทุกบัญชี
+        </label>
+      }
+    >
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <Table
         head={
@@ -506,6 +517,8 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
             <th className={TH}>ส่วนต่างค่ารักษาสูงกว่าข้อตกลง (Dr)</th>
             <th className={TH}>ส่วนต่างค่ารักษาต่ำกว่าข้อตกลง (Cr)</th>
             <th className={TH}>ตัดหนี้ด้วย STM</th>
+            <th className={TH}>กลุ่มเรียกเก็บ</th>
+            <th className={TH}>ตัดอัตโนมัติ (Dr)</th>
             <th className={TH}><span className="sr-only">จัดการ</span></th>
           </>
         }
@@ -516,13 +529,27 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
             <tr key={a.code} className="border-t border-line hover:bg-surface-sunken">
               <td className={TD}><span className="whitespace-nowrap tabular-nums">{a.code}</span> <span className="text-muted">{a.name}</span></td>
               <td className={TD}>{editing ? input("revenue_code", `รายได้คู่ของ ${a.code}`) : code(a.revenue_code)}</td>
-              <td className={TD}>{editing ? input("diff_under_code", `ส่วนต่างค่ารักษาสูงกว่าข้อตกลงของ ${a.code}`) : a.diff_under_code ? code(a.diff_under_code) : <span className="text-muted">–</span>}</td>
-              <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างค่ารักษาต่ำกว่าข้อตกลงของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : <span className="text-muted">–</span>}</td>
+              <td className={TD}>{editing ? input("diff_under_code", `ส่วนต่างค่ารักษาสูงกว่าข้อตกลงของ ${a.code}`) : a.diff_under_code ? code(a.diff_under_code) : dash}</td>
+              <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างค่ารักษาต่ำกว่าข้อตกลงของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : dash}</td>
               <td className={TD}>
                 {editing ? (
                   <input type="checkbox" aria-label={`ตัดหนี้ ${a.code} ด้วย STM`} checked={draft.settles_by_stm} onChange={(e) => setDraft({ ...draft, settles_by_stm: e.target.checked })} className="size-4 accent-accent" />
                 ) : a.settles_by_stm ? "ตัด" : <span className="text-muted">ไม่ตัด</span>}
               </td>
+              <td className={TD}>
+                {editing ? (
+                  <select
+                    aria-label={`กลุ่มเรียกเก็บของ ${a.code}`}
+                    value={draft.collect_group ?? ""}
+                    onChange={(e) => setDraft({ ...draft, collect_group: e.target.value ? +e.target.value : null })}
+                    className={`${SELECT_CLASS} h-8`}
+                  >
+                    <option value="">ไม่กำหนด</option>
+                    {data.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                ) : a.collect_group ? <span className="whitespace-nowrap">{groupName.get(a.collect_group) ?? a.collect_group}</span> : dash}
+              </td>
+              <td className={TD}>{editing ? input("clear_code", `บัญชีตัดอัตโนมัติ (Dr) ของ ${a.code}`) : a.clear_code ? code(a.clear_code) : dash}</td>
               <td className={`${TD} text-right whitespace-nowrap`}>
                 {editing ? (
                   <>
@@ -530,14 +557,14 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
                     <button type="button" onClick={() => setDraft(undefined)} className={`${btn} h-7 px-2.5`}>ยกเลิก</button>
                   </>
                 ) : (
-                  <button type="button" aria-label={`แก้ไขบัญชีคู่ ${a.code}`} onClick={() => setDraft(a)} className={`${btn} h-7 px-2.5`}>แก้ไข</button>
+                  <button type="button" aria-label={`แก้ไขการตั้งค่าบัญชี ${a.code}`} onClick={() => setDraft(a)} className={`${btn} h-7 px-2.5`}>แก้ไข</button>
                 )}
               </td>
             </tr>
           );
         })}
       </Table>
-      <p className="text-xs text-muted">ส่วนต่างใช้เมื่อตัดหนี้ด้วย STM แล้วยอดที่ได้รับไม่เท่าลูกหนี้ บัญชีที่ไม่ตัดด้วย STM (เช่น .201 เหมาจ่ายรายหัว) ยอดจะคงอยู่จนกว่าจะตัดด้วยวิธีอื่น</p>
+      <p className="text-xs text-muted">ส่วนต่างใช้เมื่อตัดหนี้ด้วย STM แล้วยอดที่ได้รับไม่เท่าลูกหนี้ บัญชีที่ไม่ตัดด้วย STM (เช่น .201 เหมาจ่ายรายหัว) ยอดจะคงอยู่จนกว่าจะตัดด้วยวิธีอื่น ตัดอัตโนมัติ (Dr) คือบัญชีที่ลงเมื่อตัดหนี้โดยไม่ได้รับเงิน เช่น .201 ตัดด้วยเงินเหมาจ่ายรายหัว</p>
     </Section>
   );
 }

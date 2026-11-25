@@ -13,7 +13,8 @@ const OPD_DEBT_SQL = (where: string) => `SELECT d.debt_id, d.vn, d.debt_date, d.
        t.hipdata_code, t.pttype_eclaim_id,
        IFNULL(d.amount, 0) AS amount, d.status,
        COALESCE(NULLIF(vp.hospmain, ''), NULLIF(o.hospmain, '')) AS hospmain,
-       hc.chwpart AS hospmain_chwpart
+       hc.chwpart AS hospmain_chwpart,
+       o.vstdate
 FROM rcpt_debt d
 LEFT JOIN pttype t ON t.pttype = d.pttype
 LEFT JOIN visit_pttype vp ON vp.vn = d.vn AND vp.pttype = d.pttype
@@ -128,21 +129,22 @@ async function syncCancels(w: { from: string; to: string }, syncId: string, coun
   }
 }
 
-async function syncIpd(w: { from: string; to: string }, mode: "daily" | "backfill", rules: AccountRules, today: string, syncId: string, counts: SyncCounts) {
+async function syncIpd(w: { from: string; to: string }, rules: AccountRules, today: string, syncId: string, counts: SyncCounts) {
   for (const c of chunkRange(w.from, w.to)) {
     const rows = await hisQuery<HisIpd>(IPD_SQL(BY_RANGE.ipd), [c.from, c.to]);
     bump(counts, "ipd_rows", rows.length);
     await locked(async (tx) => {
       const states = await loadStates(tx, "ipt", rows.map((r) => r.an), c);
-      await insert(tx, planIpd(rows, states, rules, c, mode, today), syncId, counts);
+      await insert(tx, planIpd(rows, states, rules, c, today), syncId, counts);
     });
   }
 }
 
 /**
  * ดึงยอดลง ledger หนึ่งครั้ง (หนึ่งแถวใน ar_sync_log) เขียนทีละชุด ≤31 วันใน transaction ของตัวเอง กดซ้ำได้ไม่ตั้งซ้ำ
- * - daily: OPD ย้อน 14 วัน, ยกเลิกหนี้ตั้งแต่ sync รายวันที่สำเร็จล่าสุด −1 วัน, IPD ย้อน 120 วัน (วันตั้งหนี้ = วันนี้)
- * - backfill: หนึ่งเดือน (YYYY-MM) IPD ใช้ dchdate เป็นวันตั้งหนี้
+ * - daily: OPD ย้อน 14 วันของ debt_date, ยกเลิกหนี้ตั้งแต่ sync รายวันที่สำเร็จล่าสุด −1 วัน, IPD ย้อน 120 วันของ dchdate
+ * - backfill: หนึ่งเดือน (YYYY-MM)
+ * วันตั้งหนี้ทุกโหมด: OPD = วันรับบริการ (ไม่ก่อน LEDGER_START), IPD = วันจำหน่าย ; ปรับปรุง/กลับรายการลงวันที่ sync
  * error กลางทาง: ชุดที่ commit แล้วคงอยู่ (กดใหม่ได้เพราะ idempotent) และบันทึก error ลง log
  * daily รันอัตโนมัติทุก 01:00 ผ่าน scripts/ar-sync-daily.mjs (systemd timer ใน deploy/)
  * ไม่ตัดหนี้ด้วย STM (ผู้ใช้เลือก 20 พ.ย. 2569 ให้ตัดเองที่ /fund/ar-settle) แถว stm ที่ตัดอัตโนมัติไปแล้วคงไว้
@@ -175,7 +177,7 @@ export async function runSync(
     // ตั้งก่อนยกเลิก ให้หนี้ที่ตั้งและยกเลิกในรอบเดียวกันลดได้ทันที
     await syncOpd(windows.opd, rules, today, id, counts);
     await syncCancels(windows.cancel, id, counts);
-    await syncIpd(windows.ipd, input.mode, rules, today, id, counts);
+    await syncIpd(windows.ipd, rules, today, id, counts);
   } catch (e) {
     console.error("ar-sync", id, (e as Error).message);
     error = (e as Error).message.slice(0, 500);
@@ -237,9 +239,9 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
       const { entries: cancelEntries } = planCancels(cancels, await loadStates(tx, source, cancels.map((x) => String(x.debt_id))));
       entries += await insert(tx, cancelEntries, syncId, counts);
     } else {
-      // states จาก [an] ตรงๆ: AN ที่ finance_lock ไม่ใช่ Y แล้ว (his ไม่คืนแถว) จึงกลับรายการได้ ; "daily" = ตั้งใหม่ลงวันนี้
+      // states จาก [an] ตรงๆ: AN ที่ finance_lock ไม่ใช่ Y แล้ว (his ไม่คืนแถว) จึงกลับรายการได้
       const states = await loadStates(tx, source, [id]);
-      entries += await insert(tx, planIpd(ipd, states, rules, { from: LEDGER_START, to: today }, "daily", today), syncId, counts);
+      entries += await insert(tx, planIpd(ipd, states, rules, { from: LEDGER_START, to: today }, today), syncId, counts);
     }
     const [after] = await tx<CaseState>(CASE_SQL, [source, id]);
     await tx("UPDATE ar_sync_log SET counts = $2, finished_at = now() WHERE id = $1", [syncId, JSON.stringify(counts)]);
