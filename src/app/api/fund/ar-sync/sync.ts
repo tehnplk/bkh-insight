@@ -62,7 +62,7 @@ SELECT ${COLS}, $2 FROM jsonb_to_recordset($1::jsonb) AS x(source text, kind tex
 ON CONFLICT (source, ref, kind) WHERE kind IN ('set', 'cancel') DO NOTHING
 RETURNING source, kind`;
 // ยอดของหนี้ (x = ทุกแถวของ (patient_type, ref) เดียวกับแถว set s): balance = ค่ารักษาเต็มของ source HOSxP (ไม่นับ diff),
-//   diff = ส่วนต่างตามเพดาน/สัดส่วน (diff ของ source HOSxP), settled = ตัดหนี้แล้วด้วย source อื่น (stm/fwf/manual)
+//   diff = ส่วนต่างตามเพดาน/สัดส่วน (diff ของ source HOSxP), settled = ตัดหนี้แล้วด้วย source อื่น (stm/fwf/capitation/manual)
 const REF_AGG = `SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff') AS balance,
   COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind = 'diff'), 0) AS diff,
   bool_or(x.kind = 'cancel') AS cancelled,
@@ -210,7 +210,7 @@ RETURNING ${LOG_COLS}`,
   return log;
 }
 
-// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวรับชำระ/ส่วนต่างแล้ว (STM, เงินรับล่วงหน้า fwf, รับเงิน manual ; รวมรับบางส่วน)
+// หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวรับชำระ/ส่วนต่างแล้ว (STM, เงินรับล่วงหน้า fwf, เหมาจ่าย capitation, รับเงิน manual ; รวมรับบางส่วน)
 //   booked = ยอดของ source HOSxP (เท่าคอลัมน์ "ลงสมุดแล้ว"), balance = คงเหลือทางบัญชีทุก source
 //   diff ของ source HOSxP (เพดาน/สัดส่วนของกติกาบัญชี) ไม่ใช่การตัดหนี้ และไม่นับใน booked
 const CASE_SQL = `SELECT COALESCE(bool_or(x.kind = 'settle' OR (x.kind = 'diff' AND x.source <> s.source)), false) AS settled,
@@ -245,7 +245,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
   ]);
   return locked(async (tx) => {
     const [before] = await tx<CaseState>(CASE_SQL, [source, id]);
-    if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
+    if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า, เหมาจ่าย หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
     if (!before.debts && !debts.length && !cancels.length && !ipd.length) return null;
     const [{ id: syncId }] = await tx<{ id: string }>(
       "INSERT INTO ar_sync_log (mode, range_start, range_end, requested_by, case_ref) VALUES ('case', $1, $1, $2, $3) RETURNING id",

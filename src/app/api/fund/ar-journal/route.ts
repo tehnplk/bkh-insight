@@ -11,11 +11,12 @@ import { CASH_NAME, journalLines, type JournalGroup, type JournalLine } from "./
 export type ArJournal = { month: string; lines: JournalLine[]; total: number; missing: number };
 
 // แยกตามเครื่องหมายด้วย ให้ยอดบวกและลบของบัญชีเดียวกันออกคนละข้าง (ไม่หักกลบ) ; ตามวันที่ลงบัญชี (entry_date)
+// บัญชีคู่ของ source capitation มาจากชุด (ค่า ณ ตอนตัด) ไม่ใช่ ar_account ปัจจุบัน
 const SQL = `SELECT l.account_code, a.name AS account_name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code,
-  count(*)::int AS n, SUM(l.amount) AS amount
-FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code
+  cb.clear_code, cb.clear_short_code, count(*)::int AS n, SUM(l.amount) AS amount
+FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code LEFT JOIN ar_capitation_batch cb ON cb.id = l.capitation_batch_id
 WHERE l.entry_date BETWEEN $1 AND $2
-GROUP BY l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, sign(l.amount)`;
+GROUP BY l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, cb.clear_code, cb.clear_short_code, sign(l.amount)`;
 // เงินโอนที่ได้รับ (ar_transfer ไม่ยกเลิก) ตาม transfer_date ; amount ติดลบ = เครดิต account_code (journalLines kind transfer)
 const TRANSFER_SQL = `SELECT t.account_code, a.name AS account_name, 'transfer' AS kind, 'transfer' AS source, NULL AS revenue_code, NULL AS diff_under_code, NULL AS diff_over_code,
   count(*)::int AS n, -SUM(t.amount) AS amount

@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
         { key: "transfer_date", header: "วันที่โอน", width: 12 },
         { key: "ref_doc_no", header: "เลขที่เอกสาร", width: 28 },
         { key: "fund_name", header: "กองทุน", width: 40 },
+        { key: "budget_year", header: "งบปี (พ.ศ.)", width: 10 },
         { key: "account_code", header: "รหัสบัญชี", width: 16 },
         { key: "account_name", header: "ชื่อบัญชี", width: 32 },
         { key: "amount", header: "จำนวนเงิน (บาท)", width: 16, type: "money" },

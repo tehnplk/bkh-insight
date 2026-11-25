@@ -41,7 +41,7 @@ export type DebtRow = Amounts & {
 export type DebtPage = GridPage<DebtRow>;
 
 /** ที่มาของรับเงินล่าสุด (ar_ledger.source ของแถว settle) */
-export const SOURCE_LABEL: Record<string, string> = { stm: "STM", manual: "บันทึกรับเงิน", fwf: "เงินรับล่วงหน้า" };
+export const SOURCE_LABEL: Record<string, string> = { stm: "STM", manual: "บันทึกรับเงิน", fwf: "เงินรับล่วงหน้า", capitation: "เหมาจ่าย" };
 
 export type Num = string | number | null;
 const n = (v: Num) => Number(v ?? 0);

@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/ar-transfer/transfer.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fundKey, parseTransferInput, parseTransferPatch, planImport, smtKey, summarize } from "./transfer.ts";
+import { PRIOR_YEAR_ACCOUNT, budgetYear, fundKey, keyBudgetYear, parseTransferInput, parseTransferPatch, planImport, smtKey, summarize } from "./transfer.ts";
 
 const row = (extra = {}) => ({
   budgetSource: "UC", postingDate: "25691009", batchNo: "Y004", refDocNo: "OP จัดสรรพลางก่อนร้อยละ 25", mouGrpCode: "70010101",
@@ -47,6 +47,26 @@ test("planImport: ใหม่, เหมือนเดิม, SMT เปลี
 test("planImport: แถวในงวดที่ปิดแล้วไม่เพิ่ม/ไม่แก้ แต่แถวที่แก้แล้วยังนับ kept", () => {
   const p = planImport([row(), row({ batchNo: "E1" })], MAP(), new Map([[smtKey(row({ batchNo: "E1" })), { amount: 1, account_code: "4301020105.214", edited: false, cancelled: true }]]), "2026-10");
   assert.deepEqual([p.counts.closed, p.counts.kept, p.inserts.length], [1, 1, 0]);
+});
+
+test("planImport: งบปีก่อนวันโอนลง 3102010102.201 ; จัดสรรพลางก่อนต้นปีงบไม่ย้าย ; แถวเดิมที่ยังไม่แก้ย้ายบัญชีเมื่อนำเข้าใหม่", () => {
+  const MAP2 = new Map([...MAP(), ["UC|4301020105.217|160301", { account_code: "4301020105.217", ignore: false }], ["UC||010101", { account_code: "4301020105.214", ignore: false }]]);
+  const alloc = row({ postingDate: "25681008", mophId: " ", mouGrpCode: "69010101", refDocNo: "จัดสรร OP ไปพลางก่อน" }); // 8 ต.ค. 2568 ปีงบ 2569 งบ 69
+  const refer = row({ postingDate: "25691116", batchNo: "R1", mouGrpCode: "69010101", refDocNo: "OP REFER6909", total: -27931.75 }); // ปีงบ 2570 งบ 69
+  const pp = row({ postingDate: "25681020", batchNo: "P1", mophId: "4301020105.217", mouGrpCode: "68160301", refDocNo: "6808_OP_02", total: 14650 });
+  const sept = row({ postingDate: "25690930", batchNo: "S1", mouGrpCode: "69010101" }); // 30 ก.ย. ยังปีงบ 2569
+  const edited = row({ postingDate: "25691120", batchNo: "E1", mouGrpCode: "69010101" });
+  const existing = new Map([
+    [smtKey(refer), { amount: "-27931.75", account_code: "4301020105.214", edited: false, cancelled: false }],
+    [smtKey(edited), { amount: "7224700", account_code: "4301020105.214", edited: true, cancelled: false }],
+  ]);
+  const p = planImport([alloc, refer, pp, sept, edited], MAP2, existing, null);
+  assert.deepEqual(p.inserts.map((r) => [r.ref_doc_no, r.account_code]), [
+    ["จัดสรร OP ไปพลางก่อน", "4301020105.214"], ["6808_OP_02", PRIOR_YEAR_ACCOUNT.code], ["OP จัดสรรพลางก่อนร้อยละ 25", "4301020105.214"],
+  ]);
+  assert.deepEqual(p.updates, [{ smt_key: smtKey(refer), account_code: "3102010102.201", amount: -27931.75 }]);
+  assert.deepEqual([p.counts.kept, p.counts.updated, p.counts.new], [1, 1, 3]);
+  assert.deepEqual([budgetYear("70160301"), budgetYear(" 69010101 "), budgetYear("6901"), keyBudgetYear(smtKey(pp)), keyBudgetYear(null)], [2570, 2569, null, 2568, null]);
 });
 
 test("summarize: ต่อบัญชีต่อเดือน ไม่นับยกเลิก .214/.217 ขึ้นก่อน", () => {

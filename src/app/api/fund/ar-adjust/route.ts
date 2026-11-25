@@ -34,7 +34,7 @@ FROM (
 ) q
 LEFT JOIN ar_ledger s ON s.patient_type = q.patient_type AND s.ref = q.ref AND s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt')
 LEFT JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x WHERE x.patient_type = q.patient_type AND x.ref = q.ref
-  AND x.source IN (s.source, 'stm', 'manual', 'fwf')) b ON true
+  AND x.source IN (s.source, 'stm', 'manual', 'fwf', 'capitation')) b ON true
 ORDER BY q.status = 'pending' DESC, COALESCE(q.decided_at, q.requested_at) DESC`;
 const SET_ROW_SQL = `SELECT source, ref, vn, an, patient_type, ref_date, pttype, hipdata_code, hospmain, hospmain_chwpart, account_code
 FROM ar_ledger WHERE patient_type = $1 AND ref = $2 AND kind = 'set' AND source IN ('rcpt_debt', 'ipt')`;

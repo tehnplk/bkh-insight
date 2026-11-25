@@ -1,5 +1,6 @@
 "use client";
 
+import { ReceiptText } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { copyable } from "@/components/copy-button/copy-button";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
@@ -12,6 +13,7 @@ import {
   MAX_DAYS, SOURCE_LABEL,
   type Amounts, type ArCollectGroup, type ArCollectSummary, type Counts, type DebtPage, type DebtRow, type GroupRow, type HospRow, type PatientType, type SendMode,
 } from "@/app/api/fund/ar-collect/collect";
+import { DebtorItems, Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 
 const TYPES: { key: PatientType; label: string }[] = [
@@ -220,6 +222,27 @@ const debtColumns = (type: PatientType) =>
   ]);
 const DEBT_COLUMNS = { OP: debtColumns("OP"), IP: debtColumns("IP") };
 
+const debtDetailTitle = (r: DebtRow) => (
+  <>
+    {r.patient_name || "–"}{" "}
+    <span className="font-normal text-muted tabular-nums">{r.an ? <>AN {copyable(r.an, "AN")}</> : <>VN {copyable(r.vn ?? r.ref, "VN")}</>}</span>
+  </>
+);
+// แถว OP มีแต่ vn แถว IP มีแต่ an (ar-sync) ; ค่ารักษาของหนี้ (set + ปรับปรุง) เทียบกับลูกหนี้สิทธิจากรายการ
+const renderDebtDetail = (r: DebtRow) => (
+  <div className="text-sm">
+    <Facts>
+      <Fact label="HN">{copyable(r.hn, "HN")}</Fact>
+      <Fact label={r.an ? "วันที่จำหน่าย" : "วันที่รับบริการ"}>{formatThaiDate(r.ref_date)}</Fact>
+      <Fact label="สิทธิ">{r.pttype && `${r.pttype} ${r.pttype_name ?? ""}`.trim()}</Fact>
+      <Fact label="ค่ารักษา (บาท)"><Money value={r.cost} /></Fact>
+      <Fact label="ลูกหนี้สุทธิ (บาท)"><Money value={r.debt} /></Fact>
+      <Fact label="คงเหลือ (บาท)"><span className="font-semibold"><Money value={r.balance} /></span></Fact>
+    </Facts>
+    <DebtorItems vn={r.vn} an={r.an} debtor={r.cost} />
+  </div>
+);
+
 type PanelProps = { start: string; end: string; grp: string; name: string; mode: SendMode; type: PatientType; setType: (t: PatientType) => void };
 
 function GroupPanel({ start, end, grp, name, mode, type, setType }: PanelProps) {
@@ -278,6 +301,11 @@ function GroupPanel({ start, end, grp, name, mode, type, setType }: PanelProps) 
               localState={{ pageSize: "50" }}
               columns={DEBT_COLUMNS[type]}
               getRowId={(r) => r.ref}
+              renderDetail={renderDebtDetail}
+              detailTitle={debtDetailTitle}
+              detailSize="medium"
+              detailIcon={<ReceiptText aria-hidden className="size-4" />}
+              detailInColumn="patient_name"
               searchable={false}
               fitScreen
               pinColumns={2}

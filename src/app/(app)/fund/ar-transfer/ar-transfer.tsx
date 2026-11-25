@@ -71,6 +71,7 @@ const COLUMNS = col.columns([
   col.accessor("transfer_date", { header: "วันที่โอน", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums" } }),
   col.accessor("ref_doc_no", { header: "เลขที่เอกสาร", cell: (c) => c.getValue() || dash }),
   col.accessor("fund_name", { header: "กองทุน", cell: (c) => c.getValue() || dash, meta: { filter: true } }),
+  col.accessor("budget_year", { header: "งบปี", cell: (c) => c.getValue() ?? dash, enableSorting: false, meta: { className: "tabular-nums" } }),
   col.accessor("account_code", { header: "บัญชี", cell: (c) => <Account code={c.getValue()} name={c.row.original.account_name} />, meta: { filter: true } }),
   col.accessor("amount", { header: "จำนวนเงิน (บาท)", cell: (c) => <Amount row={c.row.original} />, meta: { className: num } }),
   col.accessor("source", { header: "ที่มา", cell: (c) => SOURCE_LABEL[c.getValue()], meta: { filter: { format: (v) => SOURCE_LABEL[v as TransferRow["source"]] ?? v } } }),
@@ -171,6 +172,7 @@ function Detail({ row, accounts, closedThrough, onDone }: { row: TransferRow; ac
         <Fact label="ยอดจาก SMT (บาท)"><Money value={row.smt_amount} /></Fact>
         <Fact label="บัญชี (เครดิต)"><Account code={row.account_code} name={row.account_name} /></Fact>
         <Fact label="กองทุน">{row.fund_name}</Fact>
+        <Fact label="งบปี">{row.budget_year}</Fact>
         <Fact label="ที่มา">{SOURCE_LABEL[row.source]}</Fact>
         <Fact label="สถานะ"><Status status={row.status} /></Fact>
         <Fact label="หมายเหตุ">{row.note}</Fact>
