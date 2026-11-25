@@ -60,13 +60,12 @@ export function HerbalUsage({ title }: { title: ReactNode }) {
     body = <Notice title="โหลดข้อมูลไม่สำเร็จ" detail={error} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />;
   } else if (!data) {
     body = <Skeleton rows={8} />;
-  } else if (data.items.length === 0) {
+  } else if (data.year.listed === 0) {
     body = <Notice title="HOSxP ยังไม่มีรายการที่ระบุเป็นยาสมุนไพร" detail="ระบุได้ที่ drugitems: หมวด 3/4 หรือรหัส TTMT" />;
   } else {
     const y = data.year;
     const loaded = data.months.slice(0, data.loaded);
     const sideRows = (k: "op" | "ip") => data.items.reduce((s, x) => s + x[k].rows, 0);
-    const inactive = data.items.filter((x) => !x.active).length;
     body = (
       <div className="flex flex-col gap-8">
         <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -79,9 +78,9 @@ export function HerbalUsage({ title }: { title: ReactNode }) {
           <Kpi label="ครั้งที่สั่งใช้" sub={`ผู้ป่วยนอก ${formatCount(sideRows("op"))} · ผู้ป่วยใน ${formatCount(sideRows("ip"))}`}>
             <span className="text-kpi font-semibold tracking-tight">{formatCount(y.rows)}</span>
           </Kpi>
-          <Kpi label="รายการที่มีการใช้" sub={`จากรายการที่ระบุเป็นยาสมุนไพร${inactive ? ` (ปิดใช้ ${inactive})` : ""}`}>
+          <Kpi label="รายการที่มีการใช้" sub={`จากรายการที่ระบุเป็นยาสมุนไพร${y.inactive ? ` (ปิดใช้ ${y.inactive})` : ""}`}>
             <span className="text-kpi font-semibold tracking-tight">{formatCount(y.used)}</span>
-            <span className="text-sm text-muted">/ {formatCount(data.items.length)} รายการ</span>
+            <span className="text-sm text-muted">/ {formatCount(y.listed)} รายการ</span>
           </Kpi>
         </dl>
 
@@ -138,9 +137,9 @@ export function HerbalUsage({ title }: { title: ReactNode }) {
 
         <Panel
           title={`รายการยาสมุนไพร · ปีงบ ${fy}`}
-          aside={<a href={`${API}?fy=${fy}&format=xlsx`} className={btn} download>ส่งออก Excel</a>}
+          aside={data.items.length > 0 && <a href={`${API}?fy=${fy}&format=xlsx`} className={btn} download>ส่งออก Excel</a>}
         >
-          <ItemTable items={data.items} total={y.amt} />
+          {data.items.length > 0 ? <ItemTable items={data.items} total={y.amt} /> : <Notice title={`ยังไม่มีการสั่งใช้ยาสมุนไพรในปีงบ ${fy}`} />}
           <p className="mt-2 text-xs text-muted">
             เกณฑ์จาก drugitems ของ HOSxP: หมวด 3/4 (sks_product_category_id) หรือมีรหัส TTMT · AN ที่สั่งยาหลายเดือนนับเดือนละครั้ง
             {partial && ` · ${monthMid(partial.month)} ยังไม่จบเดือน`}
@@ -212,25 +211,22 @@ function ItemTable({ items, total }: { items: ItemSum[]; total: number }) {
           </tr>
         </thead>
         <tbody>
-          {items.map((x) => {
-            const unused = x.op.rows + x.ip.rows === 0;
-            return (
-              <tr key={x.icode} className={`border-t border-line ${unused ? "text-muted" : ""}`}>
-                <th scope="row" className="min-w-56 px-3 py-2 text-left font-normal">
-                  <span className="flex flex-wrap items-center gap-x-2">
-                    {x.name}
-                    {!x.active && <span className="rounded border border-line px-1 text-xs text-muted">ปิดใช้</span>}
-                  </span>
-                  <span className="block text-xs text-subtle tabular-nums">{x.icode}{x.units && ` · ${x.units}`}</span>
-                </th>
-                <td className="px-3 py-2 whitespace-nowrap">{reasons(x).join(", ")}</td>
-                {sideCells(x.op)}
-                {sideCells(x.ip)}
-                <td className={`${cell} border-l border-line font-medium`}>{formatBaht(x.amt)}</td>
-                <td className={cell}>{x.share === null ? <Dash /> : x.share.toFixed(1)}</td>
-              </tr>
-            );
-          })}
+          {items.map((x) => (
+            <tr key={x.icode} className="border-t border-line">
+              <th scope="row" className="min-w-56 px-3 py-2 text-left font-normal">
+                <span className="flex flex-wrap items-center gap-x-2">
+                  {x.name}
+                  {!x.active && <span className="rounded border border-line px-1 text-xs text-muted">ปิดใช้</span>}
+                </span>
+                <span className="block text-xs text-subtle tabular-nums">{x.icode}{x.units && ` · ${x.units}`}</span>
+              </th>
+              <td className="px-3 py-2 whitespace-nowrap">{reasons(x).join(", ")}</td>
+              {sideCells(x.op)}
+              {sideCells(x.ip)}
+              <td className={`${cell} border-l border-line font-medium`}>{formatBaht(x.amt)}</td>
+              <td className={cell}>{x.share === null ? <Dash /> : x.share.toFixed(1)}</td>
+            </tr>
+          ))}
         </tbody>
         <tfoot>
           <tr className="border-t border-line font-semibold">

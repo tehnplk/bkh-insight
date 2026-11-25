@@ -12,8 +12,8 @@ test("reasons: category 3/4 and TTMT", () => {
   assert.deepEqual(reasons({ cat: 1, ttmt: true }), ["TTMT"]);
 });
 
-test("report: months filled, future null, share per side and total, unused items last", () => {
-  const items = [item("A"), item("B"), item("C", null, true)];
+test("report: months filled, future null, share per side and total, unused items hidden", () => {
+  const items = [item("A"), item("B"), { ...item("C", null, true), active: false }];
   const usage = [
     { month: "2026-10", icode: "A", side: "OP", rows: 224, visits: 224, qty: 439, amt: 6818.5 },
     { month: "2026-10", icode: "A", side: "IP", rows: 95, visits: 37, qty: 105, amt: 1630 },
@@ -36,17 +36,18 @@ test("report: months filled, future null, share per side and total, unused items
   assert.equal(r.monthly.share.ip[1], null); // ไม่มียอดยา IP เดือนนั้น
   assert.equal(r.monthly.share.all[2], null);
 
-  assert.deepEqual(r.items.map((x) => x.icode), ["B", "A", "C"]);
+  assert.deepEqual(r.items.map((x) => x.icode), ["B", "A"]); // C ไม่มีการใช้ ไม่แสดง
   const a = r.items[1];
   assert.deepEqual(a.op, { rows: 224, visits: 224, qty: 439, amt: 6818.5 });
   assert.equal(a.amt, 8448.5);
   assert.ok(Math.abs(a.share - (8448.5 / 18508.5) * 100) < 1e-9);
-  assert.equal(r.items[2].share, 0);
 
   assert.equal(r.year.amt, 18508.5);
   assert.equal(r.year.drugAmt, 5304314.8);
   assert.equal(r.year.rows, 469);
   assert.equal(r.year.used, 2);
+  assert.equal(r.year.listed, 3);
+  assert.equal(r.year.inactive, 1);
   assert.ok(Math.abs(r.year.share.ip - (1630 / 551090.53) * 100) < 1e-9);
 });
 
@@ -54,6 +55,7 @@ test("no usage, no drug value: shares null, nothing used", () => {
   const r = buildReport(months, 1, [item("A")], [], []);
   assert.deepEqual(r.monthly.op, [0, null, null]);
   assert.equal(r.year.share.all, null);
-  assert.equal(r.items[0].share, null);
+  assert.deepEqual(r.items, []);
   assert.equal(r.year.used, 0);
+  assert.equal(r.year.listed, 1);
 });
