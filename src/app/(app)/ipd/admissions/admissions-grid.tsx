@@ -54,8 +54,8 @@ import { OVERDUE_VALUES, UNSENT_VALUES } from "@/app/api/fdh/claim-batch/claim";
 
 const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
 const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
-/** ข้อความอัตรา เช่น "จำหน่ายตั้งแต่ 1 ต.ค. 2569: 5,119.00 บาท/AdjRW · ..." */
-const RATE_NOTE = `AdjRW × อัตราตามวันจำหน่าย: ${ADJRW_RATES.map((r) => `ตั้งแต่ ${formatThaiDate(r.from)} ${formatBaht(r.rate)} บาท`).join(" · ")}`;
+/** ข้อความอัตรา เช่น "เฉพาะสิทธิ UC: AdjRW × อัตราตามวันจำหน่าย · ตั้งแต่ 16 ก.ย. 2569 5,100.00 บาท (หน่วยบริการหลักต่างจังหวัด 9,680.00 บาท) · ..." */
+const RATE_NOTE = `เฉพาะสิทธิ UC: AdjRW × อัตราตามวันจำหน่าย · ${ADJRW_RATES.map((r) => `ตั้งแต่ ${formatThaiDate(r.from)} ${formatBaht(r.normal)} บาท (หน่วยบริการหลักต่างจังหวัด ${formatBaht(r.outProvince)} บาท)`).join(" · ")}`;
 const dash = <span className="text-muted">–</span>;
 const nowrap = { className: "whitespace-nowrap" };
 const dateCell = { className: "whitespace-nowrap tabular-nums" };
@@ -709,17 +709,16 @@ export function ClaimStats({ grid, counts, type }: { grid: SummaryGrid; counts?:
   );
 }
 
-// ยอดเงินใต้ตาราง พื้นเขียวสด (--accent) ตัวอักษร --accent-fg ที่ออกแบบให้อ่านบนพื้นนี้ ; คำเตือนรายที่ไม่รวมในยอดอยู่ข้างยอด
+// ยอดเงินใต้ตาราง พื้นเขียวสด (--accent) ตัวอักษร --accent-fg ที่ออกแบบให้อ่านบนพื้นนี้ ; จำนวนรายที่ไม่คิดยอดอยู่ข้างยอด (ตามเกณฑ์ ไม่ใช่ความผิดพลาด จึงสีจาง)
 const renderFooter = (d: AdmissionsPage) => (
   <>
     <Stat label="ยอดคำนวณเงิน" title={RATE_NOTE} tone="strong">
       <span className="font-semibold tabular-nums">{formatBaht(d.adjrw_amount)}</span> บาท
     </Stat>
     {d.adjrw_amount_n < d.adjrw_n && (
-      <p role="status" className="text-xs text-warning">
-        {formatCount(d.adjrw_n - d.adjrw_amount_n)} รายจำหน่ายก่อน{" "}
-        {formatThaiDate(ADJRW_RATES[ADJRW_RATES.length - 1].from)}{" "}
-        ยังไม่มีอัตราบาทต่อ AdjRW จึงไม่รวมในยอด
+      <p role="status" className="text-xs text-muted">
+        {formatCount(d.adjrw_n - d.adjrw_amount_n)} รายไม่คิดยอด (ไม่ใช่สิทธิ UC หรือจำหน่ายก่อน{" "}
+        {formatThaiDate(ADJRW_RATES[ADJRW_RATES.length - 1].from)})
       </p>
     )}
   </>
