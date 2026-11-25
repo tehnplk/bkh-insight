@@ -31,7 +31,7 @@ const ipRx = (n: number) =>
   `SELECT an AS \`key\`, ${RX_COLS} FROM opitemrece FORCE INDEX (ix_an) WHERE an IN (${Array(n).fill("?").join(", ")}) GROUP BY an`;
 // สมุดลูกหนี้ใช้แค่ให้สถานะ "ปรับปรุงในสมุดแล้ว" (stale_fixed) ของ OPD ตรงกับหน้า ar-precheck ที่ลิงก์ไป ; IPD ไม่ใช้
 const LEDGER_OPD = `SELECT s.vn AS key,
-  SUM(x.amount) FILTER (WHERE x.source = s.source) AS booked,
+  SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff') AS booked,
   SUM(x.amount) AS balance
 FROM ar_ledger s JOIN ar_ledger x ON x.patient_type = s.patient_type AND x.ref = s.ref
 WHERE s.kind = 'set' AND s.source = 'rcpt_debt' AND s.vn = ANY($1::text[])

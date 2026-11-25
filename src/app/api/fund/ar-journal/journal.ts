@@ -3,6 +3,7 @@
 //   รับชำระ (STM, รับเงิน): ลบ Dr เงินฝากธนาคาร / Cr ลูกหนี้ ; บวก (เรียกคืน) กลับข้าง
 //   รับชำระด้วยเงินรับล่วงหน้าบัตรต่างด้าว (source fwf): Dr 2103010103.502 / Cr ลูกหนี้ เป็นกติกาต่อ source ไม่ใช่ต่อบัญชี (หนี้ .501 จ่ายเงินสดก็ได้)
 //   ส่วนต่าง (STM), ชื่อบัญชีตามผังบัญชี สธ. มองจากค่ารักษาที่เรียกเก็บ: ลบ = ได้รับต่ำกว่า Dr ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง / Cr ลูกหนี้ ; บวก = ได้รับสูงกว่า Dr ลูกหนี้ / Cr ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง
+//   ส่วนต่างตามเพดาน/สัดส่วนของกติกาบัญชี (kind diff ของ source rcpt_debt/ipt): ลบ Dr ส่วนต่างที่สูงกว่าข้อตกลง / Cr ลูกหนี้ ; บวก (ยกเลิก/กลับรายการ) กลับข้างในบัญชีเดียวกัน
 
 /** ยอดรวมของ ar_ledger ต่อ (บัญชี, kind, เครื่องหมาย) พร้อมบัญชีคู่จาก ar_account */
 export type JournalGroup = {
@@ -37,8 +38,9 @@ export function journalLines(groups: JournalGroup[]): JournalLine[] {
     const ar = { type: "ar" as const, code: g.account_code, name: g.account_name ?? "ลูกหนี้ไม่ระบุบัญชี" };
     let other: { type: AccountType; code: string | null; name: string };
     if (g.kind === "settle") other = g.source === "fwf" ? { type: "pool", ...POOL_ACCOUNT } : { type: "cash", code: null, name: CASH_NAME };
+    // diff ของ source HOSxP = เพดาน/สัดส่วนของกติกาบัญชี: บวกคือกลับรายการส่วนต่างเดิม จึงลงบัญชี diff_under ข้างเดียวกันเสมอ
     else if (g.kind === "diff")
-      other = cents < 0 ? { type: "diff_under", code: g.diff_under_code, name: "ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง" } : { type: "diff_over", code: g.diff_over_code, name: "ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง" };
+      other = cents < 0 || g.source === "rcpt_debt" || g.source === "ipt" ? { type: "diff_under", code: g.diff_under_code, name: "ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง" } : { type: "diff_over", code: g.diff_over_code, name: "ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง" };
     else other = { type: "revenue", code: g.revenue_code, name: "รายได้" };
     const [dr, cr] = cents > 0 ? [ar, other] : [other, ar];
     const kind = KIND_TEXT[g.kind] ?? g.kind;

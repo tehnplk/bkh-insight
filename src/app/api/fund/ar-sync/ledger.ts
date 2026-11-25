@@ -3,13 +3,11 @@
 
 /** วันแรกที่ตั้งลูกหนี้ (1 ต.ค. 2568) */
 export const LEDGER_START = "2025-10-01";
-/** รหัสหน่วยบริการของโรงพยาบาล และจังหวัดที่ตั้ง (UCS OP ใน CUP / ในจังหวัด / ต่างจังหวัด) */
+/** รหัสหน่วยบริการของโรงพยาบาล และจังหวัดที่ตั้ง (แยกบัญชีตามที่ตั้งหน่วยบริการประจำ) */
 export const HOSPITAL_HCODE = "11252";
 export const HOSPITAL_CHWPART = "65";
-/** หน่วยบริการประจำนอกสังกัด สธ. ในจังหวัด (UCS OP ลง .201 นอกสังกัด สธ.): รพ.มหาวิทยาลัยนเรศวร, รพ.ค่ายสมเด็จพระนเรศวร, รพ.จิตเวชพิษณุโลก */
-export const NON_MOPH_HCODES = new Set(["14972", "11517", "41429"]);
-/** บัญชี UCS OP ตามหน่วยบริการประจำ */
-export const UC_OP_ACCOUNTS = { cup: "1102050101.201", province: "1102050101.203", other: "1102050101.204", nonMoph: "1102050102.201" } as const;
+/** hospcode.hospital_type_id ของหน่วยบริการสังกัด สธ. (5 รพศ., 7 รพช.) ที่เหลือ เช่น 11 จิตเวช, 12 มหาวิทยาลัย/ค่ายทหาร = นอกสังกัด */
+const MOPH_TYPES = new Set(["5", "7"]);
 /** ชุดละไม่เกิน 31 วัน (เท่ากับช่วงสูงสุดของ query his) */
 export const MAX_BATCH_DAYS = 31;
 export const DAILY_OPD_DAYS = 14;
@@ -17,10 +15,24 @@ export const DAILY_IPD_DAYS = 120;
 
 export type PatientType = "OP" | "IP";
 export type Source = "rcpt_debt" | "ipt";
-export type Kind = "set" | "adjust" | "cancel" | "reverse";
+/** diff ของ source HOSxP = ส่วนต่างตามเพดาน/สัดส่วนของกติกาบัญชี (ค่ารักษาเต็มลงรายได้ ส่วนเกินลูกหนี้ลง diff_under_code) */
+export type Kind = "set" | "adjust" | "cancel" | "reverse" | "diff";
 
-export type AccountMap = { hipdata_code: string | null; pttype: string | null; patient_type: PatientType; account_code: string };
-export type AccountRules = { maps: AccountMap[]; cup: Set<string> };
+/** ที่ตั้งหน่วยบริการประจำเทียบกับหน่วยบริการหลักของกลุ่มสิทธิ ; any = กติกาที่ใช้เมื่อไม่มีกติกาของที่ตั้งนั้น */
+export const LOCS = ["any", "main", "province_moph", "province_other", "outside", "unknown"] as const;
+export type Loc = (typeof LOCS)[number];
+export const LOC_LABEL: Record<Loc, string> = {
+  any: "ทุกที่", main: "หน่วยบริการหลัก/ใน CUP", province_moph: "ในจังหวัด สังกัด สธ.", province_other: "ในจังหวัด นอกสังกัด สธ.",
+  outside: "ต่างจังหวัด", unknown: "ไม่พบหน่วยบริการประจำ",
+};
+/** กลุ่มสิทธิ (ar_right) main_hcode = หน่วยบริการหลัก (null = ไม่แยกตามที่ตั้ง) books_ar = false คือไม่ตั้งลูกหนี้ */
+export type Right = { code: string; name: string; main_hcode: string | null; books_ar: boolean };
+/** บัญชีของกลุ่มสิทธิ × OP/IP × ที่ตั้ง (ar_account_rule) cap = เพดานลูกหนี้ (บาท), debt_pct = ลูกหนี้เป็น % ของค่ารักษา */
+export type AccountRule = {
+  right_code: string; patient_type: PatientType; loc: Loc; account_code: string; cap: string | number | null; debt_pct: string | number | null;
+};
+export type AccountRules = { rights: Right[]; pttypes: Map<string, string>; rules: AccountRule[]; cup: Set<string> };
+export type Resolved = { account_code: string | null; rule: AccountRule | null; books: boolean };
 
 /** ข้อมูลสิทธิของแถวที่ใช้หาบัญชี (เก็บลงทุกแถวของ ledger เพื่อคำนวณบัญชีใหม่ได้) */
 export type Coverage = {
@@ -29,6 +41,8 @@ export type Coverage = {
   hipdata_code: string | null;
   hospmain: string | null;
   hospmain_chwpart: string | null;
+  /** hospcode.hospital_type_id ของหน่วยบริการประจำ */
+  hospmain_type: string | null;
 };
 
 /** แถวที่จะ INSERT ลง ar_ledger (amount เป็นบาท string 2 ตำแหน่ง) */
@@ -45,8 +59,11 @@ export type Entry = Coverage & {
   note: string | null;
 };
 
-/** ยอดคงเหลือของ ref ใน ledger + ข้อมูลจากแถว set (ทุกแถวถัดไปคัดลอกจากแถวนี้) */
-export type RefState = Omit<Entry, "kind" | "entry_date" | "amount" | "note"> & { balance: number; cancelled: boolean };
+/**
+ * หนี้ใน ledger + ข้อมูลจากแถว set (ทุกแถวถัดไปคัดลอกจากแถวนี้) ยอดเป็นสตางค์ของ source เดียวกัน:
+ * balance = ค่ารักษาเต็ม (ไม่นับ diff), diff = ส่วนต่างตามเพดาน/สัดส่วน, settled = มีแถวตัดหนี้จาก source อื่น (STM/fwf/รับเงิน)
+ */
+export type RefState = Omit<Entry, "kind" | "entry_date" | "amount" | "note"> & { balance: number; diff: number; cancelled: boolean; settled: boolean };
 
 /** ผลจาก query A (rcpt_debt) */
 export type HisDebt = {
@@ -60,45 +77,97 @@ export type HisDebt = {
   amount: string | number | null;
   hospmain: string | null;
   hospmain_chwpart: string | null;
+  hospmain_type: string | number | null;
 };
 /** ผลจาก query B (rcpt_debt_cancel) */
 export type HisCancel = { debt_id: string | number; cancel_datetime: string };
-/** ผลจาก query C (ipt ที่ finance_lock = 'Y') */
-export type HisIpd = { an: string; dchdate: string; pttype: string | null; hipdata_code: string | null; uc_money: string | number | null };
+/** ผลจาก query C (ipt ที่ finance_lock = 'Y') pttype = an_stat.pttype */
+export type HisIpd = {
+  an: string; dchdate: string; pttype: string | null; hipdata_code: string | null; uc_money: string | number | null;
+  hospmain: string | null; hospmain_chwpart: string | null; hospmain_type: string | number | null;
+};
 
 export const toCents = (v: string | number | null | undefined) => Math.round(Number(v ?? 0) * 100);
 export const fromCents = (c: number) => (c / 100).toFixed(2);
-const blank = (v: string | null | undefined) => (v == null || String(v).trim() === "" ? null : String(v).trim());
+const blank = (v: string | number | null | undefined) => (v == null || String(v).trim() === "" ? null : String(v).trim());
 const day = (v: string) => String(v).slice(0, 10);
 
-/**
- * บัญชีของสิทธิ: override ราย pttype > UCS OP ตามหน่วยบริการประจำ > ตามกองทุน > null (ไม่ระบุบัญชี ห้ามเดา)
- * UCS OP: hospmain = รพ. หรืออยู่ใน CUP = .201, นอกสังกัด สธ. = 1102050102.201, จังหวัดเดียวกัน = .203, จังหวัดอื่น = .204, ไม่มี hospmain/จังหวัด = null
- */
-export function accountFor(c: Coverage, rules: AccountRules): string | null {
-  const byPttype = c.pttype && rules.maps.find((m) => m.pttype === c.pttype && m.patient_type === c.patient_type);
-  if (byPttype) return byPttype.account_code;
-  if (c.hipdata_code === "UCS" && c.patient_type === "OP") {
-    if (!c.hospmain) return null;
-    if (c.hospmain === HOSPITAL_HCODE || rules.cup.has(c.hospmain)) return UC_OP_ACCOUNTS.cup;
-    if (NON_MOPH_HCODES.has(c.hospmain)) return UC_OP_ACCOUNTS.nonMoph;
-    if (!c.hospmain_chwpart) return null;
-    return c.hospmain_chwpart === HOSPITAL_CHWPART ? UC_OP_ACCOUNTS.province : UC_OP_ACCOUNTS.other;
-  }
-  return rules.maps.find((m) => m.hipdata_code === c.hipdata_code && m.pttype == null && m.patient_type === c.patient_type)?.account_code ?? null;
+/** ที่ตั้งหน่วยบริการประจำ: ตรง main_hcode (หรืออยู่ใน CUP เมื่อหน่วยหลักคือโรงพยาบาล) = main ; ไม่มี hospmain/ไม่พบใน hospcode = unknown */
+export function locationOf(c: Coverage, main: string | null, cup: Set<string>): Loc {
+  if (!main) return "any";
+  if (!c.hospmain) return "unknown";
+  if (c.hospmain === main || (main === HOSPITAL_HCODE && cup.has(c.hospmain))) return "main";
+  if (!c.hospmain_chwpart) return "unknown";
+  if (c.hospmain_chwpart !== HOSPITAL_CHWPART) return "outside";
+  return MOPH_TYPES.has(String(c.hospmain_type)) ? "province_moph" : "province_other";
 }
 
-const follow = (s: RefState, kind: Kind, entry_date: string, cents: number, note: string): Entry => ({
+/** บัญชีของหนี้: pttype -> กลุ่มสิทธิ -> กติกาของ (OP/IP, ที่ตั้ง) แล้ว (OP/IP, any) ; ไม่มีกลุ่มสิทธิหรือกติกา = null (ไม่ระบุบัญชี ห้ามเดา) */
+export function resolve(c: Coverage, r: AccountRules): Resolved {
+  const code = c.pttype ? r.pttypes.get(c.pttype) : undefined;
+  const right = code ? r.rights.find((x) => x.code === code) : undefined;
+  if (!right) return { account_code: null, rule: null, books: true };
+  if (!right.books_ar) return { account_code: null, rule: null, books: false };
+  const loc = locationOf(c, right.main_hcode, r.cup);
+  const of = (l: Loc) => r.rules.find((x) => x.right_code === right.code && x.patient_type === c.patient_type && x.loc === l);
+  const rule = of(loc) ?? of("any") ?? null;
+  return { account_code: rule?.account_code ?? null, rule, books: true };
+}
+
+/** ส่วนต่าง (สตางค์ ≤ 0) ที่ทำให้ลูกหนี้เหลือตามเพดานหรือสัดส่วนของกติกา จากค่ารักษาเต็ม full */
+export function capDiff(full: number, rule: AccountRule | null): number {
+  if (rule?.cap != null) return Math.min(full, toCents(rule.cap)) - full;
+  if (rule?.debt_pct != null) return Math.round((full * Number(rule.debt_pct)) / 100) - full;
+  return 0;
+}
+const capNote = (rule: AccountRule | null) =>
+  rule?.cap != null ? `ลูกหนี้ไม่เกิน ${Number(rule.cap)} บาท`
+  : rule?.debt_pct != null ? `ลูกหนี้ ${Number(rule.debt_pct)}% ของค่ารักษา`
+  : "ยกเลิกส่วนต่างตามเพดาน/สัดส่วน";
+const NO_AR = "สิทธินี้ไม่ตั้งลูกหนี้";
+
+type RefInfo = Omit<RefState, "balance" | "diff" | "cancelled" | "settled">;
+const follow = (s: RefInfo, kind: Kind, entry_date: string, cents: number, note: string | null): Entry => ({
   source: s.source, ref: s.ref, vn: s.vn, an: s.an, ref_date: s.ref_date, patient_type: s.patient_type, pttype: s.pttype,
-  hipdata_code: s.hipdata_code, hospmain: s.hospmain, hospmain_chwpart: s.hospmain_chwpart, account_code: s.account_code,
-  kind, entry_date, amount: fromCents(cents), note,
+  hipdata_code: s.hipdata_code, hospmain: s.hospmain, hospmain_chwpart: s.hospmain_chwpart, hospmain_type: s.hospmain_type,
+  account_code: s.account_code, kind, entry_date, amount: fromCents(cents), note,
 });
 const changed = (from: number, to: number) => `ยอดใน HOSxP เปลี่ยน ${fromCents(from)} → ${fromCents(to)}`;
+
+/** ตั้งหนี้ใหม่ + ส่วนต่างตามเพดาน/สัดส่วนวันเดียวกัน ; สิทธิที่ไม่ตั้งลูกหนี้ = ไม่มีแถว */
+function setEntries(e: Omit<RefInfo, "account_code"> & { entry_date: string }, cents: number, rules: AccountRules): Entry[] {
+  const res = resolve(e, rules);
+  if (!res.books) return [];
+  const s = { ...e, account_code: res.account_code };
+  const d = capDiff(cents, res.rule);
+  const set = follow(s, "set", e.entry_date, cents, null);
+  return d ? [set, follow(s, "diff", e.entry_date, d, capNote(res.rule))] : [set];
+}
+
+/** หนี้ที่ตั้งแล้ว ยอด HOSxP = target: ปรับปรุงค่ารักษาเต็มให้เท่า target แล้วปรับ diff ตามกติกา ; หนี้ที่ตัดแล้ว (settled) ไม่แตะ diff */
+function followEntries(s: RefState, target: number, rules: AccountRules, today: string, note: string): Entry[] {
+  const res = resolve(s, rules);
+  const full = res.books ? target : 0;
+  const out: Entry[] = [];
+  if (full !== s.balance) out.push(follow(s, "adjust", today, full - s.balance, res.books ? note : NO_AR));
+  const want = s.settled ? s.diff : capDiff(full, res.rule);
+  if (want !== s.diff) out.push(follow(s, "diff", today, want - s.diff, capNote(want ? res.rule : null)));
+  return out;
+}
+
+/** ยกเลิก/กลับรายการทั้งหนี้: ค่ารักษาเต็ม และ diff ตามเพดาน/สัดส่วน */
+function closeEntries(s: RefState, kind: "cancel" | "reverse", date: string, note: string): Entry[] {
+  const out: Entry[] = [];
+  if (s.balance !== 0) out.push(follow(s, kind, date, -s.balance, note));
+  if (s.diff !== 0) out.push(follow(s, "diff", date, -s.diff, capNote(null)));
+  return out;
+}
 
 /**
  * OPD (rcpt_debt) หนึ่ง debt_id = หนึ่ง ref: ยังไม่มี = ตั้งลงวันรับบริการ (vstdate, ไม่มีใช้ debt_date) ทั้ง ref_date และ entry_date
  * แต่ entry_date ไม่ก่อน LEDGER_START (สมุดไม่มียอดยกมาก่อนวันนั้น ref_date คงวันรับบริการจริง) ; แถวถัดไปคัดลอก ref_date จากแถว set
  * มีแล้วยอดต่าง = ปรับปรุงส่วนต่างลงวันที่ sync (today) ยกเลิกแล้วไม่ปรับอีก ยอด 0 ที่ยังไม่เคยตั้งไม่ต้องตั้ง
+ * ค่ารักษาเต็มลงแถว set/adjust ส่วนที่เกินเพดาน/สัดส่วนของกติกาลงแถว diff (source เดียวกัน)
  */
 export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: AccountRules, today: string): Entry[] {
   const out: Entry[] = [];
@@ -111,23 +180,20 @@ export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: 
     const s = states.get(ref);
     if (!s) {
       if (target === 0) continue;
-      const cov: Coverage = {
-        patient_type: "OP", pttype: blank(d.pttype), hipdata_code: blank(d.hipdata_code),
-        hospmain: blank(d.hospmain), hospmain_chwpart: blank(d.hospmain_chwpart),
-      };
       const svc = day(d.vstdate ?? d.debt_date);
-      out.push({
-        ...cov, source: "rcpt_debt", kind: "set", ref, vn: d.vn, an: null, ref_date: svc, entry_date: svc < LEDGER_START ? LEDGER_START : svc,
-        account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
-      });
-    } else if (!s.cancelled && target !== s.balance) {
-      out.push(follow(s, "adjust", today, target - s.balance, changed(s.balance, target)));
+      out.push(...setEntries({
+        patient_type: "OP", pttype: blank(d.pttype), hipdata_code: blank(d.hipdata_code), hospmain: blank(d.hospmain),
+        hospmain_chwpart: blank(d.hospmain_chwpart), hospmain_type: blank(d.hospmain_type),
+        source: "rcpt_debt", ref, vn: d.vn, an: null, ref_date: svc, entry_date: svc < LEDGER_START ? LEDGER_START : svc,
+      }, target, rules));
+    } else if (!s.cancelled) {
+      out.push(...followEntries(s, target, rules, today, changed(s.balance, target)));
     }
   }
   return out;
 }
 
-/** ยกเลิกหนี้: ลดเท่ายอดที่ ledger ตั้งไว้ ลงวันที่ cancel_datetime (ref_date ตามแถว set) ไม่เคยตั้ง (ก่อน 1 ต.ค. 2568) = ข้าม debt_id ซ้ำนับครั้งแรก */
+/** ยกเลิกหนี้: ลดเท่ายอดที่ ledger ตั้งไว้ (และ diff) ลงวันที่ cancel_datetime (ref_date ตามแถว set) ไม่เคยตั้ง (ก่อน 1 ต.ค. 2568) = ข้าม debt_id ซ้ำนับครั้งแรก */
 export function planCancels(cancels: HisCancel[], states: Map<string, RefState>): { entries: Entry[]; skipped: number } {
   const entries: Entry[] = [];
   const seen = new Set<string>();
@@ -142,7 +208,7 @@ export function planCancels(cancels: HisCancel[], states: Map<string, RefState>)
       continue;
     }
     s.cancelled = true; // กันชุดเดียวกันยกเลิกซ้ำ
-    if (s.balance !== 0) entries.push(follow(s, "cancel", day(c.cancel_datetime), -s.balance, "ยกเลิกหนี้ใน HOSxP"));
+    entries.push(...closeEntries(s, "cancel", day(c.cancel_datetime), "ยกเลิกหนี้ใน HOSxP"));
   }
   return { entries, skipped };
 }
@@ -151,7 +217,7 @@ export function planCancels(cancels: HisCancel[], states: Map<string, RefState>)
  * IPD ที่ปิดสิทธิแล้ว (finance_lock = 'Y') ในช่วง from..to ของ dchdate
  * - ยังไม่มี: ตั้งเมื่อ uc_money > 0 ลงวันจำหน่าย (dchdate) ทุกโหมด ให้หนี้อยู่ในเดือนที่เกิด ไม่ใช่เดือนที่ปิดสิทธิ
  * - มีแล้วยอดต่าง (รวมปิดสิทธิอีกครั้งหลังกลับรายการ): ปรับปรุงส่วนต่างลงวันที่ sync
- * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ
+ * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ (และ diff)
  */
 export function planIpd(
   rows: HisIpd[], states: Map<string, RefState>, rules: AccountRules,
@@ -166,20 +232,50 @@ export function planIpd(
     const s = states.get(r.an);
     if (!s) {
       if (target <= 0) continue;
-      const cov: Coverage = { patient_type: "IP", pttype: blank(r.pttype), hipdata_code: blank(r.hipdata_code), hospmain: null, hospmain_chwpart: null };
-      out.push({
-        ...cov, source: "ipt", kind: "set", ref: r.an, vn: null, an: r.an, ref_date: day(r.dchdate),
-        entry_date: day(r.dchdate), account_code: accountFor(cov, rules), amount: fromCents(target), note: null,
-      });
-    } else if (target !== s.balance) {
-      out.push(follow(s, "adjust", today, target - s.balance, s.balance === 0 ? "ปิดสิทธิอีกครั้ง" : changed(s.balance, target)));
+      out.push(...setEntries({
+        patient_type: "IP", pttype: blank(r.pttype), hipdata_code: blank(r.hipdata_code), hospmain: blank(r.hospmain),
+        hospmain_chwpart: blank(r.hospmain_chwpart), hospmain_type: blank(r.hospmain_type),
+        source: "ipt", ref: r.an, vn: null, an: r.an, ref_date: day(r.dchdate), entry_date: day(r.dchdate),
+      }, target, rules));
+    } else {
+      out.push(...followEntries(s, target, rules, today, s.balance === 0 ? "ปิดสิทธิอีกครั้ง" : changed(s.balance, target)));
     }
   }
   for (const [an, s] of states) {
-    if (seen.has(an) || s.balance === 0 || !s.ref_date || s.ref_date < window.from || s.ref_date > window.to) continue;
-    out.push(follow(s, "reverse", today, -s.balance, "ยกเลิกปิดสิทธิ (finance_lock ไม่ใช่ Y)"));
+    if (seen.has(an) || !s.ref_date || s.ref_date < window.from || s.ref_date > window.to) continue;
+    out.push(...closeEntries(s, "reverse", today, "ยกเลิกปิดสิทธิ (finance_lock ไม่ใช่ Y)"));
   }
   return out;
+}
+
+/** หนี้ใน ledger สำหรับคำนวณบัญชีใหม่: RefState + วันลงบัญชีของแถว set */
+export type RecomputeState = RefState & { set_date: string };
+/** ผลคำนวณบัญชีใหม่ต่อหนี้: บัญชีใหม่ + แถวที่ต้องลงเพิ่ม (diff ที่ขาด หรือกลับรายการสิทธิที่ไม่ตั้งลูกหนี้) ลงวันเดียวกับแถว set */
+export type Recomputed = { state: RecomputeState; to: string | null; entries: Entry[]; noRule: boolean; settledSkip: boolean };
+
+/**
+ * คำนวณบัญชีของหนี้ที่มีอยู่ตามกติกาปัจจุบัน (ใช้กับทุกแถวของหนี้ รวม stm/manual/fwf) กดซ้ำได้: ครั้งถัดไปไม่มีอะไรเปลี่ยน
+ * ไม่มีกติกา = คงบัญชีเดิม (noRule) ; หนี้ที่ตัดแล้วไม่ลง diff เพิ่ม (ส่วนต่างตอนตัดลงไปแล้ว) แค่ย้ายบัญชี
+ */
+export function planRecompute(states: RecomputeState[], rules: AccountRules): Recomputed[] {
+  return states.map((s) => {
+    const res = resolve(s, rules);
+    const noRule = res.books && !res.account_code;
+    const to = res.account_code ?? s.account_code;
+    const t = { ...s, account_code: to };
+    const entries: Entry[] = [];
+    let settledSkip = false;
+    if (!res.books) {
+      if (!s.settled) entries.push(...closeEntries(t, "reverse", s.set_date, NO_AR));
+    } else {
+      const want = capDiff(s.balance, res.rule);
+      if (want !== s.diff) {
+        if (s.settled) settledSkip = true;
+        else entries.push(follow(t, "diff", s.set_date, want - s.diff, capNote(want ? res.rule : null)));
+      }
+    }
+    return { state: s, to, entries, noRule, settledSkip };
+  });
 }
 
 const DAY_MS = 86_400_000;
@@ -231,7 +327,7 @@ export function parseCase(body: unknown): SyncCase | { error: string } {
 }
 
 /** ประเภทแถวทั้งหมดใน ar_ledger: Kind ของ ar-sync + settle/diff ของการตัดหนี้ด้วย STM */
-export type LedgerKind = Kind | "settle" | "diff";
+export type LedgerKind = Kind | "settle";
 export const KIND_LABEL: Record<LedgerKind, string> = { set: "ตั้งหนี้", adjust: "ปรับปรุง", cancel: "ยกเลิก", reverse: "กลับรายการ", settle: "รับชำระ", diff: "ส่วนต่าง" };
 
 /** เดือนที่เลือกได้ ตั้งแต่ ต.ค. 2568 ถึงเดือนของ today (ใหม่ไปเก่า) */

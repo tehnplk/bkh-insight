@@ -2,8 +2,9 @@ import "server-only";
 import { hisQuery, insightQuery, insightTransaction, type InsightTx } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
 import {
-  LEDGER_START, accountFor, addDays, chunkRange, dailyWindows, monthRange, planCancels, planIpd, planOpd,
-  type AccountMap, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RefState, type Source, type SyncCase,
+  LEDGER_START, addDays, chunkRange, dailyWindows, monthRange, planCancels, planIpd, planOpd, planRecompute, toCents,
+  type AccountRule, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RecomputeState, type Recomputed, type RefState,
+  type Right, type Source, type SyncCase,
 } from "./ledger";
 
 // SQL ฝั่ง his ผ่าน prove-query แล้ว (A/B/C) ห้ามเปลี่ยน logic ถ้าไม่ได้ prove ใหม่
@@ -14,6 +15,7 @@ const OPD_DEBT_SQL = (where: string) => `SELECT d.debt_id, d.vn, d.debt_date, d.
        IFNULL(d.amount, 0) AS amount, d.status,
        COALESCE(NULLIF(vp.hospmain, ''), NULLIF(o.hospmain, '')) AS hospmain,
        hc.chwpart AS hospmain_chwpart,
+       hc.hospital_type_id AS hospmain_type,
        o.vstdate
 FROM rcpt_debt d
 LEFT JOIN pttype t ON t.pttype = d.pttype
@@ -32,11 +34,19 @@ WHERE ${where}
   AND LENGTH(r.vn) = 12
 ORDER BY c.cancel_datetime, c.debt_id`;
 // C IPD ที่ปิดสิทธิแล้ว: ช่วงยาวกว่า 120 วันจะ full scan ipt (เราดึงชุดละ ≤31 วัน)
-const IPD_SQL = (where: string) => `SELECT i.an, i.dchdate, i.pttype, t.hipdata_code, t.pttype_eclaim_id,
-       s.uc_money, i.finance_lock
+//   สิทธิ = an_stat.pttype (สิทธิที่คิดเงิน) ; hospmain จาก ipt_pttype ของสิทธินั้น (ไม่มีใช้แถวแรกของ AN)
+const IPD_SQL = (where: string) => `SELECT i.an, i.dchdate,
+       s.pttype AS pttype,
+       ta.hipdata_code, ta.pttype_eclaim_id,
+       s.uc_money, i.finance_lock,
+       ip.hospmain, hc.chwpart AS hospmain_chwpart, hc.hospital_type_id AS hospmain_type
 FROM ipt i
 JOIN an_stat s ON s.an = i.an
-LEFT JOIN pttype t ON t.pttype = i.pttype
+LEFT JOIN pttype ta ON ta.pttype = s.pttype
+LEFT JOIN ipt_pttype ip ON ip.ipt_pttype_id = (
+  SELECT p2.ipt_pttype_id FROM ipt_pttype p2 WHERE p2.an = i.an
+  ORDER BY (p2.pttype = s.pttype) DESC, p2.ipt_pttype_id LIMIT 1)
+LEFT JOIN hospcode hc ON hc.hospcode = NULLIF(ip.hospmain, '')
 WHERE ${where}
   AND i.finance_lock = 'Y'
 ORDER BY i.dchdate, i.an`;
@@ -44,19 +54,24 @@ const BY_RANGE = { opd: "d.debt_date BETWEEN ? AND ?", cancel: "c.cancel_datetim
 // รายราย (params [vn|an, LEDGER_START]) ไม่ตั้งหนี้ก่อนวันเริ่มสมุด ; cancel สแกน rcpt_debt_cancel ทั้งตาราง (InnoDB เล็ก) เหมือนรายวัน
 const BY_CASE = { opd: "d.vn = ? AND d.debt_date >= ?", cancel: "r.vn = ?", ipd: "i.an = ? AND i.dchdate >= ?" };
 
-const COLS = "source, kind, ref, vn, an, patient_type, ref_date, entry_date, pttype, hipdata_code, hospmain, hospmain_chwpart, account_code, amount, note";
+const COLS = "source, kind, ref, vn, an, patient_type, ref_date, entry_date, pttype, hipdata_code, hospmain, hospmain_chwpart, hospmain_type, account_code, amount, note";
 // ON CONFLICT: set/cancel ซ้ำ (unique ar_ledger_once_uq) ไม่ลงซ้ำแม้หลุดการเทียบยอด
 const INSERT_SQL = `INSERT INTO ar_ledger (${COLS}, sync_id)
 SELECT ${COLS}, $2 FROM jsonb_to_recordset($1::jsonb) AS x(source text, kind text, ref text, vn varchar, an varchar, patient_type text,
-  ref_date date, entry_date date, pttype text, hipdata_code text, hospmain text, hospmain_chwpart text, account_code text, amount numeric, note text)
+  ref_date date, entry_date date, pttype text, hipdata_code text, hospmain text, hospmain_chwpart text, hospmain_type text, account_code text, amount numeric, note text)
 ON CONFLICT (source, ref, kind) WHERE kind IN ('set', 'cancel') DO NOTHING
 RETURNING source, kind`;
-// แถว set ของ ref + ยอดคงเหลือทั้ง ref ; $3/$4 = ช่วง ref_date (IPD หา AN ที่หายไปจากผล) OPD ส่ง null
-const STATES_SQL = `SELECT s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart,
-  s.account_code, b.balance, b.cancelled
+// ยอดของหนี้ (x = ทุกแถวของ (patient_type, ref) เดียวกับแถว set s): balance = ค่ารักษาเต็มของ source HOSxP (ไม่นับ diff),
+//   diff = ส่วนต่างตามเพดาน/สัดส่วน (diff ของ source HOSxP), settled = ตัดหนี้แล้วด้วย source อื่น (stm/fwf/manual)
+const REF_AGG = `SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff') AS balance,
+  COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind = 'diff'), 0) AS diff,
+  bool_or(x.kind = 'cancel') AS cancelled,
+  COALESCE(bool_or(x.source <> s.source AND x.kind IN ('settle', 'diff')), false) AS settled`;
+const SET_COLS = "s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart, s.hospmain_type, s.account_code";
+// แถว set ของ ref + ยอดของหนี้ ; $3/$4 = ช่วง ref_date (IPD หา AN ที่หายไปจากผล) OPD ส่ง null
+const STATES_SQL = `SELECT ${SET_COLS}, b.balance, b.diff, b.cancelled, b.settled
 FROM ar_ledger s
-CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance, bool_or(x.kind = 'cancel') AS cancelled
-  FROM ar_ledger x WHERE x.source = s.source AND x.ref = s.ref) b
+CROSS JOIN LATERAL (SELECT ${REF_AGG} FROM ar_ledger x WHERE x.patient_type = s.patient_type AND x.ref = s.ref) b
 WHERE s.source = $1 AND s.kind = 'set' AND (s.ref = ANY($2::text[]) OR s.ref_date BETWEEN $3::date AND $4::date)`;
 // ชุดเขียนลง ledger ทีละชุด: ถือ lock นี้ตลอด transaction ให้การกดพร้อมกันเรียงคิว ไม่ตั้งหรือปรับซ้ำ
 const LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('ar_ledger'))";
@@ -78,22 +93,27 @@ export type SyncLog = {
   error: string | null;
 };
 
-/** mapping จาก insight + รายการ hcode ใน CUP จาก HOSxP (hospcode_cup ~20 แถว) */
+/** กลุ่มสิทธิ, pttype -> กลุ่มสิทธิ และกติกาบัญชีจาก insight + รายการ hcode ใน CUP จาก HOSxP (hospcode_cup ~20 แถว) */
 export async function loadRules(): Promise<AccountRules> {
-  const [maps, cup] = await Promise.all([
-    insightQuery<AccountMap>("SELECT hipdata_code, pttype, patient_type, account_code FROM ar_account_map"),
+  const [rights, pttypes, rules, cup] = await Promise.all([
+    insightQuery<Right>("SELECT code, name, main_hcode, books_ar FROM ar_right"),
+    insightQuery<{ pttype: string; right_code: string }>("SELECT pttype, right_code FROM ar_right_pttype"),
+    insightQuery<AccountRule>("SELECT right_code, patient_type, loc, account_code, cap, debt_pct FROM ar_account_rule"),
     hisQuery<{ hospcode: string }>("SELECT hospcode FROM hospcode_cup"),
   ]);
-  return { maps, cup: new Set(cup.map((c) => c.hospcode)) };
+  return { rights, pttypes: new Map(pttypes.map((p) => [p.pttype, p.right_code])), rules, cup: new Set(cup.map((c) => c.hospcode)) };
 }
 
+type RawState<T> = Omit<T, "balance" | "diff"> & { balance: string; diff: string };
+const toState = <T,>(r: RawState<T>) => ({ ...r, balance: toCents(r.balance), diff: toCents(r.diff) }) as T;
+
 async function loadStates(tx: InsightTx, source: Source, refs: string[], window?: { from: string; to: string }) {
-  const rows = await tx<Omit<RefState, "balance"> & { balance: string }>(STATES_SQL, [source, refs, window?.from ?? null, window?.to ?? null]);
-  return new Map(rows.map((r) => [r.ref, { ...r, balance: Math.round(Number(r.balance) * 100) }]));
+  const rows = await tx<RawState<RefState>>(STATES_SQL, [source, refs, window?.from ?? null, window?.to ?? null]);
+  return new Map(rows.map((r) => [r.ref, toState<RefState>(r)]));
 }
 
 /** คืนจำนวนแถวที่ลงจริง (ไม่นับที่ชน ON CONFLICT) */
-async function insert(tx: InsightTx, entries: Entry[], syncId: string, counts: SyncCounts) {
+async function insert(tx: InsightTx, entries: Entry[], syncId: string | null, counts: SyncCounts) {
   let n = 0;
   for (let i = 0; i < entries.length; i += CHUNK) {
     const rows = await tx<{ source: Source; kind: string }>(INSERT_SQL, [JSON.stringify(entries.slice(i, i + CHUNK)), syncId]);
@@ -192,9 +212,10 @@ RETURNING ${LOG_COLS}`,
 
 // หนี้ทั้งหมดของ VN/AN ใน ledger ($1 = source จากโค้ด, $2 = vn หรือ an): settled = มีแถวรับชำระ/ส่วนต่างแล้ว (STM, เงินรับล่วงหน้า fwf, รับเงิน manual ; รวมรับบางส่วน)
 //   booked = ยอดของ source HOSxP (เท่าคอลัมน์ "ลงสมุดแล้ว"), balance = คงเหลือทางบัญชีทุก source
-const CASE_SQL = `SELECT COALESCE(bool_or(x.kind IN ('settle', 'diff')), false) AS settled,
+//   diff ของ source HOSxP (เพดาน/สัดส่วนของกติกาบัญชี) ไม่ใช่การตัดหนี้ และไม่นับใน booked
+const CASE_SQL = `SELECT COALESCE(bool_or(x.kind = 'settle' OR (x.kind = 'diff' AND x.source <> s.source)), false) AS settled,
   count(DISTINCT s.ref)::int AS debts,
-  COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source), 0) AS booked,
+  COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff'), 0) AS booked,
   COALESCE(SUM(x.amount), 0) AS balance
 FROM ar_ledger s
 JOIN ar_ledger x ON x.patient_type = s.patient_type AND x.ref = s.ref
@@ -249,24 +270,129 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
   });
 }
 
-/** ใส่บัญชีให้แถวที่ account_code ยังเป็น NULL ตาม mapping ปัจจุบัน (หลังแก้ mapping) คืนจำนวนแถวที่ได้บัญชี */
-export async function recomputeAccounts(): Promise<number> {
+// ทุกหนี้ใน ledger (แถว set ของ source HOSxP) พร้อมยอดของหนี้
+const RECOMPUTE_SQL = `SELECT ${SET_COLS}, s.entry_date AS set_date, ${REF_AGG}
+FROM ar_ledger s JOIN ar_ledger x ON x.patient_type = s.patient_type AND x.ref = s.ref
+WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt')
+GROUP BY s.id`;
+// ที่ตั้งหน่วยบริการประจำของ OPD (hospcode PK) ค่าใน IN มาจาก ledger ส่งเป็น bind parameter
+const HOSPCODE_SQL = (n: number) => `SELECT hospcode, chwpart, hospital_type_id FROM hospcode WHERE hospcode IN (${Array(n).fill("?").join(", ")})`;
+const HIS_CHUNK = 500;
+// ข้อมูลสิทธิในทุกแถวของหนี้ (คัดลอกจากแถว set) ให้ตรงกับที่คำนวณ
+const COVERAGE_UPDATE_SQL = `UPDATE ar_ledger l SET pttype = x.pttype, hipdata_code = x.hipdata_code, hospmain = x.hospmain,
+  hospmain_chwpart = x.hospmain_chwpart, hospmain_type = x.hospmain_type
+FROM jsonb_to_recordset($1::jsonb) AS x(patient_type text, ref text, pttype text, hipdata_code text, hospmain text, hospmain_chwpart text, hospmain_type text)
+WHERE l.patient_type = x.patient_type AND l.ref = x.ref
+  AND (l.pttype, l.hipdata_code, l.hospmain, l.hospmain_chwpart, l.hospmain_type) IS DISTINCT FROM (x.pttype, x.hipdata_code, x.hospmain, x.hospmain_chwpart, x.hospmain_type)`;
+const ACCOUNT_UPDATE_SQL = `UPDATE ar_ledger l SET account_code = x.account_code
+FROM jsonb_to_recordset($1::jsonb) AS x(patient_type text, ref text, account_code text)
+WHERE l.patient_type = x.patient_type AND l.ref = x.ref AND l.account_code IS DISTINCT FROM x.account_code
+RETURNING l.id`;
+
+/** ผลคำนวณบัญชีใหม่ (บาท) month = เดือนของวันตั้งหนี้ YYYY-MM */
+export type RecomputeResult = {
+  applied: boolean;
+  /** ทุกคู่บัญชีเดิม -> ใหม่ (รวมที่ไม่เปลี่ยน) amount = ค่ารักษาเต็มคงค้าง (ไม่นับ diff) */
+  moves: { month: string; from: string | null; to: string | null; refs: number; amount: number }[];
+  /** diff ที่ลงเพิ่มต่อบัญชีใหม่ (ลบ = ลดลูกหนี้ตามเพดาน/สัดส่วน) */
+  diffs: { month: string; account: string | null; n: number; amount: number }[];
+  /** หนี้ของสิทธิที่ไม่ตั้งลูกหนี้ ที่กลับรายการ (amount = ยอดที่กลับ) */
+  reversed: { refs: number; amount: number };
+  /** ไม่มีกติกา คงบัญชีเดิม */
+  no_rule: { refs: number; amount: number };
+  /** หนี้ที่ตัดแล้ว ไม่ลง diff เพิ่ม */
+  settled_skipped: number;
+  /** หนี้ที่ข้อมูลสิทธิ (สิทธิ IPD, ที่ตั้งหน่วยบริการประจำ) เปลี่ยนตาม HOSxP */
+  coverage_updated: number;
+  /** แถวที่ย้ายบัญชี และแถวที่ลงใหม่ (apply เท่านั้น) */
+  rows_moved: number;
+  rows_inserted: number;
+};
+
+const coverageKey = (s: RecomputeState) => [s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart, s.hospmain_type].join("|");
+const str = (v: unknown) => (v == null || String(v).trim() === "" ? null : String(v).trim());
+const round = (n: number) => Math.round(n * 100) / 100;
+
+/** ข้อมูลสิทธิจาก HOSxP: OPD = ที่ตั้งของหน่วยบริการประจำ (hospcode) ; IPD = สิทธิ an_stat + hospmain ของ ipt_pttype (query C) */
+async function hisCoverage(states: RecomputeState[]) {
+  const hospmains = [...new Set(states.flatMap((s) => (s.patient_type === "OP" && s.hospmain ? [s.hospmain] : [])))];
+  const ans = states.flatMap((s) => (s.patient_type === "IP" ? [s.ref] : []));
+  const hosp = new Map<string, { chwpart: string | null; type: string | null }>();
+  for (let i = 0; i < hospmains.length; i += HIS_CHUNK) {
+    const part = hospmains.slice(i, i + HIS_CHUNK);
+    for (const h of await hisQuery<{ hospcode: string; chwpart: string | null; hospital_type_id: string | number | null }>(HOSPCODE_SQL(part.length), part))
+      hosp.set(h.hospcode, { chwpart: str(h.chwpart), type: str(h.hospital_type_id) });
+  }
+  const ipd = new Map<string, HisIpd>();
+  for (let i = 0; i < ans.length; i += HIS_CHUNK) {
+    const part = ans.slice(i, i + HIS_CHUNK);
+    for (const r of await hisQuery<HisIpd>(IPD_SQL(`i.an IN (${Array(part.length).fill("?").join(", ")})`), part)) ipd.set(r.an, r);
+  }
+  return (s: RecomputeState): RecomputeState => {
+    if (s.patient_type === "OP") {
+      const h = s.hospmain ? hosp.get(s.hospmain) : undefined;
+      return { ...s, hospmain_chwpart: h?.chwpart ?? null, hospmain_type: h?.type ?? null };
+    }
+    const r = ipd.get(s.ref); // finance_lock ไม่ใช่ Y แล้ว = คงข้อมูลเดิม
+    return r
+      ? { ...s, pttype: str(r.pttype), hipdata_code: str(r.hipdata_code), hospmain: str(r.hospmain), hospmain_chwpart: str(r.hospmain_chwpart), hospmain_type: str(r.hospmain_type) }
+      : s;
+  };
+}
+
+/** สรุปแผนเป็นยอดต่อเดือน/บัญชี */
+function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number): RecomputeResult {
+  const out: RecomputeResult = {
+    applied: apply, moves: [], diffs: [], reversed: { refs: 0, amount: 0 }, no_rule: { refs: 0, amount: 0 },
+    settled_skipped: 0, coverage_updated: coverageUpdated, rows_moved: 0, rows_inserted: 0,
+  };
+  const moves = new Map<string, RecomputeResult["moves"][number]>();
+  const diffs = new Map<string, RecomputeResult["diffs"][number]>();
+  for (const p of plan) {
+    const month = p.state.set_date.slice(0, 7);
+    const baht = p.state.balance / 100;
+    const mk = `${month}|${p.state.account_code}|${p.to}`;
+    const m = moves.get(mk) ?? { month, from: p.state.account_code, to: p.to, refs: 0, amount: 0 };
+    moves.set(mk, { ...m, refs: m.refs + 1, amount: m.amount + baht });
+    if (p.noRule) out.no_rule = { refs: out.no_rule.refs + 1, amount: out.no_rule.amount + baht };
+    if (p.settledSkip) out.settled_skipped++;
+    if (p.entries.some((e) => e.kind === "reverse")) out.reversed = { refs: out.reversed.refs + 1, amount: out.reversed.amount + baht };
+    for (const e of p.entries.filter((x) => x.kind === "diff")) {
+      const dk = `${month}|${e.account_code}`;
+      const d = diffs.get(dk) ?? { month, account: e.account_code, n: 0, amount: 0 };
+      diffs.set(dk, { ...d, n: d.n + 1, amount: d.amount + Number(e.amount) });
+    }
+  }
+  out.moves = [...moves.values()].map((m) => ({ ...m, amount: round(m.amount) }));
+  out.diffs = [...diffs.values()].map((d) => ({ ...d, amount: round(d.amount) }));
+  out.reversed.amount = round(out.reversed.amount);
+  out.no_rule.amount = round(out.no_rule.amount);
+  return out;
+}
+
+/**
+ * คำนวณบัญชีของทุกหนี้ใน ledger ใหม่ตามกติกาปัจจุบัน (ar_right/ar_account_rule) ; apply = false คือดูผลอย่างเดียว ไม่เขียน
+ * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด
+ * และกลับรายการหนี้ของสิทธิที่ไม่ตั้งลูกหนี้ ลงวันเดียวกับแถว set ใน transaction เดียวที่ถือ lock ของ ar_ledger กดซ้ำได้
+ * งวดที่ปิดแล้ว: trigger ar_ledger_period_guard ห้าม UPDATE แถวในงวดปิด ทั้งชุดจึง ROLLBACK
+ */
+export async function recomputeLedger(apply: boolean): Promise<RecomputeResult> {
   const rules = await loadRules();
+  // อ่าน his ก่อนถือ lock (เหมือน sync) จากหนี้ที่มีตอนนี้ ; หนี้ที่ตั้งระหว่างนี้ไม่มีใน map จึงคงข้อมูลเดิม (OPD = ไม่พบที่ตั้ง)
+  const fresh = await hisCoverage((await insightQuery<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r)));
   return locked(async (tx) => {
-    const groups = await tx<{ patient_type: "OP" | "IP"; pttype: string | null; hipdata_code: string | null; hospmain: string | null; hospmain_chwpart: string | null }>(
-      "SELECT DISTINCT patient_type, pttype, hipdata_code, hospmain, hospmain_chwpart FROM ar_ledger WHERE account_code IS NULL",
-    );
-    const resolved = groups.map((g) => ({ ...g, account_code: accountFor(g, rules) })).filter((g) => g.account_code);
-    if (!resolved.length) return 0;
-    const rows = await tx<{ id: string }>(
-      `UPDATE ar_ledger l SET account_code = x.account_code
-FROM jsonb_to_recordset($1::jsonb) AS x(patient_type text, pttype text, hipdata_code text, hospmain text, hospmain_chwpart text, account_code text)
-WHERE l.account_code IS NULL AND l.patient_type = x.patient_type AND l.pttype IS NOT DISTINCT FROM x.pttype
-  AND l.hipdata_code IS NOT DISTINCT FROM x.hipdata_code AND l.hospmain IS NOT DISTINCT FROM x.hospmain
-  AND l.hospmain_chwpart IS NOT DISTINCT FROM x.hospmain_chwpart
-RETURNING l.id`,
-      [JSON.stringify(resolved)],
-    );
-    return rows.length;
+    const before = (await tx<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
+    const states = before.map(fresh);
+    const changedCoverage = states.filter((s, i) => coverageKey(s) !== coverageKey(before[i]));
+    const plan = planRecompute(states, rules);
+    const out = summarize(plan, apply, changedCoverage.length);
+    if (!apply) return out;
+    if (changedCoverage.length)
+      await tx(COVERAGE_UPDATE_SQL, [JSON.stringify(changedCoverage.map(({ patient_type, ref, pttype, hipdata_code, hospmain, hospmain_chwpart, hospmain_type }) =>
+        ({ patient_type, ref, pttype, hipdata_code, hospmain, hospmain_chwpart, hospmain_type })))]);
+    const moved = plan.filter((p) => p.to !== p.state.account_code).map((p) => ({ patient_type: p.state.patient_type, ref: p.state.ref, account_code: p.to }));
+    if (moved.length) out.rows_moved = (await tx(ACCOUNT_UPDATE_SQL, [JSON.stringify(moved)])).length;
+    out.rows_inserted = await insert(tx, plan.flatMap((p) => p.entries), null, {});
+    return out;
   });
 }
