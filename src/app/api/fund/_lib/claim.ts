@@ -1,5 +1,5 @@
 import "server-only";
-import { fundSql } from "./fund";
+import { fundSql, inList } from "./fund";
 
 // สถานะการเคลมต่อ visit (prove-query ผ่านแล้ว) ต้องมี alias: o = ovst, c = nhso_confirm_privilege, vp = visit_pttype
 // ปิดสิทธิ = ยืนยันกับ สปสช. แล้วไม่ถูกยกเลิก หรือไม่มี confirm แต่ auth_code เป็น EP
@@ -29,3 +29,7 @@ export const OP_CLOSED_SQL = `IF(${IS_OFC_SQL}, ${APPROVE_CODE_SQL} IS NOT NULL,
 // ผลส่ง FDH ของ HOSxP สำหรับสถานะเคลม (vn UNIQUE = eq_ref) ชื่อคอลัมน์ตรงกับ FdhStatus ของ claim-batch/claim.ts หลังตัด fdh_
 export const FDH_JOIN = "LEFT JOIN fdh_claim_status fcs ON fcs.vn = o.vn";
 export const FDH_COLS = "fcs.fdh_reservation_status AS fdh_resv, fcs.fdh_reservation_datetime AS fdh_resv_at, fcs.fdh_claim_status_message AS fdh_msg, fcs.fdh_claim_status_datetime AS fdh_msg_at";
+/** ผลส่ง FDH ตามรายการ vn (n = จำนวน vn ห้ามเป็น 0) คืน k = vn + คอลัมน์ของ FdhStatus ; ใช้ที่ fdh/claim-batch/items และ fund/ar-collect */
+export const fdhByVnSql = (n: number) => `SELECT vn AS k, fdh_reservation_status AS resv, fdh_reservation_datetime AS resv_at,
+  fdh_claim_status_message AS msg, fdh_claim_status_datetime AS msg_at
+FROM fdh_claim_status WHERE ${inList("vn", n)}`;

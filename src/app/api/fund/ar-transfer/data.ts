@@ -1,0 +1,70 @@
+import "server-only";
+import { insightQuery } from "@/lib/db";
+import { todayIso } from "@/lib/thai-date";
+import { fiscalYearOf, parseFiscalYear } from "../uc-dashboard/dashboard";
+
+export type TransferStatus = "active" | "cancelled";
+export type TransferRow = {
+  id: string;
+  source: "smt" | "manual";
+  transfer_date: string;
+  ref_doc_no: string | null;
+  fund_key: string | null;
+  fund_name: string | null;
+  account_code: string;
+  account_name: string | null;
+  amount: number;
+  smt_amount: number | null;
+  /** การเงินแก้ยอดจาก SMT (amount ≠ smt_amount) */
+  edited: boolean;
+  note: string | null;
+  status: TransferStatus;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
+};
+export type FundMapRow = { fund_key: string; fund_name: string | null; smt_account_name: string | null; account_code: string | null; ignore: boolean; updated_by: string | null };
+export type AccountOption = { code: string; name: string };
+
+const ROWS_SQL = `SELECT id::text AS id, source, transfer_date, ref_doc_no, fund_key, fund_name, account_code, amount, smt_amount, note,
+  created_by, to_char(created_at, 'YYYY-MM-DD HH24:MI') AS created_at, updated_by, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at,
+  cancelled_by, to_char(cancelled_at, 'YYYY-MM-DD HH24:MI') AS cancelled_at, cancel_reason
+FROM ar_transfer WHERE transfer_date BETWEEN $1 AND $2`;
+// ยังไม่จับคู่ขึ้นก่อน แล้วที่จับคู่แล้ว ที่ไม่ใช้ไว้ท้าย
+const FUNDS_SQL = `SELECT fund_key, fund_name, smt_account_name, account_code, ignore, updated_by
+FROM ar_transfer_fund_map ORDER BY (account_code IS NULL AND NOT ignore) DESC, ignore, fund_key`;
+type DbRow = Omit<TransferRow, "amount" | "smt_amount" | "edited" | "status" | "account_name"> & { amount: string; smt_amount: string | null };
+
+/** ?fy= (ไม่ส่ง = ปีงบปัจจุบัน) ; null = ไม่ถูกต้อง */
+export function parseFy(params: URLSearchParams): number | null {
+  const current = fiscalYearOf(todayIso());
+  const raw = params.get("fy");
+  return raw ? parseFiscalYear(raw, current) : current;
+}
+
+export const loadFunds = () => insightQuery<FundMapRow>(FUNDS_SQL);
+
+/** บัญชีที่เลือกได้: ผังบัญชีลูกหนี้ (ar_account) + บัญชีที่ SMT แนะนำ/ที่จับคู่ใน mapping (ชื่อจาก SMT) */
+export async function loadAccounts(funds: FundMapRow[]): Promise<AccountOption[]> {
+  const out = new Map((await insightQuery<AccountOption>("SELECT code, name FROM ar_account")).map((a) => [a.code, a]));
+  for (const f of funds) {
+    for (const code of [f.fund_key.split("|")[1], f.account_code]) {
+      if (code && /^\d{10}\.(\d{3}|\d{5})$/.test(code) && !out.has(code)) out.set(code, { code, name: f.smt_account_name ?? "" });
+    }
+  }
+  return [...out.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/** ทุกแถวของปีงบ fy ตามวันที่โอน (รวมที่ยกเลิก) */
+export async function loadRows(fy: number, accounts: AccountOption[]): Promise<TransferRow[]> {
+  const names = new Map(accounts.map((a) => [a.code, a.name]));
+  const rows = await insightQuery<DbRow>(ROWS_SQL, [`${fy - 544}-10-01`, `${fy - 543}-09-30`]);
+  return rows.map((r) => {
+    const amount = Number(r.amount), smt = r.smt_amount === null ? null : Number(r.smt_amount);
+    return { ...r, amount, smt_amount: smt, edited: smt !== null && smt !== amount, status: r.cancelled_at ? "cancelled" : "active", account_name: names.get(r.account_code) || null };
+  });
+}

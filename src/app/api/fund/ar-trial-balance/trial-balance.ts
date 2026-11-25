@@ -76,10 +76,19 @@ const TB_SQL = `SELECT CASE WHEN l.entry_date < $1 THEN 'prior' WHEN l.entry_dat
 FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code
 WHERE l.entry_date <= $3
 GROUP BY 1, l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, sign(l.amount)`;
+// เงินโอนที่ได้รับ (ar_transfer ไม่ยกเลิก) ตาม transfer_date ; ส่ง amount ติดลบ = เครดิต account_code (journalLines kind transfer)
+const TB_TRANSFER_SQL = `SELECT CASE WHEN t.transfer_date < $1 THEN 'prior' WHEN t.transfer_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
+  t.account_code, a.name AS account_name, 'transfer' AS kind, 'transfer' AS source, NULL AS revenue_code, NULL AS diff_under_code, NULL AS diff_over_code,
+  count(*)::int AS n, -SUM(t.amount) AS amount
+FROM ar_transfer t LEFT JOIN ar_account a ON a.code = t.account_code
+WHERE t.cancelled_at IS NULL AND t.transfer_date <= $3
+GROUP BY 1, t.account_code, a.name, sign(t.amount)`;
 
 /** งบทดลองของเดือน YYYY-MM ถึงวันที่ to ; query = insightQuery หรือ tx ของ insightTransaction */
 export async function loadTrialBalance(query: Query, month: string, to: string): Promise<TrialBalance> {
-  return trialBalance(await query<TbGroup>(TB_SQL, [fiscalStart(month), `${month}-01`, to]));
+  const params = [fiscalStart(month), `${month}-01`, to];
+  const [ledger, transfers] = await Promise.all([query<TbGroup>(TB_SQL, params), ignoreMissingTable(query<TbGroup>(TB_TRANSFER_SQL, params), [])]);
+  return trialBalance([...ledger, ...transfers]);
 }
 
 /** ar_period_close ยังไม่มี (ก่อนรัน migration) = ยังไม่ปิดงวด หน้า ar-ledger จะได้ไม่พังระหว่าง deploy */

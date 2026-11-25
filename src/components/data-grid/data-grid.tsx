@@ -87,6 +87,8 @@ export type DataGridProps<T extends RowData, R extends GridPage<T> = GridPage<T>
   renderFooter?: (data: R, grid: SummaryGrid) => ReactNode;
   /** "compact" = ช่องค้นหาแคบลง (เมื่อแถวตัวกรองแน่น) ค่าเริ่มต้น "default" */
   searchSize?: "default" | "compact";
+  /** false = ไม่มีช่องค้นหา (endpoint ไม่รองรับ q) ค่าเริ่มต้น true */
+  searchable?: boolean;
   /** ไอคอนของปุ่มเปิดรายละเอียดหน้าแถว (detailMode="modal") ไม่ส่ง = ไอคอนเปิดหน้าต่าง */
   detailIcon?: ReactNode;
   /** id คอลัมน์ที่ปุ่มรายละเอียด (detailMode="modal") ไปอยู่หน้าเนื้อหาแทนคอลัมน์ปุ่มแยก ผู้ใช้ซ่อนคอลัมน์นั้น = กลับไปคอลัมน์ปุ่มแยก */
@@ -196,6 +198,7 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
   summaryActions,
   renderFooter,
   searchSize = "default",
+  searchable = true,
   detailIcon,
   detailInColumn,
   reorderable = false,
@@ -613,27 +616,29 @@ export function DataGrid<T extends RowData, R extends GridPage<T> = GridPage<T>>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           {toolbar}
           {filters}
-          <form role="search" onSubmit={onSearch} className={`flex min-w-0 flex-1 gap-2 ${searchSize === "compact" ? "basis-40 sm:max-w-52" : "basis-60 sm:max-w-md"}`}>
-            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
-              <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
-              <input
-                name="q"
-                type="search"
-                aria-label="ค้นหา"
-                value={text}
-                onChange={(e) => onSearchInput(e.target.value)}
-                onKeyDown={onSearchKeyDown}
-                maxLength={100}
-                className="min-w-0 flex-1 bg-transparent outline-none"
-              />
-            </label>
-            {!liveSearch && (
-              <button type="submit" className={btnPrimary}>
-                <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" />
-                ค้นหา
-              </button>
-            )}
-          </form>
+          {searchable && (
+            <form role="search" onSubmit={onSearch} className={`flex min-w-0 flex-1 gap-2 ${searchSize === "compact" ? "basis-40 sm:max-w-52" : "basis-60 sm:max-w-md"}`}>
+              <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-surface px-3 focus-within:ring-2 focus-within:ring-ring">
+                <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" className="size-4 shrink-0 text-muted" />
+                <input
+                  name="q"
+                  type="search"
+                  aria-label="ค้นหา"
+                  value={text}
+                  onChange={(e) => onSearchInput(e.target.value)}
+                  onKeyDown={onSearchKeyDown}
+                  maxLength={100}
+                  className="min-w-0 flex-1 bg-transparent outline-none"
+                />
+              </label>
+              {!liveSearch && (
+                <button type="submit" className={btnPrimary}>
+                  <Icon d="M9 15a6 6 0 100-12 6 6 0 000 12zM17 17l-3.5-3.5" />
+                  ค้นหา
+                </button>
+              )}
+            </form>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hideable && <ColumnChooser columns={choosable} hidden={hidden} onChange={saveHidden} />}

@@ -73,6 +73,7 @@ export const navItems: NavItem[] = [
       { label: "ลูกหนี้สิทธิ UC", href: "/fund/uc-debtor" },
       { label: "ลูกหนี้ตามผังบัญชี", href: "/fund/ar-ledger" },
       { label: "ตัดลูกหนี้", href: "/fund/ar-settle" },
+      { label: "สถานที่เรียกเก็บ", href: "/fund/ar-collect" },
       { label: "บัตรประกันสุขภาพต่างด้าว", href: "/fund/fwf-card" },
     ],
   },
@@ -82,6 +83,7 @@ export const navItems: NavItem[] = [
     children: [
       { label: "นำเข้า STM", href: "/fund/stm-import" },
       { label: "เทียบยอดโอน SMT กับ STM", href: "/fund/smt-reconcile" },
+      { label: "เงินโอนที่ได้รับ", href: "/fund/ar-transfer" },
       { label: "แนวโน้ม STM", href: "/fund/stm-trend" },
     ],
   },
