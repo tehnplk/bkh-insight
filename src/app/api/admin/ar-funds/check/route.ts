@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
 import { fundOf, inList, loadLookups } from "@/app/api/fund/_lib/fund";
-import { ITEMS_SQL, REP_SQL, TOTALS_SQL, byChunks, loadFundRules } from "../sql";
+import { ITEMS_SQL, REP_SQL, TOTALS_SQL, byChunks, loadFundRules, withAdpIcodes } from "../sql";
 import { checkRules, monthBounds, ruleReady, type Diag, type ItemRow, type RepRow, type RuleCheck, type VisitInfo, type VisitTotal } from "../rules";
 
 /** response ของ GET /api/admin/ar-funds/check?month=YYYY-MM */
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   if (!bounds) return Response.json({ error: "month ต้องเป็น YYYY-MM ตั้งแต่ 2024-10 ถึงเดือนปัจจุบัน" }, { status: 400 });
   const { start, end, next } = bounds;
 
-  const [rules, lk] = await Promise.all([loadFundRules(), loadLookups()]);
+  const [rules, lk] = await Promise.all([loadFundRules().then(withAdpIcodes), loadLookups()]);
   const ready = rules.filter(ruleReady);
   const itemRules = ready.filter((r) => r.match_mode === "items");
   const totalRules = ready.filter((r) => r.match_mode !== "items");

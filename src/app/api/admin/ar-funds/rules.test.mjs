@@ -1,10 +1,10 @@
 // รัน: node --test src/app/api/admin/ar-funds/rules.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { REASON, checkRules, classifyVisits, icdMatch, parseCodeList, repPay, ruleSide, subfundFilterLabel, subfundFilterValues } from "./rules.ts";
+import { REASON, checkRules, classifyVisits, expandAdpTypes, icdMatch, parseCodeList, repPay, ruleReady, ruleSide, subfundFilterLabel, subfundFilterValues } from "./rules.ts";
 
 const rule = (o) => ({
-  code: "X", name: "x", match_mode: "items", hipdata_codes: ["UCS"], pttypes: [], incomes: [], icodes: [], icd10: [], icd_scope: "any", required_icodes: [],
+  code: "X", name: "x", match_mode: "items", hipdata_codes: ["UCS"], pttypes: [], incomes: [], icodes: [], icd10: [], icd_scope: "any", required_icodes: [], adp_types: [], exclude_icodes: [],
   rep_keys: ["K"], account_op: null, account_ip: null, updated_by: null, updated_at: "", activities: [], ...o,
 });
 const it = (vn, icode, income, amount, o = {}) => ({ vn, icode, income, pttype: "89", fund: "UCS", amount, ...o });
@@ -110,4 +110,18 @@ test("repPay, ruleSide, filter values", () => {
   const funds = new Map([["1", [{ code: "INST", rep: "paid" }, { code: "PP", rep: "none" }]]]);
   assert.deepEqual(subfundFilterValues(["1", "2"], funds), [{ k: "1", v: "INST:paid" }, { k: "1", v: "PP:none" }, { k: "2", v: "" }]);
   assert.equal(subfundFilterLabel("INST:unpaid"), "INST · REP ไม่จ่าย");
+});
+
+test("ADP type: expands to icodes minus exclusions, exclusions also drop income matches", () => {
+  const adp = [{ icode: "A", adp_type: 2 }, { icode: "C", adp_type: "2" }, { icode: "X", adp_type: 2 }, { icode: "B", adp_type: 3 }];
+  const inst = rule({ code: "INST", adp_types: ["2"], exclude_icodes: ["X", "C"] });
+  assert.equal(ruleReady(inst), true);
+  const [r] = expandAdpTypes([inst], adp);
+  assert.deepEqual(r.icodes, ["A"]);
+  const out = classifyVisits([r], [...items, it("6", "X", "02", "70")], new Map());
+  assert.deepEqual([...out].map(([vn, f]) => [vn, f[0].amount]), [["1", 100.1]]);
+  // ไม่มี adp_types = คงเดิม ; exclusions ตัดรายการที่ตรงหมวดรายรับด้วย
+  assert.equal(expandAdpTypes([rule({ icodes: ["B"] })], adp)[0].icodes[0], "B");
+  const byIncome = classifyVisits([rule({ incomes: ["02"], exclude_icodes: ["A"] })], items, new Map());
+  assert.deepEqual([...byIncome.keys()], ["2"]);
 });

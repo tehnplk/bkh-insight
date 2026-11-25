@@ -28,6 +28,10 @@ export type FundRule = {
   icd10: string[];
   icd_scope: IcdScope;
   required_icodes: string[];
+  /** ADP type (nondrugitems.nhso_adp_type_id) ที่นับเป็นรายการ แปลงเป็น icodes ด้วย expandAdpTypes ก่อนจับคู่ */
+  adp_types: string[];
+  /** icode ที่ไม่นับแม้ตรงหมวดรายรับ/icode/ADP type */
+  exclude_icodes: string[];
   rep_keys: string[];
   account_op: string | null;
   account_ip: string | null;
@@ -85,8 +89,20 @@ export function monthBounds(month: string, today: string): { start: string; end:
 const cents = (v: string | number) => Math.round(Number(v) * 100);
 const activeActs = (r: Pick<FundRule, "activities">) => r.activities.filter((a) => a.active);
 /** กติกามีเงื่อนไขพอจะนับฝั่ง HOSxP ได้ */
-export const ruleReady = (r: Pick<FundRule, "match_mode" | "incomes" | "icodes" | "icd10" | "activities">) =>
-  r.match_mode === "rights" || (r.match_mode === "icd" ? r.icd10.length > 0 : r.incomes.length > 0 || r.icodes.length > 0 || activeActs(r).length > 0);
+export const ruleReady = (r: Pick<FundRule, "match_mode" | "incomes" | "icodes" | "icd10" | "activities" | "adp_types">) =>
+  r.match_mode === "rights" ||
+  (r.match_mode === "icd" ? r.icd10.length > 0 : r.incomes.length > 0 || r.icodes.length > 0 || r.adp_types.length > 0 || activeActs(r).length > 0);
+
+/** เติม icode ของ ADP type ที่กติกาเลือก (rows จาก nondrugitems) เข้า icodes แล้วตัด exclude_icodes */
+export function expandAdpTypes(rules: FundRule[], rows: { icode: string; adp_type: string | number | null }[]): FundRule[] {
+  return rules.map((r) => {
+    if (!r.adp_types.length) return r;
+    const types = new Set(r.adp_types);
+    const ex = new Set(r.exclude_icodes);
+    const adp = rows.filter((x) => types.has(String(x.adp_type))).map((x) => x.icode);
+    return { ...r, icodes: [...new Set([...r.icodes, ...adp])].filter((c) => !ex.has(c)) };
+  });
+}
 
 /** ข้อความรายการรหัสจากผู้ใช้ (คั่นด้วยช่องว่าง , หรือขึ้นบรรทัด) -> รายการไม่ซ้ำ ตัวพิมพ์ใหญ่ ; รหัสผิดรูปแบบคืน invalid */
 export function parseCodeList(raw: unknown, re: RegExp): string[] | { invalid: string } {
@@ -133,6 +149,7 @@ function matchRule(rule: FundRule, itemsByVn: Map<string, ItemRow[]>, diags: Map
   const rightsOk = rightsOf(rule);
   const acts = activeActs(rule);
   const ruleDx = (vn: string) => dxPass(diags.get(vn), rule.icd10, rule.icd_scope);
+  const ex = new Set(rule.exclude_icodes);
   if (rule.match_mode !== "items") {
     for (const t of totals)
       if (rightsOk(t.fund, t.pttype) && cents(t.amount) > 0 && ruleDx(t.vn)) {
@@ -143,7 +160,7 @@ function matchRule(rule: FundRule, itemsByVn: Map<string, ItemRow[]>, diags: Map
     return out;
   }
   for (const [vn, list] of itemsByVn) {
-    const own = list.filter((it) => rightsOk(it.fund, it.pttype));
+    const own = list.filter((it) => rightsOk(it.fund, it.pttype) && !ex.has(it.icode));
     if (!own.length || !ruleDx(vn)) continue;
     let picked: ItemRow[];
     const passed: string[] = [];

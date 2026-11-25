@@ -427,7 +427,7 @@ function Recompute({ reload }: { reload: () => void }) {
   const moves = preview ? sum(preview.moves.filter((m) => m.from !== m.to), (m) => `${m.from}>${m.to}`, (m) => m.refs, (m) => m.amount) : [];
   const diffs = preview ? sum(preview.diffs, (d) => `${d.account}`, (d) => d.n, (d) => d.amount) : [];
   const code = (c: string | null) => (c ? <span className="whitespace-nowrap tabular-nums">{c}</span> : <span className="text-warning">ไม่ระบุบัญชี</span>);
-  const changes = moves.length + diffs.length + (preview?.reversed.refs ?? 0) + (preview?.coverage_updated ?? 0);
+  const changes = moves.length + diffs.length + (preview?.reversed.refs ?? 0) + (preview?.cr_split.refs ?? 0) + (preview?.coverage_updated ?? 0);
 
   return (
     <Section
@@ -448,7 +448,8 @@ function Recompute({ reload }: { reload: () => void }) {
             <li>ส่วนต่างตามเพดาน/สัดส่วน {formatCount(diffs.reduce((s, d) => s + d.n, 0))} รายการ</li>
             <li>กลับรายการสิทธิที่ไม่ตั้งลูกหนี้ {formatCount(preview.reversed.refs)} ราย · <Money value={preview.reversed.amount} /> บาท</li>
             <li>ไม่มีกติกา คงบัญชีเดิม {formatCount(preview.no_rule.refs)} ราย</li>
-            <li>ตัดหนี้แล้ว ไม่ลงส่วนต่าง {formatCount(preview.settled_skipped)} ราย</li>
+            <li>แยก HC/INST จาก .201 ไป .216 {formatCount(preview.cr_split.refs)} ราย · <Money value={preview.cr_split.amount} /> บาท</li>
+            <li>ตัดหนี้แล้ว ไม่ลงส่วนต่าง/ไม่แยก {formatCount(preview.settled_skipped)} ราย</li>
             <li>ข้อมูลสิทธิเปลี่ยนตาม HOSxP {formatCount(preview.coverage_updated)} ราย</li>
           </ul>
           {moves.length > 0 && (
