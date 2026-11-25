@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { hisQuery, insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
 import { OPI_BY_DATE, inList, loadLookups } from "@/app/api/fund/_lib/fund";
-import { REP_SQL, itemNames, loadFundRules } from "../sql";
+import { REP_SQL, itemNames, loadFundRules, withAdpIcodes } from "../sql";
 import { monthBounds } from "../rules";
 
 export type SuggestItem = { icode: string; name: string; income: string | null; vns: number; share: number; unpaidShare: number | null };
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
   const bounds = monthBounds(month, todayIso());
   if (!/^[A-Z][A-Z0-9_]{0,15}$/.test(code) || !bounds) return Response.json({ error: "ต้องระบุ code และ month (YYYY-MM)" }, { status: 400 });
 
-  const rule = (await loadFundRules()).find((r) => r.code === code);
+  const rule = (await withAdpIcodes(await loadFundRules())).find((r) => r.code === code);
   if (!rule) return Response.json({ error: "ไม่พบกติกา" }, { status: 404 });
   const paidVns = rule.rep_keys.length ? [...new Set((await insightQuery<{ vn: string }>(REP_SQL, [bounds.start, bounds.next, rule.rep_keys])).map((r) => r.vn))] : [];
 

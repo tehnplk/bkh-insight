@@ -2,7 +2,7 @@
 import { hisQuery, insightQuery } from "@/lib/db";
 import type { SqlValue } from "@/lib/column-filter-sql";
 import { OPI_BY_DATE, inList } from "@/app/api/fund/_lib/fund";
-import type { FundActivity, FundRule } from "./rules";
+import { expandAdpTypes, type FundActivity, type FundRule } from "./rules";
 // แถวล่าสุดของแต่ละ VN (tran_id มากสุด) เหมือน /fund/claim-errors เฉพาะ REP UC (visit ที่ส่งใหม่เป็นสิทธิอื่นทีหลังจะหลุดไป)
 export const REP_SQL = `SELECT r.seq_no AS vn, k.key, k.value AS amount
 FROM rep_row r CROSS JOIN LATERAL jsonb_each_text(r.fund_amounts) k
@@ -47,7 +47,7 @@ export async function byChunks<T>(values: string[], sql: (n: number) => string, 
   return out;
 }
 
-const RULE_COLS = `code, name, match_mode, hipdata_codes, pttypes, incomes, icodes, icd10, icd_scope, required_icodes, rep_keys, account_op, account_ip,
+const RULE_COLS = `code, name, match_mode, hipdata_codes, pttypes, incomes, icodes, icd10, icd_scope, required_icodes, adp_types, exclude_icodes, rep_keys, account_op, account_ip,
   updated_by, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at`;
 
 /** กติกาทั้งหมดพร้อมกิจกรรมย่อย (เรียงตามรหัส / ลำดับที่เพิ่ม) */
@@ -57,6 +57,15 @@ export async function loadFundRules(): Promise<FundRule[]> {
     insightQuery<FundActivity>("SELECT id, rule_code, name, items_mode, incomes, icodes, icd10, icd_scope, active FROM ar_fund_activity ORDER BY rule_code, id"),
   ]);
   return rules.map((r) => ({ ...r, activities: acts.filter((a) => a.rule_code === r.code) }));
+}
+
+// nondrugitems ~2,400 แถว (ไม่มี index บน nhso_adp_type_id สแกนทั้งตารางเล็ก) ; ค่าใน IN มาจาก ar_fund_rule ส่งเป็น bind parameter
+const ADP_ICODES_SQL = (n: number) => `SELECT icode, nhso_adp_type_id AS adp_type FROM nondrugitems WHERE ${inList("nhso_adp_type_id", n)}`;
+/** กติกาที่ใช้คำนวณ: แปลง adp_types เป็น icode ของ HOSxP ตอนนี้ (รายการใหม่เข้าเอง) แล้วตัด exclude_icodes */
+export async function withAdpIcodes(rules: FundRule[]): Promise<FundRule[]> {
+  const types = [...new Set(rules.flatMap((r) => r.adp_types))];
+  if (!types.length) return rules;
+  return expandAdpTypes(rules, await hisQuery<{ icode: string; adp_type: number | null }>(ADP_ICODES_SQL(types.length), types));
 }
 
 /** ชื่อรายการของ icode (ตรวจว่ามีใน HOSxP ด้วย) */

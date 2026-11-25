@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/ar-sync/ledger.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LEDGER_START, capDiff, chunkRange, dailyWindows, monthRange, parseCase, planCancels, planIpd, planOpd, planRecompute, resolve, toCents } from "./ledger.ts";
+import { LEDGER_START, allocateCr, capDiff, chunkRange, crRef, dailyWindows, monthRange, parseCase, planCancels, planIpd, planOpd, planRecompute, resolve, toCents } from "./ledger.ts";
 
 const rights = [
   { code: "UCS", name: "UC", main_hcode: "11252", books_ar: true },
@@ -268,4 +268,75 @@ test("planRecompute: move account, add missing diff on set date, skip settled, r
   // หลังลงแล้วกดซ้ำ ไม่มีอะไรเปลี่ยน
   const after = [{ ...states[0], account_code: "1102050101.203", diff: -20000 }, states[1], { ...states[2], balance: 0 }, states[3], states[4]];
   assert.ok(planRecompute(after, rules).every((p) => p.entries.length === 0 && p.to === p.state.account_code));
+});
+
+// ---- ช่วง 4a: แยก HC + INST ของ UC OP ใน CUP (.201) เป็นหนี้ CR (.216) ----
+const cup = { pttype: "89", hipdata_code: "UCS", hospmain: "07526", hospmain_chwpart: "65", hospmain_type: "18" };
+const vnOf = (id) => `6810010000${id}`;
+const crState = (id, balance, o = {}) => state(crRef(String(id)), balance, { ...cup, vn: vnOf(id), account_code: "1102050101.216", ...o });
+const mainState = (id, balance, o = {}) => state(String(id), balance, { ...cup, vn: vnOf(id), account_code: "1102050101.201", ...o });
+
+test("allocateCr: per vn in debt_id order, capped at each debt", () => {
+  const out = allocateCr([{ ref: "12", vn: "A", cap: 500 }, { ref: "3", vn: "A", cap: 300 }, { ref: "4", vn: "B", cap: 100 }], new Map([["A", 700], ["B", 0]]));
+  assert.deepEqual([...out], [["3", 300], ["12", 400]]);
+});
+
+test("planOpd CR: new .201 debt splits HC+INST, sum unchanged, idempotent ; non-.201 not split", () => {
+  const today = "2026-11-25";
+  const cr = new Map([[vnOf(1), 30000], [vnOf(2), 5000]]);
+  const debts = [debt(1, 1000, cup), debt(2, 100, uc)]; // 2 = ในจังหวัด .203 ไม่แยก
+  const out = planOpd(debts, new Map(), rules, today, cr);
+  assert.deepEqual(out.map((e) => [e.kind, e.ref, e.account_code, e.amount, e.entry_date]), [
+    ["set", "1", "1102050101.201", "700.00", "2025-10-02"],
+    ["set", "1:CR", "1102050101.216", "300.00", "2025-10-02"],
+    ["set", "2", "1102050101.203", "100.00", "2025-10-02"],
+  ]);
+  assert.equal(out[1].vn, vnOf(1));
+  const states = applied(new Map(), out);
+  assert.deepEqual(planOpd(debts, states, rules, today, cr), []);
+  // CR เกินยอดหนี้ = แยกได้ไม่เกินยอด ; หนี้หลักห้ามยอด 0 จึงตั้งเต็มแล้วปรับลด
+  const full = planOpd([debt(1, 100, cup)], new Map(), rules, today, cr);
+  assert.deepEqual(full.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["set", "1", "100.00", "2025-10-02"], ["adjust", "1", "-100.00", "2025-10-02"], ["set", "1:CR", "100.00", "2025-10-02"]]);
+  assert.ok(full.every((e) => Number(e.amount) !== 0));
+  assert.deepEqual(planOpd([debt(1, 100, cup)], applied(new Map(), full), rules, today, cr), []);
+});
+
+test("planOpd CR: existing unsplit debt splits on its set date, later changes adjust on sync date, settled not split", () => {
+  const today = "2026-11-25";
+  const cr = new Map([[vnOf(1), 20000]]);
+  let states = new Map([["1", mainState(1, 100000)]]);
+  const first = planOpd([debt(1, 1000, cup)], states, rules, today, cr);
+  assert.deepEqual(first.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["adjust", "1", "-200.00", "2025-10-02"], ["set", "1:CR", "200.00", "2025-10-02"]]);
+  states = applied(states, first);
+  // HOSxP: ยอดรวม 1,100 และ HC+INST 250
+  const next = planOpd([debt(1, 1100, cup)], states, rules, today, new Map([[vnOf(1), 25000]]));
+  assert.deepEqual(next.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["adjust", "1:CR", "50.00", today], ["adjust", "1", "50.00", today]]);
+  // ไม่ใช่ .201 แล้ว (สิทธิไม่ตั้งลูกหนี้) = CR กลับเป็น 0 และหนี้หลักเป็น 0
+  const free = new Map([["1", { ...states.get("1"), pttype: "26" }], ["1:CR", states.get("1:CR")]]);
+  assert.deepEqual(planOpd([debt(1, 1000, cup)], free, rules, today, cr).map((e) => [e.ref, e.amount]), [["1:CR", "-200.00"], ["1", "-800.00"]]);
+  // ตัดเหมาจ่ายแล้วและยังไม่เคยแยก: ไม่แยก
+  assert.deepEqual(planOpd([debt(1, 1000, cup)], new Map([["1", mainState(1, 100000, { settled: true })]]), rules, today, cr), []);
+});
+
+test("planCancels CR: cancelling a debt_id closes both refs once", () => {
+  const states = new Map([["1", mainState(1, 80000)], ["1:CR", crState(1, 20000)]]);
+  const cancels = [{ debt_id: 1, cancel_datetime: "2025-10-05 10:00:00" }];
+  const { entries } = planCancels(cancels, states);
+  assert.deepEqual(entries.map((e) => [e.kind, e.ref, e.amount, e.account_code]), [["cancel", "1", "-800.00", "1102050101.201"], ["cancel", "1:CR", "-200.00", "1102050101.216"]]);
+  assert.deepEqual(planCancels(cancels, applied(states, entries)).entries, []);
+});
+
+test("planRecompute CR: splits .201 on set date, adjusts existing CR, keeps CR account, skips settled, idempotent", () => {
+  const rs = (s) => ({ ...s, set_date: "2026-10-05" });
+  const states = [rs(mainState(1, 100000)), rs(mainState(2, 80000)), rs(crState(2, 10000)), rs(mainState(3, 50000, { settled: true }))];
+  const cr = new Map([[vnOf(1), 30000], [vnOf(2), 15000], [vnOf(3), 1000]]);
+  const plan = planRecompute(states, rules, cr);
+  assert.deepEqual(plan.map((p) => [p.state.ref, p.to, p.entries.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), p.settledSkip]), [
+    ["1", "1102050101.201", [["adjust", "1", "-300.00", "2026-10-05"], ["set", "1:CR", "300.00", "2026-10-05"]], false],
+    ["2", "1102050101.201", [["adjust", "2", "-50.00", "2026-10-05"]], false],
+    ["3", "1102050101.201", [], true],
+    ["2:CR", "1102050101.216", [["adjust", "2:CR", "50.00", "2026-10-05"]], false],
+  ]);
+  const after = [rs(mainState(1, 70000)), rs(crState(1, 30000)), rs(mainState(2, 75000)), rs(crState(2, 15000)), states[3]];
+  assert.ok(planRecompute(after, rules, cr).every((p) => p.entries.length === 0 && p.to === p.state.account_code));
 });

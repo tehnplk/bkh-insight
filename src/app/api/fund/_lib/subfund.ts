@@ -3,7 +3,7 @@
 import { hisQuery, insightQuery } from "@/lib/db";
 import { formatBaht } from "@/lib/number-format";
 import { fundOf, inList, type Lookups } from "./fund";
-import { CHUNK, ITEMS_SQL, TOTALS_SQL, byChunks, itemNames, loadFundRules, type ItemScope } from "@/app/api/admin/ar-funds/sql";
+import { CHUNK, ITEMS_SQL, TOTALS_SQL, byChunks, itemNames, loadFundRules, withAdpIcodes, type ItemScope } from "@/app/api/admin/ar-funds/sql";
 import {
   REP_PAY_LABEL, classifyVisits, repPay, ruleReady, ruleSide,
   type Diag, type FundRule, type ItemRow, type SubFund, type SubFundSide, type VisitTotal,
@@ -28,16 +28,16 @@ const uniq = <T,>(xs: T[]) => [...new Set(xs)];
 /**
  * กองทุนย่อยต่อ key (OP = VN, IP = AN) จากกติกาที่ตั้งเงื่อนไขแล้ว (ruleReady) และใช้กับฝั่งนี้ (ruleSide) ; ไม่เข้าเกณฑ์ = ไม่มีใน map
  * range: ช่วงวันรับบริการของ OP ทุก key ต้องอยู่ในช่วงนี้ เมื่อ key เกิน CHUNK อ่าน opitemrece ตามวันครั้งเดียวแทนหลายชุด
- * IP อ่านตาม AN เสมอ (ห้ามสแกน opitemrece ตามวันของผู้ป่วยใน) ; names = เติมชื่อรายการ (ใช้แสดงผล ตัวกรองไม่ต้องใช้)
+ * IP อ่านตาม AN เสมอ (ห้ามสแกน opitemrece ตามวันของผู้ป่วยใน) ; names = เติมชื่อรายการ (ใช้แสดงผล ตัวกรองไม่ต้องใช้) ; codes = เฉพาะกติกาเหล่านี้
  */
 export async function loadSubfunds(
   side: SubFundSide,
   keys: string[],
   lk: Lookups,
-  opts: { range?: { start: string; end: string }; names?: boolean } = {},
+  opts: { range?: { start: string; end: string }; names?: boolean; codes?: string[] } = {},
 ): Promise<Map<string, SubFund[]>> {
   if (!keys.length) return new Map();
-  const rules = (await loadFundRules()).filter((r) => ruleReady(r) && ruleSide(r, side));
+  const rules = await withAdpIcodes((await loadFundRules()).filter((r) => ruleReady(r) && ruleSide(r, side) && (!opts.codes || opts.codes.includes(r.code))));
   if (!rules.length) return new Map();
   const ptOf = (rs: FundRule[]) => {
     const funds = new Set(rs.flatMap((r) => r.hipdata_codes));

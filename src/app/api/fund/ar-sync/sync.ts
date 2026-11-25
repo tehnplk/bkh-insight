@@ -1,8 +1,11 @@
 import "server-only";
 import { hisQuery, insightQuery, insightTransaction, type InsightTx } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
+import { inList, loadLookups } from "@/app/api/fund/_lib/fund";
+import { loadSubfunds } from "@/app/api/fund/_lib/subfund";
+import { byChunks, loadFundRules } from "@/app/api/admin/ar-funds/sql";
 import {
-  LEDGER_START, addDays, chunkRange, dailyWindows, monthRange, planCancels, planIpd, planOpd, planRecompute, toCents,
+  CR_SPLIT, LEDGER_START, addDays, chunkRange, crRef, dailyWindows, isCrRef, monthRange, planCancels, planIpd, planOpd, planRecompute, resolve, toCents,
   type AccountRule, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RecomputeState, type Recomputed, type RefState,
   type Right, type Source, type SyncCase,
 } from "./ledger";
@@ -108,7 +111,9 @@ type RawState<T> = Omit<T, "balance" | "diff"> & { balance: string; diff: string
 const toState = <T,>(r: RawState<T>) => ({ ...r, balance: toCents(r.balance), diff: toCents(r.diff) }) as T;
 
 async function loadStates(tx: InsightTx, source: Source, refs: string[], window?: { from: string; to: string }) {
-  const rows = await tx<RawState<RefState>>(STATES_SQL, [source, refs, window?.from ?? null, window?.to ?? null]);
+  // OPD โหลดหนี้ CR ของ debt_id มาด้วย (planOpd/planCancels ใช้ทั้งสอง ref)
+  const all = source === "rcpt_debt" ? refs.flatMap((r) => [r, crRef(r)]) : refs;
+  const rows = await tx<RawState<RefState>>(STATES_SQL, [source, all, window?.from ?? null, window?.to ?? null]);
   return new Map(rows.map((r) => [r.ref, toState<RefState>(r)]));
 }
 
@@ -124,15 +129,48 @@ async function insert(tx: InsightTx, entries: Entry[], syncId: string | null, co
 }
 
 const bump = (c: SyncCounts, k: string, n = 1) => (c[k] = (c[k] ?? 0) + n);
+
+// ovst PK (vn) เฉพาะ visit ที่มี HC/INST
+const ADMITTED_SQL = (n: number) => `SELECT vn FROM ovst WHERE ${inList("vn", n)} AND an IS NOT NULL`;
+
+/**
+ * ยอด HC + INST (สตางค์) ต่อ vn ของผู้ป่วยนอก = กองทุนย่อยที่ account_op เป็นบัญชี CR (กติกาเดียวกับ /admin/ar-funds ผ่าน loadSubfunds)
+ * อ่านทีละเดือนของวันรับบริการ (ช่วง min..max ของเดือน): เกิน 1,000 VN อ่าน opitemrece ตามวัน (ix_vstdate) ไม่งั้นตาม VN (ix_vn)
+ * visit ที่ admit แล้ว (ovst.an) ไม่แยก เหมือนโปรแกรม Claim ; อ่าน his ก่อนถือ lock ; error = ทั้งรอบล้ม (ไม่ลงยอดผิดว่า CR เป็น 0)
+ */
+async function loadCr(visits: { vn: string | null; date: string | null }[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const months = new Map<string, { vns: Set<string>; start: string; end: string }>();
+  for (const v of visits) {
+    if (!v.vn || !v.date) continue;
+    const d = v.date.slice(0, 10);
+    const m = months.get(d.slice(0, 7)) ?? { vns: new Set<string>(), start: d, end: d };
+    m.vns.add(v.vn);
+    if (d < m.start) m.start = d;
+    if (d > m.end) m.end = d;
+    months.set(d.slice(0, 7), m);
+  }
+  if (!months.size) return out;
+  const codes = (await loadFundRules()).filter((r) => r.account_op === CR_SPLIT.to).map((r) => r.code);
+  if (!codes.length) return out;
+  const lk = await loadLookups();
+  for (const m of months.values())
+    for (const [vn, funds] of await loadSubfunds("OP", [...m.vns], lk, { range: { start: m.start, end: m.end }, codes }))
+      out.set(vn, funds.reduce((sum, f) => sum + toCents(f.amount), 0));
+  for (const r of await byChunks<{ vn: string }>([...out.keys()], ADMITTED_SQL)) out.delete(r.vn);
+  return out;
+}
+const debtVisits = (debts: HisDebt[]) => debts.map((d) => ({ vn: d.vn, date: d.vstdate ?? d.debt_date }));
 /** ถือ advisory lock ของ ar_ledger ตลอด transaction (ar-sync และตัดลูกหนี้ /fund/ar-settle) */
 export const locked = <T>(fn: (tx: InsightTx) => Promise<T>) => insightTransaction(async (tx) => (await tx(LOCK_SQL), fn(tx)));
 
 async function syncOpd(w: { from: string; to: string }, rules: AccountRules, today: string, syncId: string, counts: SyncCounts) {
   const debts = await hisQuery<HisDebt>(OPD_DEBT_SQL(BY_RANGE.opd), [w.from, w.to]);
   bump(counts, "opd_rows", debts.length);
+  const cr = await loadCr(debtVisits(debts));
   await locked(async (tx) => {
     const states = await loadStates(tx, "rcpt_debt", debts.map((d) => String(d.debt_id)));
-    await insert(tx, planOpd(debts, states, rules, today), syncId, counts);
+    await insert(tx, planOpd(debts, states, rules, today, cr), syncId, counts);
   });
 }
 
@@ -243,6 +281,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
     opd ? hisQuery<HisCancel>(OPD_CANCEL_SQL(BY_CASE.cancel), [id]) : [],
     opd ? [] : hisQuery<HisIpd>(IPD_SQL(BY_CASE.ipd), [id, LEDGER_START]),
   ]);
+  const cr = await loadCr(debtVisits(debts));
   return locked(async (tx) => {
     const [before] = await tx<CaseState>(CASE_SQL, [source, id]);
     if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า, เหมาจ่าย หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
@@ -255,7 +294,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
     let entries = 0;
     if (opd) {
       if (cancels.length) counts.cancel_rows = cancels.length;
-      entries += await insert(tx, planOpd(debts, await loadStates(tx, source, debts.map((d) => String(d.debt_id))), rules, today), syncId, counts);
+      entries += await insert(tx, planOpd(debts, await loadStates(tx, source, debts.map((d) => String(d.debt_id))), rules, today, cr), syncId, counts);
       // โหลด states ใหม่ ให้หนี้ที่เพิ่งตั้งในรอบนี้ยกเลิกได้ทันที (ลำดับเดียวกับรายวัน)
       const { entries: cancelEntries } = planCancels(cancels, await loadStates(tx, source, cancels.map((x) => String(x.debt_id))));
       entries += await insert(tx, cancelEntries, syncId, counts);
@@ -300,8 +339,10 @@ export type RecomputeResult = {
   reversed: { refs: number; amount: number };
   /** ไม่มีกติกา คงบัญชีเดิม */
   no_rule: { refs: number; amount: number };
-  /** หนี้ที่ตัดแล้ว ไม่ลง diff เพิ่ม */
+  /** หนี้ที่ตัดแล้ว ไม่ลง diff/ไม่แยก CR เพิ่ม */
   settled_skipped: number;
+  /** หนี้ .201 ที่แยก/ปรับยอด HC + INST ไปหนี้ CR (.216) amount = ยอดที่ย้ายเข้า CR (ลบ = ย้ายกลับ) */
+  cr_split: { refs: number; amount: number };
   /** หนี้ที่ข้อมูลสิทธิ (สิทธิ IPD, ที่ตั้งหน่วยบริการประจำ) เปลี่ยนตาม HOSxP */
   coverage_updated: number;
   /** แถวที่ย้ายบัญชี และแถวที่ลงใหม่ (apply เท่านั้น) */
@@ -344,7 +385,7 @@ async function hisCoverage(states: RecomputeState[]) {
 function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number): RecomputeResult {
   const out: RecomputeResult = {
     applied: apply, moves: [], diffs: [], reversed: { refs: 0, amount: 0 }, no_rule: { refs: 0, amount: 0 },
-    settled_skipped: 0, coverage_updated: coverageUpdated, rows_moved: 0, rows_inserted: 0,
+    settled_skipped: 0, cr_split: { refs: 0, amount: 0 }, coverage_updated: coverageUpdated, rows_moved: 0, rows_inserted: 0,
   };
   const moves = new Map<string, RecomputeResult["moves"][number]>();
   const diffs = new Map<string, RecomputeResult["diffs"][number]>();
@@ -356,6 +397,8 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
     moves.set(mk, { ...m, refs: m.refs + 1, amount: m.amount + baht });
     if (p.noRule) out.no_rule = { refs: out.no_rule.refs + 1, amount: out.no_rule.amount + baht };
     if (p.settledSkip) out.settled_skipped++;
+    const crs = p.entries.filter((e) => isCrRef(e.ref) && (e.kind === "set" || e.kind === "adjust"));
+    if (crs.length) out.cr_split = { refs: out.cr_split.refs + 1, amount: out.cr_split.amount + crs.reduce((sum, e) => sum + Number(e.amount), 0) };
     if (p.entries.some((e) => e.kind === "reverse")) out.reversed = { refs: out.reversed.refs + 1, amount: out.reversed.amount + baht };
     for (const e of p.entries.filter((x) => x.kind === "diff")) {
       const dk = `${month}|${e.account_code}`;
@@ -367,24 +410,29 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
   out.diffs = [...diffs.values()].map((d) => ({ ...d, amount: round(d.amount) }));
   out.reversed.amount = round(out.reversed.amount);
   out.no_rule.amount = round(out.no_rule.amount);
+  out.cr_split.amount = round(out.cr_split.amount);
   return out;
 }
 
 /**
  * คำนวณบัญชีของทุกหนี้ใน ledger ใหม่ตามกติกาปัจจุบัน (ar_right/ar_account_rule) ; apply = false คือดูผลอย่างเดียว ไม่เขียน
- * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด
+ * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด, แยก HC + INST ของ .201 เป็นหนี้ CR
  * และกลับรายการหนี้ของสิทธิที่ไม่ตั้งลูกหนี้ ลงวันเดียวกับแถว set ใน transaction เดียวที่ถือ lock ของ ar_ledger กดซ้ำได้
  * งวดที่ปิดแล้ว: trigger ar_ledger_period_guard ห้าม UPDATE แถวในงวดปิด ทั้งชุดจึง ROLLBACK
  */
 export async function recomputeLedger(apply: boolean): Promise<RecomputeResult> {
   const rules = await loadRules();
   // อ่าน his ก่อนถือ lock (เหมือน sync) จากหนี้ที่มีตอนนี้ ; หนี้ที่ตั้งระหว่างนี้ไม่มีใน map จึงคงข้อมูลเดิม (OPD = ไม่พบที่ตั้ง)
-  const fresh = await hisCoverage((await insightQuery<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r)));
+  const current = (await insightQuery<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
+  const fresh = await hisCoverage(current);
+  // ยอด HC + INST ของหนี้ OPD ที่ลง .201 ตามกติกาปัจจุบัน (ตามเดือนของวันรับบริการ = ref_date)
+  const cr = await loadCr(current.map(fresh).filter((s) => s.patient_type === "OP" && !isCrRef(s.ref) && !s.cancelled && resolve(s, rules).account_code === CR_SPLIT.from)
+    .map((s) => ({ vn: s.vn, date: s.ref_date })));
   return locked(async (tx) => {
     const before = (await tx<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
     const states = before.map(fresh);
     const changedCoverage = states.filter((s, i) => coverageKey(s) !== coverageKey(before[i]));
-    const plan = planRecompute(states, rules);
+    const plan = planRecompute(states, rules, cr);
     const out = summarize(plan, apply, changedCoverage.length);
     if (!apply) return out;
     if (changedCoverage.length)

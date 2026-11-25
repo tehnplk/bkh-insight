@@ -232,6 +232,8 @@ function Rules({ data, reload }: { data: ArFundsData; reload: () => void }) {
               {!ruleReady(r) && <span className="block text-warning">ยังไม่มีเงื่อนไขรายการ</span>}
               {r.incomes.map((i) => <span key={i} className="block">หมวด {i} {muted(incomeName.get(i)?.replace(/^\d+\s*/, "") ?? "")}</span>)}
               {r.icodes.length > 0 && <span className="block">รหัสรายการ {formatCount(r.icodes.length)} รหัส</span>}
+              {r.adp_types.length > 0 && <span className="block">ADP type {r.adp_types.join(", ")}</span>}
+              {r.exclude_icodes.length > 0 && <span className="block">ไม่นับ {formatCount(r.exclude_icodes.length)} รหัส</span>}
               {r.icd10.length > 0 && <span className="block">ICD-10 {r.icd10.join(", ")}{r.icd_scope === "pdx" && " (โรคหลัก)"}</span>}
               {r.required_icodes.length > 0 && <span className="block">รายการจำเป็น {formatCount(r.required_icodes.length)} รหัส</span>}
               {r.activities.length > 0 && <span className="block">กิจกรรมย่อย {formatCount(r.activities.filter((a) => a.active).length)} / {formatCount(r.activities.length)} {muted("(ใช้แทนเงื่อนไขรายการ)")}</span>}
