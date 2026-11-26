@@ -17,12 +17,12 @@ export const pdxMissing = (daysSinceDch: number | null) =>
 /** สิทธิ UC (pttype.hipdata_code) ที่คิดยอดตาม AdjRW ; สิทธิอื่นไม่คิดยอด */
 export const UC_HIPDATA = ["UCS", "WEL", "DIS"] as const;
 /**
- * อัตราบาทต่อ AdjRW ของสิทธิ UC ตามวันจำหน่าย (เกณฑ์จังหวัด ผู้ใช้อนุมัติ 25 พ.ย. 2569) เรียงจากใหม่ไปเก่า ใช้ตัวแรกที่ dchdate >= from
+ * อัตราบาทต่อ AdjRW ของสิทธิ UC ตามวันจำหน่าย (เกณฑ์จังหวัด ผู้ใช้อนุมัติ 25 พ.ย. 2569 ; ต่างจังหวัด 9,860 ตามข้อมูลใหม่ 26 พ.ย. 2569) เรียงจากใหม่ไปเก่า ใช้ตัวแรกที่ dchdate >= from
  * outProvince = hospmain ของ ipt_pttype แถวแรกอยู่ต่างจังหวัด (ไม่มี/ไม่พบใน hospcode = normal) ; จำหน่ายก่อนอัตราเก่าสุด = ไม่มีอัตรา
  * แหล่งเดียวของทั้ง rateFor (รายแถว) และ rateCase (ยอดรวมใน SQL)
  */
 export const ADJRW_RATES = [
-  { from: "2026-09-16", normal: 5100, outProvince: 9680 },
+  { from: "2026-09-16", normal: 5100, outProvince: 9860 },
   { from: "2025-10-01", normal: 3505.14, outProvince: 9600 },
 ] as const;
 

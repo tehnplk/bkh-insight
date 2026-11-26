@@ -39,10 +39,10 @@ test("REP file name, type and support", () => {
   assert.equal(lib.repTypeOf(fn), "OP_APPEAL_HC");
   assert.equal(lib.xlsName(fn), "eclaim_12345_OP_APPEAL_HC_25691105_143000123.xls");
   assert.match(lib.xlsName(fn), /^eclaim_(\d+)_(.+)_(\d{8})_(\d+)(?: \(\d+\))?\.xls$/); // FILE_RE ของ rep.ts
-  for (const t of ["IP", "OP", "OP_APPEAL_HC", "IPCS", "OPCS", "IPLGO", "OPLGO", "OPBKK", "OPBMT", "IPBKK", "IPBMT", "OPLGO_APPEAL", "OPBMT_APPEAL"]) {
+  for (const t of ["IP", "OP", "OP_APPEAL_HC", "IPCS", "OPCS", "IPLGO", "OPLGO", "OPBKK", "OPBMT", "IPBKK", "IPBMT", "OPLGO_APPEAL", "OPBMT_APPEAL", "ORF"]) {
     assert.equal(lib.repSkip(t), null, t);
   }
-  for (const t of ["ORF", "IPSSS", "IP_APPEAL", "OPBKKX"]) assert.equal(lib.repSkip(t), `ยังไม่รองรับ ${t}`);
+  for (const t of ["ORF_APPEAL", "IPSSS", "IP_APPEAL", "OPBKKX"]) assert.equal(lib.repSkip(t), `ยังไม่รองรับ ${t}`);
   assert.ok(lib.repSkip(null));
   assert.equal(lib.repTypeOf("eclaim_12345_OPCS_25691105_143000123.ecd"), "OPCS");
 });

@@ -38,7 +38,7 @@ test("checkMessage accepts only the protocol", () => {
 
 const LISTS = {
   repList: (p) => (p.scheme === "ucs" && p.m === 11
-    ? [{ fn: "eclaim_12345_IP_25691105_1.ecd", repNo: "690100001" }, { fn: "eclaim_12345_ORF_25691105_2.ecd" }, { fn: "eclaim_12345_OP_25691105_3.ecd" }]
+    ? [{ fn: "eclaim_12345_IP_25691105_1.ecd", repNo: "690100001" }, { fn: "eclaim_12345_IPSSS_25691105_2.ecd" }, { fn: "eclaim_12345_OP_25691105_3.ecd" }]
     : []),
   ucsList: (p) => (p.mm === "02"
     ? [
@@ -99,7 +99,7 @@ test("plan splits found / already / pending / skipped", async () => {
   const res = await lib.plan(NOV, fakeIo(), { delayMs: 0, onProgress: (p) => progress.push(p) });
   assert.equal(res.hcode, "12345"); // จากชื่อ REP ที่นำเข้าแล้ว
   assert.deepEqual(res.stats["REP UCS"], { found: 3, already: 1, pending: 1, imported: 0, failed: 0, skipped: 1 });
-  assert.deepEqual(res.skips[0], { g: "REP UCS", reason: "ยังไม่รองรับ ORF", n: 1 });
+  assert.deepEqual(res.skips[0], { g: "REP UCS", reason: "ยังไม่รองรับ IPSSS", n: 1 });
   assert.equal(res.stats["STM UCS"].found, 1); // ฉบับที่ออกนอกช่วงไม่นับ
   assert.deepEqual(res.stats["STM OFC"], { found: 1, already: 1, pending: 0, imported: 0, failed: 0, skipped: 0 });
   assert.deepEqual(res.todo.map((t) => [t.g, t.name, t.kind]), [

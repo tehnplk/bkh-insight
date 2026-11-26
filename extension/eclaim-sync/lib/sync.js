@@ -95,8 +95,8 @@ export function beToIso(s) {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? `${y}-${pad(mo)}-${pad(d)}` : null;
 }
 
-// ชนิด REP ที่ /api/fund/rep-import อ่านได้ (rep.ts): UC IP/OP/OP_APPEAL_* และสิทธิอื่น IP/OP × CS/LGO/BKK/BMT รวม _APPEAL ; ORF ไม่มีตัวอ่าน
-const REP_OK = /^(IP|OP|OP_APPEAL\w*|(IP|OP)(CS|LGO|BKK|BMT)(_APPEAL\w*)?)$/;
+// ชนิด REP ที่ /api/fund/rep-import อ่านได้ (rep.ts): UC IP/OP/OP_APPEAL_*/ORF และสิทธิอื่น IP/OP × CS/LGO/BKK/BMT รวม _APPEAL
+const REP_OK = /^(IP|OP|OP_APPEAL\w*|ORF|(IP|OP)(CS|LGO|BKK|BMT)(_APPEAL\w*)?)$/;
 const REP_FILE = /^eclaim_\d+_[A-Za-z0-9_]+?_\d{8}_\d+\.ecd$/;
 
 /** eclaim_{hcode}_{TYPE}_{yyyymmdd พ.ศ.}_{n}.ecd -> TYPE */

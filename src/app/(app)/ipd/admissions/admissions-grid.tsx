@@ -54,7 +54,7 @@ import { OVERDUE_VALUES, UNSENT_VALUES } from "@/app/api/fdh/claim-batch/claim";
 
 const FILTERS = ["pttypes", "wards", "dx", "dxpos"] as const;
 const DX_OPTIONS = [{ value: "dx", label: "กลุ่มโรค", options: DX_GROUPS.map((g) => ({ value: g.key, label: g.label })) }];
-/** ข้อความอัตรา เช่น "เฉพาะสิทธิ UC: AdjRW × อัตราตามวันจำหน่าย · ตั้งแต่ 16 ก.ย. 2569 5,100.00 บาท (หน่วยบริการหลักต่างจังหวัด 9,680.00 บาท) · ..." */
+/** ข้อความอัตรา เช่น "เฉพาะสิทธิ UC: AdjRW × อัตราตามวันจำหน่าย · ตั้งแต่ 16 ก.ย. 2569 5,100.00 บาท (หน่วยบริการหลักต่างจังหวัด 9,860.00 บาท) · ..." */
 const RATE_NOTE = `เฉพาะสิทธิ UC: AdjRW × อัตราตามวันจำหน่าย · ${ADJRW_RATES.map((r) => `ตั้งแต่ ${formatThaiDate(r.from)} ${formatBaht(r.normal)} บาท (หน่วยบริการหลักต่างจังหวัด ${formatBaht(r.outProvince)} บาท)`).join(" · ")}`;
 const dash = <span className="text-muted">–</span>;
 const nowrap = { className: "whitespace-nowrap" };

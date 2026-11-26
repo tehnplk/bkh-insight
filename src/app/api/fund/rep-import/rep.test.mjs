@@ -230,6 +230,76 @@ for (const lgo of [false, true]) {
   });
 }
 
+// REP OP Refer (ORF): โครงตามไฟล์จริง (พ.ย. 2569) หัว 4 ชั้นแถว 6-9 ข้อมูลแถว 10 ; ค่าทั้งหมดสมมติ
+function orfBook({ seq = "", invoice = "690901083012" } = {}) {
+  const W = 113;
+  const blank = () => Array(W).fill(null);
+  const g = blank(); // แถว 6 กลุ่ม
+  Object.assign(g, {
+    0: "ข้อมูลทั่วไป", 21: "ยอดรวมค่าใช้จ่าย(เฉพาะเบิกได้) (1)", 22: "เข้าเกณฑ์ central reimburse (2)", 24: "ชำระเอง (3)", 25: "พรบ. (4)",
+    26: "เข้าเกณฑ์ OP REFER", 29: "ผลรวมทั้ง Case (8=5+7)", 30: "ผู้รับผิดชอบ (9)=(8)", 32: "ชดเชยสุทธิ (บาท) (10=8)", 33: "ชำระบัญชีโดย", 34: "PS",
+    35: "รายละเอียดการจ่าย central reimburse", 63: "รายละเอียดที่ขอเบิกกรณี OP Refer", 101: "Error Code", 102: "Deny", 106: "VA", 107: "Remark",
+    108: "AUDIT RESULTS", 109: "รูปแบบการจ่าย", 110: "SEQ NO", 111: "INVOICE NO", 112: "INVOICE LT",
+  });
+  const n = blank(); // แถว 8 ชื่อคอลัมน์
+  Object.assign(n, {
+    0: "REP", 1: "NO.", 2: "TRAN_ID", 3: "HN", 4: "PID", 5: "ชื่อ", 6: "ว/ด/ป ที่รับบริการ", 7: "เลขที่ใบส่งต่อ", 8: "หน่วยบริการ", 15: "DX.",
+    22: "กรณี", 23: "จำนวนเงิน", 26: "รายการ OPREF (5)", 27: "ค่ารักษาอื่นๆ", 30: "CUP / จังหวัด", 31: "สปสช", 61: "ชดเชยสุทธิ (บาท)", 62: "ชำระโดย",
+  });
+  for (let c = 35; c <= 60; c++) n[c] = c === 35 ? "OPHC" : `กองทุน${c}`;
+  const s = blank(); // แถว 9 ชั้นย่อย
+  Object.assign(s, { 8: "รักษา(Htype1)", 10: "รักษา(Hcode)", 13: "ประจำ(Hmain2)", 14: "รับส่งต่อ(Href)", 27: "ก่อนปรับลด (6)", 28: "หลังปรับลด (7)", 30: "<=1600", 31: ">1600", 35: "HC01", 102: "HC", 103: "AE", 104: "INST", 105: "DMIS" });
+  const row = blank();
+  Object.assign(row, {
+    0: "690900007", 1: 1, 2: "900000001", 3: "0000001", 4: "1111111111111", 5: "ทดสอบ ระบบ", 6: "01/09/2026 08:30:12", 7: "12/69",
+    10: "12345 รพ.ทดสอบ", 13: "54321 รพ.ต้นทาง", 14: "00001 สอ.ทดสอบ", 21: 850, 23: 0, 24: 50, 26: 300, 28: 200, 31: 500, 32: 500, 35: 120,
+    61: 120, 101: "C438", 102: "C", 107: "หมายเหตุ", 109: "จ่ายรายวัน", 110: seq, 111: invoice,
+  });
+  const aoa = [["ออกรายงานวันที่ 26/11/2569 เวลา 15:00"], [null, null, "กองทุนเขต"], [], [null, null, "จังหวัด"], [], g, blank(), n, s, row, ["หมายเหตุท้ายตาราง"]];
+  const detail = utils.aoa_to_sheet(aoa);
+  detail["!merges"] = [range(5, 0, 5, 20), range(5, 26, 5, 28), range(5, 30, 5, 31), range(5, 35, 5, 62), range(5, 102, 5, 105), range(7, 27, 7, 28)];
+  const h = Array(55).fill(null);
+  Object.assign(h, { 0: "งวด", 1: "HCODE", 2: "REP NO.", 3: "ข้อมูลปกติ", 18: "จ่ายชดเชยทั้งสิ้น", 19: "ข้อมูลอุทธรณ์", 48: "ชดเชยสุทธิ", 50: "ข้อมูลปกติ OPREFER", 53: "ชดเชยสุทธิ OPREFER" });
+  const h4 = Array(55).fill(null);
+  Object.assign(h4, { 3: "จำนวนราย", 6: "HC" });
+  const h5 = Array(55).fill(null);
+  Object.assign(h5, { 3: "ทั้งหมด", 4: "ผ่าน", 5: "ไม่ผ่าน", 6: "เรียกเก็บ", 7: "ชดเชย", 50: "จ่ายชดเชย" });
+  const data = Array(55).fill(0);
+  Object.assign(data, { 0: "-", 1: "12345", 2: "690900007", 3: 1, 4: 0, 5: 1, 6: 300, 7: 120, 18: 120, 50: 500 });
+  const summary = utils.aoa_to_sheet([["* หมายเหตุ"], h, [], h4, h5, data]);
+  summary["!merges"] = [range(1, 3, 1, 17), range(3, 6, 3, 7)];
+  const wb = utils.book_new();
+  utils.book_append_sheet(wb, detail, "Detail");
+  utils.book_append_sheet(wb, summary, "Summary");
+  return write(wb, { type: "buffer", bookType: "xlsx" });
+}
+
+test("ORF (OP Refer) maps to rep_row: INVOICE NO is the VN when SEQ NO is empty", () => {
+  const { layout, rows, summaries } = parseRep(orfBook());
+  assert.equal(layout, "orf");
+  assert.equal(rows.length, 1);
+  const [r] = rows;
+  assert.deepEqual([r.tran_id, r.rep_no, r.patient_type, r.hn, r.an, r.seq_no], ["900000001", "690900007", "OP", "0000001", null, "690901083012"]);
+  assert.equal(r.admit_at, "2026-09-01 08:30:12");
+  assert.deepEqual([r.claim_total, r.central_reimburse, r.self_pay, r.net_nhso], [850, 0, 50, 500]);
+  assert.deepEqual(r.error_codes, ["C438"]);
+  assert.equal(r.hmain, "54321");
+  assert.deepEqual(r.deny, { "Deny / HC": "C" });
+  assert.deepEqual(r.fund_amounts, {
+    "เข้าเกณฑ์ OP REFER / รายการ OPREF (5)": 300,
+    "เข้าเกณฑ์ OP REFER / ค่ารักษาอื่นๆ / หลังปรับลด (7)": 200,
+    "ผู้รับผิดชอบ (9)=(8) / สปสช / >1600": 500,
+    "รายละเอียดการจ่าย central reimburse / OPHC / HC01": 120,
+  });
+  assert.equal(Object.values(r).includes("ทดสอบ ระบบ"), false); // ไม่เก็บชื่อ
+  assert.equal(parseRep(orfBook({ seq: "690901083099" })).rows[0].seq_no, "690901083099"); // มี SEQ NO ใช้ SEQ NO
+  const [s] = summaries;
+  assert.deepEqual([s.rep_no, s.total_cases, s.passed, s.failed, s.paid_affiliation, s.paid_total], ["690900007", 1, 0, 1, null, 120]);
+  assert.equal(s.amounts["ข้อมูลปกติ OPREFER / จ่ายชดเชย"], 500);
+  assert.equal("จ่ายชดเชยทั้งสิ้น" in s.amounts, false);
+  assert.equal(schemeOf("ORF", layout), "UCS");
+});
+
 test("scheme from file type and layout", () => {
   assert.equal(schemeOf("OP_APPEAL_CD", "uc"), "UCS");
   assert.equal(schemeOf("IPCS", "other"), "OFC");

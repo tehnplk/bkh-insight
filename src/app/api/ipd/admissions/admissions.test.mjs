@@ -59,7 +59,7 @@ test("AdjRW amount: UC only, rate by discharge date and out-of-province hospmain
   const { rateFor } = await import("./admissions.ts");
   // ขอบช่วง
   assert.equal(rateFor("2026-09-16", true, false), 5100);
-  assert.equal(rateFor("2026-09-16", true, true), 9680);
+  assert.equal(rateFor("2026-09-16", true, true), 9860);
   assert.equal(rateFor("2026-09-15 23:59:59", true, false), 3505.14);
   assert.equal(rateFor("2026-09-15", true, true), 9600);
   assert.equal(rateFor("2025-10-01", true, false), 3505.14);
@@ -74,7 +74,7 @@ test("AdjRW amount: UC only, rate by discharge date and out-of-province hospmain
   const FUNDS = { ...FUND, W1: "WEL", D1: "DIS" };
   const amount = (extra) => buildRows([raw("1", "h", extra)], [], (p) => FUNDS[p] ?? "UNKNOWN")[0].adjrw_amount;
   assert.equal(amount({ dchdate: "2026-10-15", adjrw: "0.9067", out_prov: 0 }), 4624.17); // 0.9067 × 5100 = 4624.17
-  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "0.9067", out_prov: "1" }), 8776.86); // × 9680 = 8776.856
+  assert.equal(amount({ dchdate: "2026-10-15", adjrw: "0.9067", out_prov: "1" }), 8940.06); // × 9860 = 8940.062
   assert.equal(amount({ dchdate: "2026-09-15", adjrw: "1.0000", out_prov: 0 }), 3505.14);
   assert.equal(amount({ dchdate: "2026-09-15", adjrw: "1.0000", out_prov: 1 }), 9600);
   assert.equal(amount({ dchdate: "2026-10-15", adjrw: "1.0000", pttype: "W1" }), 5100);
@@ -89,7 +89,7 @@ test("rateCase: SQL params follow placeholders, built from ADJRW_RATES/UC_HIPDAT
   const { rateCase } = await import("./admissions.ts");
   const { sql, params } = rateCase("OP");
   assert.equal(sql.split("?").length - 1, params.length);
-  assert.deepEqual(params, ["UCS", "WEL", "DIS", "2026-09-16", 9680, 5100, "2025-10-01", 9600, 3505.14]);
+  assert.deepEqual(params, ["UCS", "WEL", "DIS", "2026-09-16", 9860, 5100, "2025-10-01", 9600, 3505.14]);
   assert.equal(
     sql.replace(/\s+/g, " "),
     "CASE WHEN t.hipdata_code IN (?, ?, ?) THEN CASE WHEN i.dchdate >= ? THEN IF(OP, ?, ?) WHEN i.dchdate >= ? THEN IF(OP, ?, ?) END END",
