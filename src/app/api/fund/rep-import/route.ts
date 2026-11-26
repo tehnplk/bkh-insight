@@ -147,9 +147,6 @@ export async function POST(request: Request) {
   if (!info) return result({ ...base, status: "error", error: "ชื่อไฟล์ไม่ใช่ไฟล์ REP ของ e-Claim (eclaim_*.xls)" }, 400);
   const typed = { ...base, type: info.type };
   if (file.size > MAX_FILE_BYTES) return result({ ...typed, status: "error", error: "ไฟล์ใหญ่เกิน 30 MB" }, 400);
-  // shortcut: ORF มีรูปแบบต่างกัน (1 แถวต่อไฟล์) ยังไม่ได้เขียนตัวอ่าน ทำเมื่อต้องใช้ข้อมูล ORF
-  if (info.type === "ORF") return result({ ...typed, status: "unsupported", error: "ยังไม่รองรับ ORF" });
-
   const buf = new Uint8Array(await file.arrayBuffer());
   let parsed;
   try {

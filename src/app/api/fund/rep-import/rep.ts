@@ -55,15 +55,18 @@ export type RepSummary = {
   paid_total: number | null;
 };
 
-/** layout "uc" = REP ของ UC (IP/OP/OP_APPEAL_*), "other" = REP สิทธิอื่น (IP/OP × CS/LGO/BKK/BMT และ _APPEAL ของแต่ละตัว) */
-export type ParsedRep = { printedAt: string | null; layout: "uc" | "other"; rows: RepRow[]; summaries: RepSummary[] };
+/**
+ * layout "uc" = REP ของ UC (IP/OP/OP_APPEAL_*), "other" = REP สิทธิอื่น (IP/OP × CS/LGO/BKK/BMT และ _APPEAL ของแต่ละตัว),
+ * "orf" = REP OP Refer ของ UC (ORF: ผู้ป่วยนอกที่รับส่งต่อมารักษาที่โรงพยาบาลเรา)
+ */
+export type ParsedRep = { printedAt: string | null; layout: "uc" | "other" | "orf"; rows: RepRow[]; summaries: RepSummary[] };
 
 /**
  * rep_row.scheme: UC = UCS, สิทธิอื่นจาก TYPE ในชื่อไฟล์ตัด IP/OP นำหน้าและ _APPEAL* ท้าย (CS = OFC) เช่น IPLGO -> LGO, OPBMT_APPEAL -> BMT
  * (REP อุทธรณ์ทับแถว TRAN_ID เดิมในกองทุนเดียวกันเหมือน OP_APPEAL_* ของ UC ; scheme ผิดจะชน TRAN_ID ทั้งไฟล์)
  */
 export function schemeOf(type: string, layout: ParsedRep["layout"]): string {
-  if (layout === "uc") return "UCS";
+  if (layout !== "other") return "UCS";
   const s = type.replace(/^(IP|OP)/, "").replace(/_APPEAL\w*$/, "");
   return s === "CS" ? "OFC" : s;
 }
@@ -317,12 +320,87 @@ function parseDetailOther(ws: WorkSheet, sheet: string): RepRow[] {
   return rows;
 }
 
-function parseSummary(ws: WorkSheet, sheet: string, other = false): RepSummary[] {
+// REP OP Refer (ORF): หัวตาราง 4 ชั้น (แถว 6-9) ข้อมูลเริ่มแถว 10 ไม่มี AN ; ชั้นบน (แถว 6) เป็นกลุ่ม ชั้นที่ 3 (แถว 8) เป็นชื่อคอลัมน์
+const ORF_GROUP_KEYS: [number, string][] = [
+  [0, "ข้อมูลทั่วไป"], [21, "ยอดรวมค่าใช้จ่าย(เฉพาะเบิกได้) (1)"], [22, "เข้าเกณฑ์ central reimburse (2)"], [24, "ชำระเอง (3)"],
+  [26, "เข้าเกณฑ์ OP REFER"], [32, "ชดเชยสุทธิ (บาท) (10=8)"], [35, "รายละเอียดการจ่าย central reimburse"], [101, "Error Code"], [102, "Deny"],
+  [107, "Remark"], [109, "รูปแบบการจ่าย"], [110, "SEQ NO"], [111, "INVOICE NO"],
+];
+const ORF_KEYS: [number, string][] = [[0, "REP"], [2, "TRAN_ID"], [3, "HN"], [4, "PID"], [6, "ว/ด/ป ที่รับบริการ"], [7, "เลขที่ใบส่งต่อ"], [23, "จำนวนเงิน"], [61, "ชดเชยสุทธิ (บาท)"]];
+// ยอดรายกองทุนของ jsonb: OP REFER (26-28) ผู้รับผิดชอบ CUP/จังหวัด กับ สปสช. (30-31) และรายละเอียด central reimburse (35-60) ; 29/32/61 เป็นยอดรวม
+const ORF_FUND_COLS = [26, 27, 28, 30, 31, ...Array.from({ length: 26 }, (_, i) => 35 + i)];
+
+function parseDetailOrf(ws: WorkSheet, sheet: string): RepRow[] {
+  const aoa = toAoa(ws);
+  const merges = ws["!merges"];
+  const { top, label } = headerLabels(aoa, merges, 5, 8);
+  checkKeys(sheet, top, ORF_GROUP_KEYS);
+  checkKeys(sheet, headerLabels(aoa, merges, 7, 7).top, ORF_KEYS);
+  if (new Set(ORF_FUND_COLS.map((c) => label[c])).size !== ORF_FUND_COLS.length) throw new Error(`ชีต ${sheet} มีหัวคอลัมน์กองทุนซ้ำกัน`);
+  const rows: RepRow[] = [];
+  for (let r = 9; r < aoa.length; r++) {
+    const v = aoa[r];
+    const tranId = text(v?.[2]);
+    if (!tranId || !/^\d+$/.test(tranId)) continue;
+    const fund: Record<string, number> = {};
+    for (const c of ORF_FUND_COLS) {
+      const n = typeof v[c] === "number" ? (v[c] as number) : null;
+      if (n) fund[label[c]] = n;
+    }
+    const deny: Record<string, string> = {};
+    for (let c = 102; c <= 105; c++) {
+      const s = text(v[c]);
+      if (s) deny[label[c]] = s;
+    }
+    rows.push({
+      tran_id: tranId,
+      rep_no: text(v[0]) ?? "",
+      sheet,
+      patient_type: "OP",
+      hn: text(v[3]),
+      an: null,
+      pid: text(v[4]),
+      // SEQ NO ว่างในไฟล์จริง (พ.ย. 2569) ส่วน INVOICE NO = VN ของ HOSxP (ตรวจกับ ovst แล้ว vn/hn/วันรับบริการตรงทุกแถว)
+      seq_no: text(v[110]) ?? text(v[111]),
+      admit_at: dateTime(v[6]),
+      discharge_at: null,
+      net_nhso: num(v[32]),
+      net_affiliation: null,
+      claim_total: num(v[21]),
+      central_reimburse: num(v[23]),
+      self_pay: num(v[24]),
+      paid: null,
+      error_codes: list(v[101]),
+      main_fund: [],
+      sub_fund: [],
+      main_inscl: null,
+      sub_inscl: null,
+      // "10823 รพ.แหลมฉบัง" -> รหัส
+      hmain: /^\d{5}/.exec(text(v[13]) ?? "")?.[0] ?? null,
+      proj: null,
+      drg: null,
+      rw: null,
+      adjrw: null,
+      fund_amounts: fund,
+      deny: Object.keys(deny).length ? deny : null,
+      remark: text(v[107]),
+      pay_mode: text(v[109]),
+    });
+  }
+  if (rows.some((r) => !r.rep_no)) throw new Error(`ชีต ${sheet} มีแถวที่ไม่มี REP`);
+  return rows;
+}
+
+const ORF_SUMMARY_KEYS: [number, string][] = [[0, "งวด"], [2, "REP NO."], [3, "ข้อมูลปกติ"], [18, "จ่ายชดเชยทั้งสิ้น"], [50, "ข้อมูลปกติ OPREFER"]];
+
+function parseSummary(ws: WorkSheet, sheet: string, kind: ParsedRep["layout"] = "uc"): RepSummary[] {
   const aoa = toAoa(ws);
   const { top, label } = headerLabels(aoa, ws["!merges"], 1, 4);
-  checkKeys(sheet, top, other ? SUMMARY_KEYS.slice(0, 3) : SUMMARY_KEYS);
+  const other = kind === "other";
+  checkKeys(sheet, top, kind === "orf" ? ORF_SUMMARY_KEYS : other ? SUMMARY_KEYS.slice(0, 3) : SUMMARY_KEYS);
   // สิทธิอื่นไม่มี "จ่ายชดเชยทั้งสิ้น" ใช้ชดเชยสุทธิ ค่ารักษา + PP ของข้อมูลปกติ (CS/BKK/BMT คอลัมน์ 22-23, LGO 20-21)
-  const paidCols = other ? [label.indexOf("ชดเชยสุทธิ / ค่ารักษา"), label.indexOf("ชดเชยสุทธิ / PP (รับจาก สปสช.)")] : [20, 21];
+  // ORF ไม่มีจ่ายต้นสังกัด "จ่ายชดเชยทั้งสิ้น" อยู่คอลัมน์ 18 (ยอด OPREFER 50-54 เก็บใน amounts)
+  const paidCols = kind === "orf" ? [18] : other ? [label.indexOf("ชดเชยสุทธิ / ค่ารักษา"), label.indexOf("ชดเชยสุทธิ / PP (รับจาก สปสช.)")] : [20, 21];
   if (paidCols.includes(-1)) throw new Error(`รูปแบบชีต ${sheet} ไม่ตรงกับที่รองรับ (ไม่พบคอลัมน์ชดเชยสุทธิ)`);
   const out: RepSummary[] = [];
   for (let r = 5; r < aoa.length; r++) {
@@ -342,8 +420,8 @@ function parseSummary(ws: WorkSheet, sheet: string, other = false): RepSummary[]
       passed: int(v[4]),
       failed: int(v[5]),
       amounts,
-      paid_affiliation: other ? null : num(v[20]),
-      paid_total: other ? add(num(v[paidCols[0]]), num(v[paidCols[1]])) : num(v[21]),
+      paid_affiliation: kind === "uc" ? num(v[20]) : null,
+      paid_total: kind === "orf" ? num(v[18]) : other ? add(num(v[paidCols[0]]), num(v[paidCols[1]])) : num(v[21]),
     });
   }
   return out;
@@ -352,8 +430,8 @@ function parseSummary(ws: WorkSheet, sheet: string, other = false): RepSummary[]
 const SHEETS = ["Detail", "Summary", "Detail(ST)", "Summary(ST)"];
 
 /**
- * อ่านไฟล์ REP แบบ IP/OP/OP_APPEAL_* ของ UC หรือ REP สิทธิอื่น (เลือกจากหัวคอลัมน์แรก "REP No." / "REP")
- * ORF รูปแบบต่างกัน ผู้เรียกต้องกันไว้ก่อน แถวซ้ำ TRAN_ID เดียวกันในไฟล์เก็บแถวหลังสุด
+ * อ่านไฟล์ REP แบบ IP/OP/OP_APPEAL_* ของ UC, ORF ของ UC หรือ REP สิทธิอื่น (เลือกจาก A6 ของ Detail: "REP No." / "ข้อมูลทั่วไป" / "REP")
+ * แถวซ้ำ TRAN_ID เดียวกันในไฟล์เก็บแถวหลังสุด
  */
 export function parseRep(buf: Uint8Array): ParsedRep {
   let wb;
@@ -366,10 +444,11 @@ export function parseRep(buf: Uint8Array): ParsedRep {
   const rows = new Map<string, RepRow>();
   const summaries: RepSummary[] = [];
   // ชีต Data Drug / Data Instrument / Data sheet 0 ของสิทธิอื่นเป็นรายรายการ ยังไม่อ่าน (sheets ด้านบนไม่โหลด)
-  const layout = norm(wb.Sheets.Detail.A6?.v) === "REP" ? "other" : "uc";
-  if (layout === "other") {
-    for (const row of parseDetailOther(wb.Sheets.Detail, "Detail")) rows.set(row.tran_id, row);
-    summaries.push(...parseSummary(wb.Sheets.Summary, "Summary", true));
+  const a6 = norm(wb.Sheets.Detail.A6?.v);
+  const layout: ParsedRep["layout"] = a6 === "REP" ? "other" : a6 === "ข้อมูลทั่วไป" ? "orf" : "uc";
+  if (layout !== "uc") {
+    for (const row of (layout === "orf" ? parseDetailOrf : parseDetailOther)(wb.Sheets.Detail, "Detail")) rows.set(row.tran_id, row);
+    summaries.push(...parseSummary(wb.Sheets.Summary, "Summary", layout));
   } else {
     for (const [detail, summary] of [["Detail", "Summary"], ["Detail(ST)", "Summary(ST)"]]) {
       if (wb.Sheets[detail]) for (const row of parseDetail(wb.Sheets[detail], detail)) rows.set(row.tran_id, row);
