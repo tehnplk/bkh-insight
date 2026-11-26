@@ -16,7 +16,7 @@ registerHooks({
     }
   },
 });
-const { amount, parseStm, stmDateTime, StmUnsupportedError } = await import("./stm.ts");
+const { amount, csmbsScheme, parseHsub, parseStm, stmDateTime, StmUnsupportedError } = await import("./stm.ts");
 
 const top = (doc) => [[null], ["ออกรายงานวันที่ 06/11/2569 เวลา 08:57"], [], ["โรงพยาบาล 11252 รพ.ทดสอบ"], [], [], [`เลขที่เอกสาร ${doc}`], [], []];
 
@@ -176,6 +176,16 @@ test("OFC: REP blocks, odd date spacing, '-' AN, totals per REP", () => {
   assert.deepEqual(p.summaries.map((s) => [s.rep_no, s.cases, s.passed, s.failed, s.paid_total]), [["681200002", 2, 2, 0, 450.25], ["681200008", 1, 1, 0, 700]]);
 });
 
+test("csmbs scheme: REP in the file wins, then the sent scheme, else OFC; conflicts reject", () => {
+  assert.equal(csmbsScheme(null, []), "OFC");
+  assert.equal(csmbsScheme("BMT", []), "BMT"); // REP ของ BMT ยังไม่นำเข้า
+  assert.equal(csmbsScheme(null, ["BMT"]), "BMT"); // นำเข้าด้วยมือ ไฟล์ BMT หน้าตาเหมือน OFC
+  assert.equal(csmbsScheme("BMT", ["BMT"]), "BMT");
+  assert.equal(csmbsScheme(null, ["BKK"]), "BKK");
+  assert.throws(() => csmbsScheme("BMT", ["OFC"]), /REP ในไฟล์เป็นสิทธิ OFC ไม่ตรงกับ STM BMT/);
+  assert.throws(() => csmbsScheme(null, ["BKK", "OFC"]), /หลายสิทธิ/);
+});
+
 test("OFC: a REP whose detail and summary differ rejects the file", () => {
   assert.throws(() => parseStm(ofcBook({ rep2Paid: 699.99 })), /ยอดรวมไม่ตรงกัน \(REP 681200008\)/);
 });
@@ -185,4 +195,71 @@ test("other workbooks are unsupported or unreadable", () => {
   utils.book_append_sheet(wb, utils.aoa_to_sheet([["x"]]), "Detail");
   assert.throws(() => parseStm(write(wb, { type: "buffer", bookType: "xlsx" })), StmUnsupportedError);
   assert.throws(() => parseStm(new Uint8Array([1, 2, 3])), /อ่านไฟล์ไม่ได้|ไม่ใช่ไฟล์ STM/);
+});
+
+// ---------- Hsub (รายงานพึงจ่าย รพ.สต.) ----------
+
+function hsubHead() {
+  const h1 = Object.assign(Array(43).fill(null), {
+    0: "REP", 1: "ลำดับที่", 2: "TRAN_ID", 3: "HN", 4: "AN", 5: "PID", 6: "ชื่อ-นามสกุล", 7: "วันเข้ารักษา", 8: "วันจำหน่าย", 9: "MAININSCL",
+    10: "PROJCODE", 11: "หน่วยบริการ", 17: "เรียกเก็บ", 18: "กองทุน IP", 28: "จ่ายชดเชย", 42: "ยอดชดเชยทั้งสิ้น",
+  });
+  const h2 = Object.assign(Array(43).fill(null), {
+    11: "HTYPE_HCODE", 12: "PROV_HCODE", 13: "HCODE", 14: "HTYPE_HCODE_PAID", 15: "PROV_HCODE_PAID", 16: "HCODE_PAID", 18: "พรบ.", 19: "AdjRW",
+    27: "OP", 28: "IP", 30: "HC", 32: "AE", 34: "INST", 35: "DMIS", 38: "Palliative care", 39: "DMISHD", 40: "PP", 41: "FS",
+  });
+  const h3 = Object.assign(Array(43).fill(null), { 28: "ยอดชดเชยที่คำนวณได้", 29: "ยอดชดเชยที่จ่ายจริง", 30: "HC", 31: "DRUG", 32: "AE", 33: "DRUG" });
+  return [h1, h2, h3];
+}
+// คอลัมน์ 31 = HC_DRUG, 33 = AE_DRUG, 40 = PP, 41 = FS
+function hsubRow(rep, no, hcode, { drug = 0, ae = 0, pp = 0, fs = 0, paidBy = "11252" } = {}) {
+  const r = Object.assign(Array(43).fill(0), {
+    0: rep, 1: String(no), 2: String(800000000 + no), 3: "0000001", 4: null, 5: "0000000000001", 6: "ทดสอบ ทดสอบ", 7: "2026-08-05 09:43:00", 8: null,
+    9: "UCS", 10: null, 11: "0010", 12: "6500", 13: hcode, 14: "0010", 15: "6500", 16: paidBy, 21: "100%",
+  });
+  Object.assign(r, { 31: drug, 33: ae, 40: pp, 41: fs, 42: drug + ae + pp + fs });
+  return r;
+}
+const hsubTotal = (v) => Object.assign(Array(43).fill(null), { 42: v });
+
+function hsubBook({ total = 190.25, paidBy, rep2 = "691000002" } = {}) {
+  const aoa = [
+    ["   รายงานพึงจ่าย รพสต. ออกรายงานวันที่ 26/11/2026 09:39:19"], [], [], [], ["ข้อมูลปกติ"], [], ...hsubHead(),
+    hsubRow("691000001", 1, "07535", { drug: 60.25 }),
+    hsubRow("691000001", 2, "07535", { pp: 60 }),
+    hsubRow(rep2, 3, "07540", { fs: 50, ae: 20, paidBy }),
+    hsubRow("691000001", 4, "07540", {}),
+    ...(total === null ? [] : [hsubTotal(total)]), [], [],
+    ["ข้อมูลอุทธรณ์"], [], ...hsubHead(), [], [],
+  ];
+  const wb = utils.book_new();
+  utils.book_append_sheet(wb, utils.aoa_to_sheet(aoa), "รายงานพึงจ่าย");
+  return write(wb, { type: "buffer", bookType: "xlsx" });
+}
+
+test("Hsub: totals per (section, รพ.สต., REP) and per fund, month from REP, no patient data", () => {
+  const p = parseHsub(hsubBook());
+  assert.deepEqual([p.hcodePaid, p.periodMonth, p.printedAt, p.cases, p.netTotal], ["11252", "2026-10-01", "2026-11-26 09:39:19", 4, 190.25]);
+  assert.deepEqual(p.amounts, { HC_DRUG: 60.25, PP: 60, AE_DRUG: 20, FS: 50 });
+  assert.deepEqual(p.summaries, [
+    { section: "normal", hcode: "07535", rep_no: "691000001", cases: 2, amounts: { HC_DRUG: 60.25, PP: 60 }, net: 120.25 },
+    { section: "normal", hcode: "07540", rep_no: "691000002", cases: 1, amounts: { AE_DRUG: 20, FS: 50 }, net: 70 },
+    { section: "normal", hcode: "07540", rep_no: "691000001", cases: 1, amounts: {}, net: 0 },
+  ]);
+  assert.equal(JSON.stringify(p).includes("ทดสอบ"), false);
+});
+
+test("Hsub: raw e-Claim file has no total row, totals come from the rows", () => {
+  const p = parseHsub(hsubBook({ total: null }));
+  assert.deepEqual([p.cases, p.netTotal], [4, 190.25]);
+  assert.deepEqual(p.amounts, { HC_DRUG: 60.25, PP: 60, AE_DRUG: 20, FS: 50 });
+});
+
+test("Hsub: rejects a wrong total row, mixed HCODE_PAID, a bad REP month and non-Hsub files", () => {
+  assert.throws(() => parseHsub(hsubBook({ total: 190.24 })), /ยอดรวมไม่ตรงกัน \(normal\)/);
+  assert.throws(() => parseHsub(hsubBook({ paidBy: "11253" })), /HCODE_PAID/);
+  assert.throws(() => parseHsub(hsubBook({ rep2: "691300002" })), /ระบุเดือนไม่ได้/);
+  // REP ค้างของเดือนก่อนในข้อมูลปกติ: เดือน = REP ล่าสุด (เหมือน STM 6910_OP_01 ที่มี REP 6909…)
+  assert.equal(parseHsub(hsubBook({ rep2: "690900002" })).periodMonth, "2026-10-01");
+  assert.throws(() => parseHsub(ucBook()), StmUnsupportedError);
 });

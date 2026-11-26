@@ -2,7 +2,7 @@ import "server-only";
 import { insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
 import { fiscalYearOf, parseFiscalYear } from "../uc-dashboard/dashboard";
-import { PRIOR_YEAR_ACCOUNT, keyBudgetYear } from "./transfer";
+import { PRIOR_YEAR_ACCOUNT, keyBudgetYear, type FundSide } from "./transfer";
 
 export type TransferStatus = "active" | "cancelled";
 export type TransferRow = {
@@ -30,16 +30,17 @@ export type TransferRow = {
   cancelled_at: string | null;
   cancel_reason: string | null;
 };
-export type FundMapRow = { fund_key: string; fund_name: string | null; smt_account_name: string | null; account_code: string | null; ignore: boolean; updated_by: string | null };
+export type FundMapRow = { fund_key: string; side: FundSide; fund_name: string | null; smt_account_name: string | null; account_code: string | null; ignore: boolean; updated_by: string | null };
 export type AccountOption = { code: string; name: string };
 
 const ROWS_SQL = `SELECT id::text AS id, source, smt_key, transfer_date, ref_doc_no, fund_key, fund_name, account_code, amount, smt_amount, note,
   created_by, to_char(created_at, 'YYYY-MM-DD HH24:MI') AS created_at, updated_by, to_char(updated_at, 'YYYY-MM-DD HH24:MI') AS updated_at,
   cancelled_by, to_char(cancelled_at, 'YYYY-MM-DD HH24:MI') AS cancelled_at, cancel_reason
 FROM ar_transfer WHERE transfer_date BETWEEN $1 AND $2`;
-// ยังไม่จับคู่ขึ้นก่อน แล้วที่จับคู่แล้ว ที่ไม่ใช้ไว้ท้าย
-const FUNDS_SQL = `SELECT fund_key, fund_name, smt_account_name, account_code, ignore, updated_by
-FROM ar_transfer_fund_map ORDER BY (account_code IS NULL AND NOT ignore) DESC, ignore, fund_key`;
+// เรียงตามแถว ALL ของกองทุน: ยังไม่จับคู่ขึ้นก่อน แล้วที่จับคู่แล้ว ที่ไม่ใช้ไว้ท้าย ; แถว OP/IP ต่อท้าย ALL ของกองทุนเดียวกัน
+const FUNDS_SQL = `SELECT m.fund_key, m.side, m.fund_name, m.smt_account_name, m.account_code, m.ignore, m.updated_by
+FROM ar_transfer_fund_map m JOIN ar_transfer_fund_map a ON a.fund_key = m.fund_key AND a.side = 'ALL'
+ORDER BY (a.account_code IS NULL AND NOT a.ignore) DESC, a.ignore, m.fund_key, m.side <> 'ALL', m.side = 'IP'`;
 type DbRow = Omit<TransferRow, "amount" | "smt_amount" | "edited" | "status" | "account_name" | "budget_year"> & { smt_key: string | null; amount: string; smt_amount: string | null };
 
 /** ?fy= (ไม่ส่ง = ปีงบปัจจุบัน) ; null = ไม่ถูกต้อง */

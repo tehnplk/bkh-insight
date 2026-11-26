@@ -1,11 +1,11 @@
 // รัน: node --test src/app/api/fund/smt-reconcile/reconcile.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { periodKey, reconcile, smtDate, stmKey, summarize, toLine } from "./reconcile.ts";
+import { hsubMissing, periodKey, reconcile, smtDate, stmKey, summarize, toLine } from "./reconcile.ts";
 
 const smt = (refDocNo, total, extra = {}) =>
   toLine({ postingDate: "25681223", batchNo: "0190A", refDocNo, fundDescr: "กองทุนผู้ป่วยใน", efundDesc: null, mophId: "1102050101.202", amount: total, wait: 0, debt: 0, total, pmntStts: "P", ...extra });
-const stm = (doc_no, period_month, patient_type, run_no, net_total) => ({ doc_no, patient_type, period_month, run_no, transfer_date: "2026-10-02", net_total });
+const stm = (doc_no, period_month, patient_type, run_no, net_total, hsub_total = null) => ({ doc_no, patient_type, period_month, run_no, transfer_date: "2026-10-02", net_total, hsub_total });
 
 test("periodKey: ต้น refDocNo ที่เป็นงวด STM รวมรูปแบบอุทธรณ์/ยกเลิก Rerun/D1 ; ที่ไม่อ้างงวดคืน null", () => {
   assert.equal(periodKey("6810_IP_01"), "6810_IP_01");
@@ -33,11 +33,11 @@ test("reconcile: รวม total ต่อ key แบบสตางค์ จ�
     [stm("11252_IPUCS256810_01", "2025-10-01", "IP", 1, "5858606.18"), stm("11252_OPUCS256810_01", "2025-10-01", "OP", 1, "0.30"), stm("11252_OPUCS256909_02", "2026-09-01", "OP", 2, "100.00"), stm("x", "2025-09-01", "OP", 1, "1")],
     2569,
   );
-  assert.deepEqual(rows.map((r) => [r.key, r.status, r.smt_total, r.stm_total, r.diff]), [
-    ["6810_IP_01", "match", 5858606.18, 5858606.18, 0],
-    ["6810_OP_01", "match", 0.3, 0.3, 0], // 0.1 + 0.2 ไม่มี float error ; รอโอนไม่นับ
-    ["6909_IP_03", "smt_only", 0, null, null],
-    ["6909_OP_02", "stm_only", null, 100, null],
+  assert.deepEqual(rows.map((r) => [r.key, r.status, r.smt_total, r.stm_total, r.hsub_total, r.diff]), [
+    ["6810_IP_01", "match", 5858606.18, 5858606.18, null, 0],
+    ["6810_OP_01", "match", 0.3, 0.3, null, 0], // 0.1 + 0.2 ไม่มี float error ; รอโอนไม่นับ
+    ["6909_IP_03", "smt_only", 0, null, null, null],
+    ["6909_OP_02", "stm_only", null, 100, null, null],
   ]);
   const op = rows[1];
   assert.equal(op.smt_date, "2025-12-24");
@@ -55,4 +55,15 @@ test("reconcile: ส่วนต่าง = SMT − STM และ summarize น�
   const s = summarize(rows);
   assert.deepEqual(s.count, { match: 0, diff: 1, smt_only: 0, stm_only: 0 });
   assert.equal(s.diff, -8360.46);
+});
+
+test("reconcile: ยอด Hsub (รพ.สต.) นับเข้าฝั่ง STM ; ยังไม่นำเข้า = ต่างเท่ายอด รพ.สต.", () => {
+  // 6910_OP_01 จริง: SMT 196,268.75 = STM 177,600.75 + Hsub 18,668.00
+  const lines = [smt("6910_OP_01", 196268.75, { postingDate: "25691120" })];
+  const [ok] = reconcile(lines, [stm("11252_OPUCS256910_01", "2026-10-01", "OP", 1, "177600.75", "18668.00")], 2570);
+  assert.deepEqual([ok.status, ok.stm_total, ok.hsub_total, ok.diff], ["match", 177600.75, 18668, 0]);
+  const [miss] = reconcile(lines, [stm("11252_OPUCS256910_01", "2026-10-01", "OP", 1, "177600.75")], 2570);
+  assert.deepEqual([miss.status, miss.hsub_total, miss.diff], ["diff", null, 18668]);
+  assert.deepEqual([hsubMissing(ok), hsubMissing(miss), hsubMissing({ ...miss, patient_type: "IP" }), hsubMissing({ ...miss, stm_doc: null })], [false, true, false, false]);
+  assert.deepEqual(summarize([ok, miss]), { count: { match: 1, diff: 1, smt_only: 0, stm_only: 0 }, smt_total: 392537.5, stm_total: 355201.5, hsub_total: 18668, diff: 18668 });
 });

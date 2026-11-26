@@ -7,7 +7,7 @@ import { xlsxResponse } from "@/lib/xlsx";
 import { badRequest, isAuthed, unauthorized } from "../_lib/fund";
 import { fiscalYearOf, parseFiscalYear } from "../uc-dashboard/dashboard";
 import {
-  STATUS_LABEL, reconcile, summarize, toLine,
+  STATUS_LABEL, hsubMissing, reconcile, summarize, toLine,
   type ReconcileRow, type ReconcileStatus, type ReconcileSummary, type SmtApiRow, type SmtLine, type StmFileInput,
 } from "./reconcile";
 
@@ -21,7 +21,7 @@ const SMT_TIMEOUT_MS = 20_000;
 const REFRESH_MIN_AGE_MS = 30_000;
 const smtTag = (fy: number) => `smt-reconcile:${fy}`;
 
-const SORTABLE = ["key", "period_month", "patient_type", "smt_date", "smt_total", "stm_doc", "stm_total", "diff", "status"] as const;
+const SORTABLE = ["key", "period_month", "patient_type", "smt_date", "smt_total", "stm_doc", "stm_total", "hsub_total", "diff", "status"] as const;
 const FILTER_GET = {
   key: (r) => r.key,
   period_month: (r) => r.period_month,
@@ -73,10 +73,12 @@ function parseFy(params: URLSearchParams, today: string) {
   return params.get("fy") ? parseFiscalYear(params.get("fy")!, currentFy) : currentFy;
 }
 
-const STM_SQL = `SELECT doc_no, patient_type, period_month, run_no, transfer_date, net_total
-FROM stm_file
-WHERE scheme = 'UCS' AND period_month BETWEEN $1 AND $2
-ORDER BY period_month, patient_type, run_no`;
+// $1, $2 = เดือนบริการแรก/สุดท้ายของปีงบ ; hsub_total = รายงานพึงจ่าย รพ.สต. ที่แนบกับไฟล์ (ไม่มี = null)
+const STM_SQL = `SELECT f.doc_no, f.patient_type, f.period_month, f.run_no, f.transfer_date, f.net_total, h.net_total AS hsub_total
+FROM stm_file f
+LEFT JOIN stm_hsub_file h ON h.stm_file_id = f.id
+WHERE f.scheme = 'UCS' AND f.period_month BETWEEN $1 AND $2
+ORDER BY f.period_month, f.patient_type, f.run_no`;
 
 function sortRows(rows: ReconcileRow[], sort: (typeof SORTABLE)[number], dir: "asc" | "desc") {
   const sign = dir === "desc" ? -1 : 1;
@@ -130,10 +132,11 @@ export async function GET(request: NextRequest) {
         { key: "smt_total", header: "ยอดโอน SMT (บาท)", width: 16, type: "money" },
         { key: "stm_doc", header: "เลขที่ STM", width: 24 },
         { key: "stm_total", header: "ยอดโอนสุทธิ STM (บาท)", width: 16, type: "money" },
-        { key: "diff", header: "ส่วนต่าง SMT − STM (บาท)", width: 16, type: "money" },
-        { key: "status_label", header: "สถานะ", width: 12 },
+        { key: "hsub_total", header: "รพ.สต. Hsub (บาท)", width: 14, type: "money" },
+        { key: "diff", header: "ส่วนต่าง SMT − (STM + Hsub) (บาท)", width: 18, type: "money" },
+        { key: "status_label", header: "สถานะ", width: 24 },
       ],
-      rows.map((r) => ({ ...r, status_label: STATUS_LABEL[r.status] })),
+      rows.map((r) => ({ ...r, status_label: `${STATUS_LABEL[r.status]}${hsubMissing(r) ? " (ยังไม่นำเข้า Hsub)" : ""}` })),
     );
   }
   const body: SmtReconcilePage = {

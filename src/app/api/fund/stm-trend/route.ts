@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import { insightQuery } from "@/lib/db";
 import { todayIso } from "@/lib/thai-date";
-import { badRequest, isAuthed, unauthorized } from "../_lib/fund";
+import { xlsxResponse, type XlsxColumn } from "@/lib/xlsx";
+import { FUNDS, periodLabel } from "@/app/(app)/fund/stm-import/labels";
+import { badRequest, isAuthed, round2, unauthorized } from "../_lib/fund";
 import { fiscalYearOf, parseFiscalYear } from "../uc-dashboard/dashboard";
-import type { FundRow, MetricRow, StmTrendResponse } from "./trend";
+import { GROUPS, OTHER_FUND, fiscalMonths, fundTable, type FundRow, type MetricRow, type StmTrendResponse } from "./trend";
 
 // ข้อมูลเล็ก (~40 ms ทั้งสอง query) จึงไม่ cache
 
@@ -79,6 +81,10 @@ export async function GET(request: NextRequest) {
   const fy = raw ? parseFiscalYear(raw, currentFy) : currentFy;
   if (fy === null) return badRequest("fy ไม่ถูกต้อง");
 
+  const format = request.nextUrl.searchParams.get("format");
+  const group = GROUPS.find((g) => g.key === request.nextUrl.searchParams.get("group"));
+  if (format === "xlsx" && !group) return badRequest("group ไม่ถูกต้อง");
+
   const params = [`${fy - 544}-10-01`, `${fy - 543}-09-01`];
   const [funds, months] = await Promise.all([
     insightQuery<Raw<FundRow>>(FUNDS_SQL, params),
@@ -89,5 +95,31 @@ export async function GET(request: NextRequest) {
     funds: funds.map((r) => ({ ...r, amount: Number(r.amount) })),
     months: months.map((r) => ({ ...r, ...Object.fromEntries(NUM_KEYS.map((k) => [k, n(r[k])])) }) as MetricRow),
   };
+  if (format === "xlsx") return fundTableXlsx(body, group!);
   return Response.json(body);
+}
+
+type XlsxRow = Record<string, string | number | null>;
+
+/** ตารางสรุปรายกองทุนของกลุ่ม ชุดเดียวกับหน้า (fundTable) ; เดือนที่ไม่มีไฟล์ = ช่องว่าง */
+function fundTableXlsx(body: StmTrendResponse, group: (typeof GROUPS)[number]) {
+  const months = fiscalMonths(body.fy);
+  const t = fundTable(body, group, months);
+  const columns: XlsxColumn<XlsxRow>[] = [
+    { key: "fund", header: "กองทุน", width: 24 },
+    ...months.map((m, i) => ({ key: `m${i}`, header: `${periodLabel(`${m}-01`)} (บาท)`, type: "money" as const })),
+    { key: "total", header: "รวมปีงบ (บาท)", width: 18, type: "money" },
+    { key: "share", header: "สัดส่วน (%)", width: 12 },
+  ];
+  const line = (fund: string, values: (number | null)[], total: number, share: number | null): XlsxRow => ({
+    fund,
+    ...Object.fromEntries(values.map((v, i) => [`m${i}`, v === null ? null : round2(v)])),
+    total: round2(total),
+    share: share === null ? null : Math.round(share * 1000) / 10,
+  });
+  const rows = [
+    ...t.funds.map((f) => line(f.key === OTHER_FUND ? "อื่นๆ" : (FUNDS[f.key] ?? f.key), f.values, f.total, f.share)),
+    line("รวม", t.total.values, t.total.total, t.total.total ? 1 : null),
+  ];
+  return xlsxResponse(`stm-trend-${body.fy}-${group.key}.xlsx`, columns, rows);
 }

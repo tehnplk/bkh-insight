@@ -6,7 +6,7 @@ import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-qu
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse } from "@/lib/xlsx";
-import { MAX_FILE_BYTES, parseStm, StmUnsupportedError, type ParsedStm, type StmRow } from "./stm";
+import { CSMBS_SCHEMES, csmbsScheme, MAX_FILE_BYTES, parseStm, StmUnsupportedError, type ParsedStm, type StmRow } from "./stm";
 
 /** แถวของรายการไฟล์ (GET) */
 export type StmFileRow = {
@@ -22,6 +22,8 @@ export type StmFileRow = {
   paid_total: string; // numeric มาเป็น string
   deduction: string;
   net_total: string;
+  /** UC OP มีรายงานพึงจ่าย รพ.สต. (stm_hsub_file) แล้ว */
+  has_hsub: boolean;
   imported_by: string | null;
   imported_at: string;
 };
@@ -43,7 +45,7 @@ const SORTABLE = [
 // $1 = คำค้น (null หรือ LIKE pattern)
 const WHERE = `WHERE ($1::text IS NULL OR doc_no ILIKE $1 OR file_name ILIKE $1 OR scheme ILIKE $1)`;
 const LIST_COLUMNS = `SELECT id, period_month, run_no, scheme, patient_type, doc_no, file_name, transfer_date, row_count,
-  paid_total, deduction, net_total, imported_by, imported_at
+  paid_total, deduction, net_total, EXISTS (SELECT 1 FROM stm_hsub_file h WHERE h.stm_file_id = stm_file.id) AS has_hsub, imported_by, imported_at
 FROM stm_file`;
 // ตัวกรองหัวคอลัมน์ (allowlist) ยกเว้นยอดเงิน
 const FILTER_DEFS: ColumnFilterDefs = {
@@ -115,6 +117,8 @@ const INSERT_SUMMARY = `INSERT INTO stm_summary (stm_file_id, section, rep_no, p
 SELECT $2, section, rep_no, period_label, cases, passed, failed, claim_total, amounts, paid_total, source
 FROM jsonb_to_recordset($1::jsonb) AS x(section text, rep_no varchar, period_label text, cases int, passed int, failed int,
   claim_total numeric, amounts jsonb, paid_total numeric, source text)`;
+// สิทธิของ REP ในไฟล์ STM แบบ csmbs ($1 = rep_no[] ไม่ว่าง) เลข REP ไม่ซ้ำข้ามสิทธิ (ตรวจกับฐานจริง 26 พ.ย. 2569) ใช้ rep_row_rep_no_idx
+const REP_SCHEME_SQL = `SELECT DISTINCT scheme FROM rep_row WHERE rep_no = ANY($1::text[]) AND scheme <> 'UCS' ORDER BY scheme`;
 // ส่งเป็น JSON ทีละก้อน ให้ parameter ไม่ใหญ่เกินไป
 const CHUNK = 2000;
 
@@ -142,10 +146,15 @@ export async function POST(request: Request) {
   const file = form.get("file");
   if (!(file instanceof File)) return result({ file: "", docNo: null, status: "error", rows: 0, netTotal: null, error: "ไม่พบไฟล์" }, 400);
   const base = { file: file.name, docNo: null, rows: 0, netTotal: null };
-  // ไม่ส่ง transfer_date = ใช้ "ออกรายงานวันที่" ในไฟล์ (นำเข้าอัตโนมัติจาก e-Claim ส่ง STM OFC แบบนี้ extension/eclaim-sync/lib/sync.js เพราะรายการ OFC บน e-Claim ไม่มีวันที่ออก)
+  // ไม่ส่ง transfer_date = ใช้ "ออกรายงานวันที่" ในไฟล์ (นำเข้าอัตโนมัติจาก e-Claim ส่ง STM OFC/BMT แบบนี้ extension/eclaim-sync/lib/sync.js เพราะรายการบน e-Claim ไม่มีวันที่ออก)
   const sentDate = form.get("transfer_date");
   const badDate = "วันที่ออก STM ไม่ถูกต้อง";
   if (sentDate !== null && !validTransferDate(sentDate)) return result({ ...base, status: "error", error: badDate }, 400);
+  // สิทธิของ STM แบบ csmbs (นำเข้าอัตโนมัติส่ง BMT) ไม่ส่ง = ตาม REP ในไฟล์ หรือ OFC (csmbsScheme)
+  const sentScheme = form.get("scheme");
+  if (sentScheme !== null && (typeof sentScheme !== "string" || !CSMBS_SCHEMES.includes(sentScheme))) {
+    return result({ ...base, status: "error", error: "สิทธิของ STM ไม่ถูกต้อง" }, 400);
+  }
   if (!/\.xls$/i.test(file.name)) return result({ ...base, status: "unsupported", error: "ไม่ใช่ไฟล์ .xls" });
   if (file.size > MAX_FILE_BYTES) return result({ ...base, status: "error", error: "ไฟล์ใหญ่เกิน 30 MB" }, 400);
 
@@ -160,6 +169,16 @@ export async function POST(request: Request) {
   const done = { ...base, docNo: p.docNo, netTotal: p.netTotal };
   const transferDate = sentDate ?? p.printedAt?.slice(0, 10) ?? null;
   if (!validTransferDate(transferDate)) return result({ ...done, status: "error", error: sentDate === null ? "ไม่พบวันที่ออก STM ในไฟล์ ต้องระบุวันที่ออก STM" : badDate }, 400);
+  let scheme: string = p.scheme;
+  if (p.layout === "uc" && sentScheme !== null) return result({ ...done, status: "error", error: `ไฟล์นี้เป็น STM UC ไม่ใช่ ${sentScheme}` }, 400);
+  if (p.layout === "csmbs") {
+    const reps = await insightQuery<{ scheme: string }>(REP_SCHEME_SQL, [[...new Set(p.rows.map((r) => r.rep_no))]]);
+    try {
+      scheme = csmbsScheme(sentScheme, reps.map((r) => r.scheme));
+    } catch (e) {
+      return result({ ...done, status: "error", error: (e as Error).message }, 400);
+    }
+  }
   const sha = createHash("sha256").update(buf).digest("hex");
 
   try {
@@ -169,7 +188,7 @@ export async function POST(request: Request) {
         `INSERT INTO stm_file (file_name, file_sha256, doc_no, hcode, scheme, layout, patient_type, period_month, run_no, printed_at,
   transfer_date, paid_total, deduction, net_total, row_count, imported_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT DO NOTHING RETURNING id`,
-        [file.name, sha, p.docNo, p.hcode, p.scheme, p.layout, p.patientType, p.periodMonth, p.runNo, p.printedAt,
+        [file.name, sha, p.docNo, p.hcode, scheme, p.layout, p.patientType, p.periodMonth, p.runNo, p.printedAt,
           transferDate, p.paidTotal, p.deduction, p.netTotal, p.rows.length, session.user.name ?? null],
       );
       if (!row) return false;

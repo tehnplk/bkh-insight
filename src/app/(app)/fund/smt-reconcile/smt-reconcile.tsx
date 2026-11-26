@@ -7,7 +7,7 @@ import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate, todayIso } from "@/lib/thai-date";
 import { FY_BACK, fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import type { SmtReconcilePage } from "@/app/api/fund/smt-reconcile/route";
-import { RECONCILE_STATUSES, STATUS_LABEL, type ReconcileRow, type ReconcileStatus } from "@/app/api/fund/smt-reconcile/reconcile";
+import { RECONCILE_STATUSES, STATUS_LABEL, hsubMissing, type ReconcileRow, type ReconcileStatus } from "@/app/api/fund/smt-reconcile/reconcile";
 import { Money, btn, focusRing, num, useUrlParams } from "../_components/ui";
 import { Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 import { periodLabel } from "../stm-import/labels";
@@ -27,6 +27,14 @@ const Status = ({ status }: { status: ReconcileStatus }) => (
   <span className={`rounded border px-1.5 py-0.5 whitespace-nowrap ${CHIP[status]}`}>{STATUS_LABEL[status]}</span>
 );
 
+/** ยอด รพ.สต. ; STM UC OP ที่ยังไม่แนบ Hsub แสดงป้ายแทน เพราะส่วนต่างของแถวนั้นยังรวมยอด รพ.สต. */
+const Hsub = ({ row }: { row: ReconcileRow }) =>
+  hsubMissing(row) ? (
+    <span className="rounded border border-warning-line bg-warning-soft px-1.5 py-0.5 whitespace-nowrap text-warning">ยังไม่นำเข้า Hsub</span>
+  ) : (
+    <Money value={row.hsub_total} />
+  );
+
 const col = gridColumnHelper<ReconcileRow>();
 const COLUMNS = col.columns([
   col.accessor("key", { header: "งวด", meta: { className: "whitespace-nowrap tabular-nums", filter: true } }),
@@ -41,6 +49,7 @@ const COLUMNS = col.columns([
   col.accessor("smt_total", { header: "ยอดโอน SMT (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } }),
   col.accessor("stm_doc", { header: "เลขที่ STM", cell: (c) => c.getValue() || dash, meta: { className: "whitespace-nowrap", filter: true } }),
   col.accessor("stm_total", { header: "ยอดโอนสุทธิ STM (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: num } }),
+  col.accessor("hsub_total", { header: "รพ.สต. Hsub (บาท)", cell: (c) => <Hsub row={c.row.original} />, meta: { className: num } }),
   col.accessor("diff", { header: "ส่วนต่าง (บาท)", cell: (c) => <Money value={c.getValue()} />, meta: { className: `${num} font-semibold` } }),
   col.accessor("status", {
     header: "สถานะ",
@@ -55,6 +64,7 @@ function Detail({ row }: { row: ReconcileRow }) {
       <Facts>
         <Fact label="ยอดโอน SMT (บาท)"><span className="font-semibold"><Money value={row.smt_total} /></span></Fact>
         <Fact label="ยอดโอนสุทธิ STM (บาท)"><span className="font-semibold"><Money value={row.stm_total} /></span></Fact>
+        <Fact label="รพ.สต. Hsub (บาท)"><Hsub row={row} /></Fact>
         <Fact label="ส่วนต่าง (บาท)"><span className="font-semibold"><Money value={row.diff} /></span></Fact>
         <Fact label="สถานะ"><Status status={row.status} /></Fact>
         <Fact label="เลขที่ STM">{row.stm_doc ?? dash}</Fact>
@@ -167,6 +177,7 @@ const renderSummary = ({ summary: s, smt_error, smt_fetched_at }: SmtReconcilePa
     <p className="text-muted tabular-nums">
       ยอดโอน SMT <Value>{formatBaht(s.smt_total)}</Value> บาท{dot}
       ยอดโอนสุทธิ STM <Value>{formatBaht(s.stm_total)}</Value> บาท{dot}
+      รพ.สต. Hsub <Value>{formatBaht(s.hsub_total)}</Value> บาท{dot}
       ส่วนต่าง <Value>{formatBaht(s.diff)}</Value> บาท
       <span className="mx-2 text-line" aria-hidden="true">|</span>
       {RECONCILE_STATUSES.map((k, i) => (

@@ -19,6 +19,8 @@ export type SmtTransferRow = {
   pmntStts: string; // P = โอนแล้ว, W = รอโอน
 };
 
+/** ฝั่งของ mapping: ALL = ทั้งกองทุน ; OP/IP = แถว SMT ฝั่งนั้น (ar_transfer_fund_map.side) */
+export type FundSide = "ALL" | "OP" | "IP";
 export type FundMapEntry = { account_code: string | null; ignore: boolean };
 /** แถว ar_transfer เดิมของ smt_key (edited = updated_by ไม่ NULL) */
 export type ExistingTransfer = { amount: string | number; account_code: string; edited: boolean; cancelled: boolean };
@@ -26,7 +28,7 @@ export type ExistingTransfer = { amount: string | number; account_code: string; 
 export type TransferInsert = {
   smt_key: string; transfer_date: string; ref_doc_no: string | null; fund_key: string; fund_name: string; account_code: string; amount: number;
 };
-export type NewFund = { fund_key: string; fund_name: string; smt_account_name: string | null };
+export type NewFund = { fund_key: string; side: FundSide; fund_name: string; smt_account_name: string | null };
 export type UnmappedFund = { fund_key: string; fund_name: string; n: number; total: number };
 export type ImportCounts = {
   /** เพิ่มใหม่ */ new: number;
@@ -76,25 +78,46 @@ export const PRIOR_YEAR_ACCOUNT = { code: "3102010102.201", name: "กำไร/
 
 export const fundName = (r: Pick<SmtTransferRow, "efundDesc" | "fundDescr">) => trim(r.efundDesc) || trim(r.fundDescr);
 
+/** ฝั่งของแถว SMT จากเลขงวด REP/STM ต้น refDocNo ("6909_IP_02", "6909_OP_01_อุทธรณ์") ; null = ไม่ระบุ (DDSA..., OP REFER..., งบจัดสรร) */
+export const rowSide = (r: Pick<SmtTransferRow, "refDocNo">): "OP" | "IP" | null => (/^\d{4}_(OP|IP)_/.exec(trim(r.refDocNo))?.[1] as "OP" | "IP" | undefined) ?? null;
+
+/** คีย์ของ Map mapping ต่อ (fund_key, side) */
+export const mapKey = (fundKey: string, side: FundSide) => `${fundKey}#${side}`;
+
+/** mapping ของแถว: ของฝั่ง OP/IP ที่ตั้งแล้ว (มีบัญชีหรือไม่ใช้) ก่อน ไม่งั้นของทั้งกองทุน ; undefined = กองทุนที่ไม่เคยเห็น */
+export function findMapping(map: Map<string, FundMapEntry>, fk: string, side: "OP" | "IP" | null): FundMapEntry | undefined {
+  const s = side ? map.get(mapKey(fk, side)) : undefined;
+  return s && (s.account_code || s.ignore) ? s : map.get(mapKey(fk, "ALL"));
+}
+
 /**
  * แผนนำเข้า: ข้ามรอโอน ยอด 0 และกองทุนที่ยังไม่จับคู่/ไม่ใช้ (กองทุนที่ไม่เคยเห็นได้แถว mapping ว่างใน newFunds)
+ * map คีย์ด้วย mapKey ; กองทุนที่มีทั้งแถว OP และ IP ได้แถว mapping ว่างของ OP/IP เพิ่ม ให้ admin แยกบัญชีได้ (ว่าง = ใช้ตาม ALL)
  * งบปีก่อนวันโอนลง PRIOR_YEAR_ACCOUNT ; แถวเดิมที่การเงินแก้หรือยกเลิกไม่แตะ ; closedThrough = เดือนล่าสุดที่ปิดงวด YYYY-MM (null = ไม่มี)
  */
 export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>, closedThrough: string | null): ImportPlan {
   const counts: ImportCounts = { new: 0, updated: 0, unchanged: 0, kept: 0, unmapped: 0, ignored: 0, pending: 0, closed: 0 };
   const plan: ImportPlan = { inserts: [], updates: [], newFunds: [], unmapped: [], counts };
   const unmapped = new Map<string, UnmappedFund>();
+  const sides = new Map<string, { op: boolean; ip: boolean; r: SmtTransferRow }>();
   for (const r of rows) {
+    const side = rowSide(r);
+    if (side) {
+      const s = sides.get(fundKey(r)) ?? { op: false, ip: false, r };
+      if (side === "OP") s.op = true;
+      else s.ip = true;
+      sides.set(fundKey(r), s);
+    }
     if (r.pmntStts !== "P") {
       counts.pending++;
       continue;
     }
     if (!cents(r.total)) continue;
     const fk = fundKey(r);
-    const m = map.get(fk);
+    const m = findMapping(map, fk, rowSide(r));
     if (!m) {
-      plan.newFunds.push({ fund_key: fk, fund_name: fundName(r), smt_account_name: trim(r.mophDesc) || null });
-      map.set(fk, { account_code: null, ignore: false }); // กองทุนเดียวกันแถวถัดไปไม่เพิ่มซ้ำ
+      plan.newFunds.push({ fund_key: fk, side: "ALL", fund_name: fundName(r), smt_account_name: trim(r.mophDesc) || null });
+      map.set(mapKey(fk, "ALL"), { account_code: null, ignore: false }); // กองทุนเดียวกันแถวถัดไปไม่เพิ่มซ้ำ
     }
     const mapped = m?.account_code ?? null;
     if (m?.ignore) {
@@ -126,8 +149,78 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
       counts.new++;
     }
   }
+  for (const [fk, s] of sides) {
+    if (!s.op || !s.ip) continue;
+    for (const side of ["OP", "IP"] as const) {
+      if (!map.has(mapKey(fk, side))) plan.newFunds.push({ fund_key: fk, side, fund_name: fundName(s.r), smt_account_name: trim(s.r.mophDesc) || null });
+    }
+  }
   plan.unmapped = [...unmapped.values()].sort((a, b) => a.fund_key.localeCompare(b.fund_key));
   return plan;
+}
+
+/* ---------- รายละเอียดกองทุน (modal ในตาราง "กองทุนใน SMT") ---------- */
+
+/** field เพิ่มของแถว SMT ที่แสดงในรายละเอียด (ไม่มีข้อมูลบุคคล) */
+export type SmtDetailRow = SmtTransferRow & { fundGroupDescr?: string | null; amount?: number; wait?: number; debt?: number; countRecord?: number };
+export type FundLine = {
+  date: string; ref_doc_no: string | null; batch_no: string; mou_grp_code: string; budget_year: number | null;
+  group: string | null; fund: string; account: string | null; account_name: string | null;
+  amount: number; wait: number; debt: number; total: number; status: string; paid: boolean; count: number | null;
+  /** งบปีก่อนวันโอน: นำเข้าแล้วลง PRIOR_YEAR_ACCOUNT แทนบัญชีที่จับคู่ */
+  prior_year: boolean;
+  side: "OP" | "IP" | null;
+};
+export type FundYear = { budget_year: number | null; n: number; total: number };
+export type FundSideTotal = { side: "OP" | "IP" | null; n: number; total: number };
+/** sides: ยอดโอนแล้วแยก OP/IP/ไม่ระบุ (ว่าง = ไม่มีแถว OP/IP เลย) */
+export type FundDetail = { lines: FundLine[]; n: number; total: number; pending: number; pending_total: number; years: FundYear[]; sides: FundSideTotal[] };
+
+export const PAYMENT_STATUS: Record<string, string> = { P: "โอนแล้ว", W: "รอโอน" };
+
+/** รายการโอนของกองทุน fund_key เรียงวันโอน ; ยอดรวมไม่นับรอโอน (แยกเป็น pending) และแยกตามงบปี */
+export function fundDetail(rows: SmtDetailRow[], key: string): FundDetail {
+  const lines = rows
+    .filter((r) => fundKey(r) === key)
+    .map((r): FundLine => {
+      const by = budgetYear(r.mouGrpCode);
+      return {
+        date: smtIso(r.postingDate), ref_doc_no: trim(r.refDocNo) || null, batch_no: trim(r.batchNo), mou_grp_code: trim(r.mouGrpCode), budget_year: by,
+        group: trim(r.fundGroupDescr) || null, fund: fundName(r), account: trim(r.mophId) || null, account_name: trim(r.mophDesc) || null,
+        amount: r.amount ?? r.total, wait: r.wait ?? 0, debt: r.debt ?? 0, total: r.total,
+        status: PAYMENT_STATUS[r.pmntStts] ?? r.pmntStts, paid: r.pmntStts === "P", count: r.countRecord ?? null,
+        prior_year: by !== null && by < transferFy(r.postingDate),
+        side: rowSide(r),
+      };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || a.batch_no.localeCompare(b.batch_no));
+  const years = new Map<number | null, { n: number; c: number }>();
+  let c = 0, pc = 0;
+  for (const l of lines) {
+    if (!l.paid) {
+      pc += cents(l.total);
+      continue;
+    }
+    c += cents(l.total);
+    const y = years.get(l.budget_year) ?? { n: 0, c: 0 };
+    y.n++;
+    y.c += cents(l.total);
+    years.set(l.budget_year, y);
+  }
+  const paid = lines.filter((l) => l.paid);
+  const sides = lines.some((l) => l.side)
+    ? (["OP", "IP", null] as const)
+        .map((side) => {
+          const ls = paid.filter((l) => l.side === side);
+          return { side, n: ls.length, total: ls.reduce((s, l) => s + cents(l.total), 0) / 100 };
+        })
+        .filter((s) => s.n > 0)
+    : [];
+  return {
+    lines, n: paid.length, total: c / 100, pending: lines.length - paid.length, pending_total: pc / 100,
+    years: [...years].sort(([a], [b]) => (a ?? 0) - (b ?? 0)).map(([budget_year, y]) => ({ budget_year, n: y.n, total: y.c / 100 })),
+    sides,
+  };
 }
 
 /** บัญชีที่แสดงก่อน (รายได้เหมาจ่ายที่รอบตัดหนี้สิ้นเดือนใช้) */

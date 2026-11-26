@@ -12,7 +12,7 @@ export async function ecFetch(url, body, mode) {
     const init = body == null ? {} : { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body };
     const res = await fetch(href, init);
     const u = new URL(res.url);
-    if (u.host !== location.host || /login|iam/i.test(u.pathname) || res.status === 401 || res.status === 403) return { expired: true };
+    if (u.host !== location.host || /login|iam/i.test(u.pathname) || u.pathname === "/webComponent/" || res.status === 401 || res.status === 403) return { expired: true };
     if (!res.ok) return { status: res.status };
     const buf = new Uint8Array(await res.arrayBuffer());
     const looksHtml = /^\s*</.test(String.fromCharCode(...buf.subarray(0, 64)));
@@ -28,7 +28,9 @@ export async function ecFetch(url, body, mode) {
       let text = dec(cs ?? "utf-8");
       const meta = !cs && /<meta[^>]+charset=["']?([\w-]+)/i.exec(text)?.[1];
       if (meta && !/utf-?8/i.test(meta)) text = dec(meta);
-      if (/type\s*=\s*["']?password/i.test(text)) return { expired: true };
+      // session ของ ThaiD หมด: e-Claim ไม่ redirect ไปหน้า login แต่ตอบฟอร์ม frmErr "ไม่มีสิทธิ์เข้าใช้งานหน้าจอดังกล่าว" หรือหน้าประกาศ SSO
+      // (พบจริง พ.ย. 2569) ตัวอ่านรายการที่ไม่เข้มจึงได้ 0 รายการเงียบ ๆ ; หน้าปกติของทุก endpoint ที่ใช้ไม่มีสองอย่างนี้
+      if (/type\s*=\s*["']?password|name=["']?frmErr|ประกาศใช้งานระบบ SSO/i.test(text)) return { expired: true };
       if (mode === "text") return { text };
     }
     window.__bkhEclaimSync = buf;
@@ -86,14 +88,14 @@ export async function ofcSelect() {
 
 // ---------- แท็บ/หน้า BKH Insight (ใช้ session ของแอป) ----------
 
-/** ค่า key ของทุกแถวในรายการไฟล์ที่นำเข้าแล้ว (GET ของ route นำเข้า) */
+/** ค่า key ของทุกแถวในรายการไฟล์ที่นำเข้าแล้ว (GET ของ route นำเข้า) ; key เป็น array = object ของ field เหล่านั้น */
 export async function appList(path, key) {
   const out = [];
   for (let page = 1; ; page++) {
     const res = await fetch(`${path}?pageSize=all&page=${page}`);
     if (!res.ok) return { status: res.status };
     const b = await res.json();
-    out.push(...b.rows.map((r) => r[key]));
+    out.push(...b.rows.map((r) => (Array.isArray(key) ? Object.fromEntries(key.map((k) => [k, r[k]])) : r[key])));
     if (!b.rows.length || out.length >= b.total) return { values: out };
   }
 }

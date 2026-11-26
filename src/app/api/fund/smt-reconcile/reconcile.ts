@@ -1,6 +1,7 @@
 // เทียบยอดโอนของ สปสช. จาก SMT (smt.nhso.go.th) กับ STM ที่นำเข้า (stm_file) แบบ pure ไม่มี import จึงรันทดสอบด้วย node ได้ตรง (reconcile.test.mjs)
 // key = งวดของ STM "YYMM_OP|IP_NN" (ปี พ.ศ. 2 หลัก) ฝั่ง SMT คือต้น refDocNo ("6809_IP_03_อุทธรณ์", "6808_IP_01(ยกเลิก Rerun)" รวมใน key เดียวกัน)
 // ฝั่ง STM คือ stm_summary.period_label ซึ่งเท่ากับ period_month + run_no ของไฟล์ UCS ทุกไฟล์
+// ยอดฝั่ง STM = ยอดโอนสุทธิของไฟล์ + รายงานพึงจ่าย รพ.สต. (Hsub) ที่แนบกับไฟล์ เพราะ SMT โอนยอดของ รพ.สต. รวมมาใน key เดียวกัน
 
 /** แถวของ SMT budgetSummaryByVendorReport/search ที่ใช้ (หนึ่งแถวต่อรายการโอนในชุด postingDate + batchNo) */
 export type SmtApiRow = {
@@ -38,6 +39,8 @@ export type StmFileInput = {
   run_no: number;
   transfer_date: string;
   net_total: string | number;
+  /** ยอดรายงานพึงจ่าย รพ.สต. (stm_hsub_file.net_total) ของไฟล์นี้ ; null = ยังไม่นำเข้า */
+  hsub_total: string | number | null;
 };
 
 export type ReconcileStatus = "match" | "diff" | "smt_only" | "stm_only";
@@ -61,13 +64,15 @@ export type ReconcileRow = {
   stm_doc: string | null;
   stm_date: string | null;
   stm_total: number | null;
-  /** SMT − STM */
+  /** รพ.สต. (Hsub) ที่ สปสช. โอนรวมมากับ STM UC OP ; null = ไม่มี/ยังไม่นำเข้า */
+  hsub_total: number | null;
+  /** SMT − (STM + Hsub) */
   diff: number | null;
   status: ReconcileStatus;
   lines: SmtLine[];
 };
 
-export type ReconcileSummary = { count: Record<ReconcileStatus, number>; smt_total: number; stm_total: number; diff: number };
+export type ReconcileSummary = { count: Record<ReconcileStatus, number>; smt_total: number; stm_total: number; hsub_total: number; diff: number };
 
 const KEY_RE = /^(\d{2})(\d{2})_(OP|IP)_(\d{2})(?!\d)/;
 const cents = (n: number | string) => Math.round(Number(n) * 100);
@@ -114,7 +119,8 @@ export function reconcile(lines: SmtLine[], files: StmFileInput[], fy: number): 
     const f = stm.get(key);
     const smtC = ls.length ? ls.reduce((s, l) => s + cents(l.total), 0) : null;
     const stmC = f ? cents(f.net_total) : null;
-    const diffC = smtC !== null && stmC !== null ? smtC - stmC : null;
+    const hsubC = f?.hsub_total == null ? null : cents(f.hsub_total);
+    const diffC = smtC !== null && stmC !== null ? smtC - stmC - (hsubC ?? 0) : null;
     return {
       key,
       ...(f ? { patient_type: f.patient_type, period_month: f.period_month, run_no: f.run_no } : parseKey(key)),
@@ -124,6 +130,7 @@ export function reconcile(lines: SmtLine[], files: StmFileInput[], fy: number): 
       stm_doc: f?.doc_no ?? null,
       stm_date: f?.transfer_date ?? null,
       stm_total: stmC === null ? null : stmC / 100,
+      hsub_total: hsubC === null ? null : hsubC / 100,
       diff: diffC === null ? null : diffC / 100,
       status: smtC === null ? "stm_only" : stmC === null ? "smt_only" : diffC === 0 ? "match" : "diff",
       lines: ls,
@@ -131,15 +138,19 @@ export function reconcile(lines: SmtLine[], files: StmFileInput[], fy: number): 
   });
 }
 
+/** STM UC ผู้ป่วยนอกที่ยังไม่แนบรายงานพึงจ่าย รพ.สต. ส่วนต่างจึงรวมยอดของ รพ.สต. อยู่ */
+export const hsubMissing = (r: Pick<ReconcileRow, "stm_doc" | "patient_type" | "hsub_total">) => r.stm_doc !== null && r.patient_type === "OP" && r.hsub_total === null;
+
 /** ยอดรวมทุกแถว ส่วนต่างรวมเฉพาะแถวที่มีทั้งสองฝั่ง */
 export function summarize(rows: ReconcileRow[]): ReconcileSummary {
   const count: Record<ReconcileStatus, number> = { match: 0, diff: 0, smt_only: 0, stm_only: 0 };
-  let smtC = 0, stmC = 0, diffC = 0;
+  let smtC = 0, stmC = 0, hsubC = 0, diffC = 0;
   for (const r of rows) {
     count[r.status]++;
     smtC += cents(r.smt_total ?? 0);
     stmC += cents(r.stm_total ?? 0);
+    hsubC += cents(r.hsub_total ?? 0);
     diffC += cents(r.diff ?? 0);
   }
-  return { count, smt_total: smtC / 100, stm_total: stmC / 100, diff: diffC / 100 };
+  return { count, smt_total: smtC / 100, stm_total: stmC / 100, hsub_total: hsubC / 100, diff: diffC / 100 };
 }

@@ -1,0 +1,11 @@
+# Runs bkh-insight-backup-verify.service every Sunday at 02:00 Bangkok time (after the 00:30 backup).
+# Install: see the header of bkh-insight-backup.service. Check: systemctl list-timers bkh-insight-backup-verify.timer
+[Unit]
+Description=bkh-insight weekly backup restore test on Sunday 02:00
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00 Asia/Bangkok
+Persistent=true
+
+[Install]
+WantedBy=timers.target

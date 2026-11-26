@@ -9,7 +9,7 @@ import { formatBaht, formatCompactBaht, formatCount } from "@/lib/number-format"
 import { usePersistedFilter } from "@/lib/persisted-filter";
 import { THAI_MONTHS_SHORT, todayIso } from "@/lib/thai-date";
 import { FY_BACK, fiscalYearOf, parseFiscalYear } from "@/app/api/fund/uc-dashboard/dashboard";
-import { GROUPS, OTHER_FUND, fiscalMonths, fundBars, groupOf, groupTrend, type Group, type GroupKey, type StmTrendResponse } from "@/app/api/fund/stm-trend/trend";
+import { GROUPS, OTHER_FUND, fiscalMonths, fundBars, fundTable, groupOf, groupTrend, type FundTable, type Group, type GroupKey, type StmTrendResponse } from "@/app/api/fund/stm-trend/trend";
 import { Notice, Panel, Skeleton, btn, focusRing, formatPct, num, useJson, useUrlParams } from "../_components/ui";
 import { FUNDS, periodLabel } from "../stm-import/labels";
 
@@ -22,6 +22,7 @@ const monthTick = (m: string) => `${THAI_MONTHS_SHORT[+m.slice(5, 7) - 1]} ${Str
 // StackedBarChart จัด tick แกน y เองไม่ได้ จึงส่งค่าเป็นล้านบาท (tick = ล้านบาท) แล้วคูณกลับตอนแสดงใน tooltip/ตาราง (แบบเดียวกับ uc-dashboard)
 const fromMillions = (n: number) => formatBaht(n * 1e6);
 const Dash = () => <span className="text-muted">–</span>;
+const fundLabel = (key: string) => (key === OTHER_FUND ? "อื่นๆ" : (FUNDS[key] ?? key));
 
 // กราฟเส้น: กลุ่มที่ค่ามีความหมาย
 const IP_GROUPS: GroupKey[] = ["uc-ip", "ofc-ip"];
@@ -45,11 +46,12 @@ export function StmTrend({ title }: { title: ReactNode }) {
   const categories = useMemo<StackedBarCategory[]>(() => months.map((m) => ({ key: m, label: monthTick(m), title: periodLabel(`${m}-01`) })), [months]);
   const trends = useMemo(() => (data ? new Map(GROUPS.map((g) => [g.key, groupTrend(data.months, g, months)])) : null), [data, months]);
   const bars = useMemo(() => (data ? fundBars(data.funds, group, months) : null), [data, group, months]);
+  const table = useMemo(() => (data ? fundTable(data, group, months) : null), [data, group, months]);
 
   let body: ReactNode;
   if (error) {
     body = <Notice title="โหลดข้อมูลไม่สำเร็จ" detail={error} action={<button type="button" className={btn} onClick={retry}>ลองอีกครั้ง</button>} />;
-  } else if (!data || !trends || !bars) {
+  } else if (!data || !trends || !bars || !table) {
     body = <Skeleton rows={8} />;
   } else if (data.months.length === 0) {
     body = <Notice title={`ยังไม่มี STM ของปีงบ ${fy}`} action={<Link href="/fund/stm-import" className={btn}>นำเข้า STM</Link>} />;
@@ -59,7 +61,7 @@ export function StmTrend({ title }: { title: ReactNode }) {
     const imported = GROUPS.filter((g) => trends.get(g.key)!.lagImported).map((g) => g.label);
     const series: StackedBarSeries[] = bars.funds.map((f) => ({
       key: f.key,
-      label: f.key === OTHER_FUND ? "อื่นๆ" : (FUNDS[f.key] ?? f.key),
+      label: fundLabel(f.key),
       short: f.key === OTHER_FUND ? "อื่นๆ" : f.key,
       color: `var(${f.color})`,
       note: f.key === OTHER_FUND ? bars.others.join(", ") : undefined,
@@ -100,6 +102,15 @@ export function StmTrend({ title }: { title: ReactNode }) {
             )}
           </div>
         </Panel>
+
+        {table.funds.length > 0 && (
+          <Panel
+            title={`สรุปรายกองทุน · ${group.label}`}
+            aside={<a href={`/api/fund/stm-trend?${new URLSearchParams({ fy: String(fy), group: group.key, format: "xlsx" })}`} className={btn} download>ส่งออก Excel</a>}
+          >
+            <FundSummary table={table} categories={categories} caption={`ยอดชดเชยรายเดือนตามกองทุน ${group.label} ปีงบ ${fy} (บาท)`} />
+          </Panel>
+        )}
 
         <div className="grid gap-8 xl:grid-cols-2">
           <TrendPanel
@@ -150,6 +161,59 @@ export function StmTrend({ title }: { title: ReactNode }) {
         {body}
       </div>
     </>
+  );
+}
+
+const th = "px-3 py-2 font-medium text-muted whitespace-nowrap";
+const td = `px-3 py-2 ${num}`;
+
+/** แถวละกองทุน (ลำดับเดียวกับกราฟ) คอลัมน์ละเดือน ; คอลัมน์กองทุนตรึงซ้ายตอนเลื่อนแนวนอน */
+function FundSummary({ table, categories, caption }: { table: FundTable; categories: StackedBarCategory[]; caption: string }) {
+  const cell = (v: number | null) => (v === null ? <Dash /> : formatBaht(v));
+  const share = (v: number | null) => (v === null ? <Dash /> : (v * 100).toFixed(1));
+  return (
+    <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+      <table className="w-full border-collapse text-sm tabular-nums">
+        <caption className="sr-only">{caption}</caption>
+        <thead>
+          <tr>
+            <th scope="col" rowSpan={2} className={`${th} sticky left-0 border-b border-line bg-surface text-left align-bottom`}>กองทุน</th>
+            <th scope="colgroup" colSpan={categories.length + 1} className={`${th} pb-0 text-left`}>ยอดชดเชย (บาท)</th>
+            <th scope="col" rowSpan={2} className={`${th} border-b border-line text-right align-bottom`}>สัดส่วน (%)</th>
+          </tr>
+          <tr className="border-b border-line">
+            {categories.map((c) => (
+              <th key={c.key} scope="col" className={`${th} text-right`} title={c.title}>{c.label}</th>
+            ))}
+            <th scope="col" className={`${th} text-right`}>รวมปีงบ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table.funds.map((f) => (
+            <tr key={f.key} className="border-b border-line last:border-0">
+              <th scope="row" className="sticky left-0 bg-surface px-3 py-2 text-left font-medium whitespace-nowrap" title={f.key === OTHER_FUND ? table.others.join(", ") : f.key}>
+                {fundLabel(f.key)}
+              </th>
+              {f.values.map((v, i) => (
+                <td key={categories[i].key} className={td}>{cell(v)}</td>
+              ))}
+              <td className={`${td} font-medium`}>{formatBaht(f.total)}</td>
+              <td className={td}>{share(f.share)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-line bg-surface-sunken">
+            <th scope="row" className="sticky left-0 bg-surface-sunken px-3 py-2 text-left font-medium">รวม</th>
+            {table.total.values.map((v, i) => (
+              <td key={categories[i].key} className={`${td} font-medium`}>{cell(v)}</td>
+            ))}
+            <td className={`${td} font-semibold`}>{formatBaht(table.total.total)}</td>
+            <td className={`${td} font-medium`}>{share(table.total.total ? 1 : null)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
 

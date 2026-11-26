@@ -55,13 +55,16 @@ export type RepSummary = {
   paid_total: number | null;
 };
 
-/** layout "uc" = REP ของ UC (IP/OP/OP_APPEAL_*), "other" = REP สิทธิอื่น (IPCS/IPLGO/OPBKK/OPBMT/OPLGO) */
+/** layout "uc" = REP ของ UC (IP/OP/OP_APPEAL_*), "other" = REP สิทธิอื่น (IP/OP × CS/LGO/BKK/BMT และ _APPEAL ของแต่ละตัว) */
 export type ParsedRep = { printedAt: string | null; layout: "uc" | "other"; rows: RepRow[]; summaries: RepSummary[] };
 
-/** rep_row.scheme: UC = UCS, สิทธิอื่นจาก TYPE ในชื่อไฟล์ตัด IP/OP นำหน้า (CS = OFC) เช่น IPLGO -> LGO, OPBKK -> BKK */
+/**
+ * rep_row.scheme: UC = UCS, สิทธิอื่นจาก TYPE ในชื่อไฟล์ตัด IP/OP นำหน้าและ _APPEAL* ท้าย (CS = OFC) เช่น IPLGO -> LGO, OPBMT_APPEAL -> BMT
+ * (REP อุทธรณ์ทับแถว TRAN_ID เดิมในกองทุนเดียวกันเหมือน OP_APPEAL_* ของ UC ; scheme ผิดจะชน TRAN_ID ทั้งไฟล์)
+ */
 export function schemeOf(type: string, layout: ParsedRep["layout"]): string {
   if (layout === "uc") return "UCS";
-  const s = type.replace(/^(IP|OP)/, "");
+  const s = type.replace(/^(IP|OP)/, "").replace(/_APPEAL\w*$/, "");
   return s === "CS" ? "OFC" : s;
 }
 

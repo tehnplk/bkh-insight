@@ -238,5 +238,10 @@ test("scheme from file type and layout", () => {
   assert.equal(schemeOf("OPLGO", "other"), "LGO");
   assert.equal(schemeOf("OPBKK", "other"), "BKK");
   assert.equal(schemeOf("OPBMT", "other"), "BMT");
+  assert.equal(schemeOf("IPBKK", "other"), "BKK");
+  assert.equal(schemeOf("IPBMT", "other"), "BMT");
+  // อุทธรณ์อยู่กองทุนเดียวกับ REP ปกติ (ไม่งั้นชน TRAN_ID ของแถวเดิม)
+  assert.equal(schemeOf("OPLGO_APPEAL", "other"), "LGO");
+  assert.equal(schemeOf("OPBMT_APPEAL", "other"), "BMT");
   assert.equal(parseRep(book()).layout, "uc");
 });
