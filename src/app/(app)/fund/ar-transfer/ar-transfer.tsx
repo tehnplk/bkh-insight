@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactNode } from "react";
 import { Download, Plus } from "lucide-react";
 import { AccountPicker, type AccountOption } from "@/components/account-picker/account-picker";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { usePersistedFilter } from "@/lib/persisted-filter";
@@ -13,7 +14,8 @@ import { LEDGER_START } from "@/app/api/fund/ar-sync/ledger";
 import type { TransferRow, TransferStatus, FundMapRow } from "@/app/api/fund/ar-transfer/data";
 import type { ArTransferSummary } from "@/app/api/fund/ar-transfer/summary/route";
 import type { ImportResult } from "@/app/api/fund/ar-transfer/import/route";
-import { ACCOUNT_RE, MAX_NOTE, SOURCE_LABEL, STATUS_LABEL, type ImportCounts } from "@/app/api/fund/ar-transfer/transfer";
+import type { FundDetailResult } from "@/app/api/fund/ar-transfer/fund-detail/route";
+import { ACCOUNT_RE, MAX_NOTE, PRIOR_YEAR_ACCOUNT, SOURCE_LABEL, STATUS_LABEL, type ImportCounts } from "@/app/api/fund/ar-transfer/transfer";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 
@@ -259,30 +261,170 @@ function SummaryTable({ data }: { data: ArTransferSummary }) {
 
 /* ---------- กองทุนใน SMT ---------- */
 
-function FundRow({ f, accounts, admin, onSaved }: { f: FundMapRow; accounts: AccountOption[]; admin: boolean; onSaved: () => void }) {
+const SIDE_LABEL = { OP: "ผู้ป่วยนอก (OP)", IP: "ผู้ป่วยใน (IP)" } as const;
+/** แถว OP/IP ที่ยังไม่ตั้งบัญชีหรือไม่ใช้ = ใช้ตามแถว ALL (findMapping ใน transfer.ts) */
+const inherits = (f: FundMapRow) => f.side !== "ALL" && !f.account_code && !f.ignore;
+
+/** บัญชีที่ใช้ของแถว mapping */
+function UsedAccount({ f, accounts }: { f: FundMapRow; accounts: AccountOption[] }) {
+  if (f.ignore) return <span className="text-muted">ไม่ใช้</span>;
+  if (f.account_code) return <Account code={f.account_code} name={accounts.find((a) => a.code === f.account_code)?.name} />;
+  return inherits(f) ? <span className="text-muted">ใช้ตามบัญชีของกองทุน</span> : <span className="text-warning">ยังไม่จับคู่</span>;
+}
+
+/** รายการโอนจริงจาก SMT ของกองทุนในปีงบ (โหลดตอนเปิด modal) ; group = แถว ALL + แถว OP/IP ของกองทุน */
+function FundDetailBody({ group, fy, accounts }: { group: FundMapRow[]; fy: number; accounts: AccountOption[] }) {
+  const f = group[0];
+  const r = useJson<FundDetailResult>(`/api/fund/ar-transfer/fund-detail?${new URLSearchParams({ fy: String(fy), fund_key: f.fund_key })}`);
+  if (r.error) return <Notice title={r.error} action={<button type="button" className={btn} onClick={r.retry}>ลองอีกครั้ง</button>} />;
+  if (!r.data) return <Skeleton rows={6} />;
+  const d = r.data;
+  const prior = d.lines.some((l) => l.prior_year && l.paid);
+  const split = d.sides.length > 0;
+  return (
+    <div className="flex flex-col gap-5">
+      <Facts>
+        <Fact label="โอนแล้ว (รายการ)">{formatCount(d.n)}</Fact>
+        <Fact label="ยอดโอนสุทธิ (บาท)"><span className="font-semibold">{formatBaht(d.total)}</span></Fact>
+        {d.sides.map((s) => (
+          <Fact key={s.side ?? "none"} label={`${s.side ? SIDE_LABEL[s.side] : "ไม่ระบุ OP/IP"} (บาท)`}>
+            {formatBaht(s.total)} <span className="text-muted">· {formatCount(s.n)} รายการ</span>
+          </Fact>
+        ))}
+        {d.years.map((y) => (
+          <Fact key={y.budget_year ?? "none"} label={`งบปี ${y.budget_year ?? "ไม่ระบุ"} (บาท)`}>
+            {formatBaht(y.total)} <span className="text-muted">· {formatCount(y.n)} รายการ</span>
+          </Fact>
+        ))}
+        {d.pending > 0 && (
+          <Fact label="รอโอน ไม่นับในยอด (บาท)">
+            {formatBaht(d.pending_total)} <span className="text-muted">· {formatCount(d.pending)} รายการ</span>
+          </Fact>
+        )}
+        <Fact label="บัญชีที่ SMT ระบุ"><Account code={f.fund_key.split("|")[1] || null} name={f.smt_account_name} /></Fact>
+        {group.map((g) => (
+          <Fact key={g.side} label={g.side === "ALL" ? "บัญชีที่ใช้ (เครดิต)" : `บัญชีที่ใช้ ${g.side}`}>
+            <UsedAccount f={g} accounts={accounts} />
+          </Fact>
+        ))}
+      </Facts>
+      {prior && <p className="text-sm text-muted">รายการงบปีก่อนวันโอนลงบัญชี {PRIOR_YEAR_ACCOUNT.code} เมื่อนำเข้า ไม่ใช่บัญชีที่จับคู่</p>}
+      {d.lines.length === 0 ? (
+        <Notice title={`ไม่มีรายการโอนของกองทุนนี้ในปีงบ ${d.fy}`} />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">รายการโอนจาก SMT ปีงบ {d.fy} (บาท)</caption>
+            <thead className="bg-surface text-left text-grid-head text-muted">
+              <tr>
+                <th scope="col" className={TH}>วันที่โอน</th>
+                <th scope="col" className={TH}>เลขที่เอกสาร</th>
+                {split && <th scope="col" className={TH}>OP/IP</th>}
+                <th scope="col" className={TH}>งบปี</th>
+                <th scope="col" className={TH}>กองทุนย่อย</th>
+                <th scope="col" className={`${TH} text-right whitespace-nowrap`}>ยอดก่อนหัก (บาท)</th>
+                <th scope="col" className={`${TH} text-right whitespace-nowrap`}>ชะลอ/หักหนี้ (บาท)</th>
+                <th scope="col" className={`${TH} text-right whitespace-nowrap`}>ยอดโอนสุทธิ (บาท)</th>
+                <th scope="col" className={TH}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.lines.map((l) => (
+                <tr key={`${l.date}|${l.batch_no}|${l.ref_doc_no}|${l.mou_grp_code}`} className={`border-t border-line align-top ${l.paid ? "" : "text-muted"}`}>
+                  <td className={`${TD} whitespace-nowrap tabular-nums`}>{formatThaiDate(l.date)}</td>
+                  <td className={TD}>
+                    {l.ref_doc_no || dash}
+                    <span className="block text-grid-sub whitespace-nowrap text-subtle tabular-nums">batch {l.batch_no}{l.count ? ` · ${formatCount(l.count)} รายการย่อย` : ""}</span>
+                  </td>
+                  {split && <td className={`${TD} whitespace-nowrap`}>{l.side ?? dash}</td>}
+                  <td className={`${TD} whitespace-nowrap tabular-nums`}>
+                    {l.budget_year ?? dash}
+                    {l.prior_year && (
+                      <span title={`ลงบัญชี ${PRIOR_YEAR_ACCOUNT.code} เมื่อนำเข้า`} className="ml-1.5 rounded border border-warning-line bg-warning-soft px-1 text-xs text-warning">งบปีก่อน</span>
+                    )}
+                    <span className="block text-grid-sub text-subtle">{l.mou_grp_code}</span>
+                  </td>
+                  <td className={TD}>
+                    {l.fund || dash}
+                    {l.group && <span className="block text-grid-sub text-subtle">{l.group}</span>}
+                  </td>
+                  <td className={`${TD} ${num}`}>{formatBaht(l.amount)}</td>
+                  <td className={`${TD} ${num}`} title={`ชะลอจ่าย ${formatBaht(l.wait)} · หักหนี้ ${formatBaht(l.debt)}`}>{formatBaht(l.wait + l.debt)}</td>
+                  <td className={`${TD} ${num} font-semibold`}>{formatBaht(l.total)}</td>
+                  <td className={`${TD} whitespace-nowrap`}>{l.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** แถวของ mapping หนึ่งแถว ; group = แถว ALL + OP/IP ของกองทุน (แถว ALL เปิด modal ได้ แถว OP/IP เป็นแถวย่อย) */
+function FundRow({ f, group, fy, accounts, admin, onSaved }: { f: FundMapRow; group: FundMapRow[]; fy: number; accounts: AccountOption[]; admin: boolean; onSaved: () => void }) {
   const smtCode = f.fund_key.split("|")[1] || null;
+  const all = f.side === "ALL";
+  const split = group.length > 1;
+  const name = f.fund_name || f.fund_key;
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [code, setCode] = useState(f.account_code ?? smtCode ?? "");
+  const [code, setCode] = useState(f.account_code ?? (all ? smtCode : null) ?? "");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string>();
   const save = (account_code: string | null, ignore: boolean) => {
     setError(undefined);
     startTransition(async () => {
-      const r = await send("/api/fund/ar-transfer/fund-map", { method: "POST", body: JSON.stringify({ fund_key: f.fund_key, account_code, ignore }) });
+      const r = await send("/api/fund/ar-transfer/fund-map", { method: "POST", body: JSON.stringify({ fund_key: f.fund_key, side: f.side, account_code, ignore }) });
       if (!r.ok) return setError(r.error);
       setEditing(false);
       onSaved();
     });
   };
   const bad = code !== "" && !ACCOUNT_RE.test(code.trim());
-  const pickerId = `fund-${f.fund_key.replace(/[^0-9A-Za-z]/g, "-")}`;
+  const pickerId = `fund-${f.side}-${f.fund_key.replace(/[^0-9A-Za-z]/g, "-")}`;
+  const target = all ? name : `${name} ${f.side}`;
   return (
-    <tr className="border-t border-line align-top">
+    <tr className={`align-top ${all ? "border-t border-line" : "border-t border-dashed border-line"}`}>
       <td className={TD}>
-        {f.fund_name || dash}
-        <span className="block text-grid-sub text-subtle tabular-nums">{f.fund_key}</span>
+        {all ? (
+          <>
+            <button type="button" onClick={() => setOpen(true)} className={`rounded text-left font-medium text-accent-text hover:underline ${focusRing}`} aria-label={`ดูรายการโอนของ ${name}`}>
+              {name}
+            </button>
+            <span className="block text-grid-sub text-subtle tabular-nums">{f.fund_key}</span>
+            {split && <span className="block text-grid-sub text-subtle">บัญชีนี้ใช้กับรายการที่ไม่ระบุ OP/IP และฝั่งที่ไม่ได้แยก</span>}
+            <DetailModal
+              open={open}
+              onClose={() => setOpen(false)}
+              size="wide"
+              title={<>{f.fund_name || "กองทุน"} <span className="font-normal text-muted tabular-nums">{f.fund_key} · ปีงบ {fy}</span></>}
+            >
+              <div className="flex flex-col gap-5">
+                <FundDetailBody group={group} fy={fy} accounts={accounts} />
+                {admin && (
+                  <div className="flex justify-end border-t border-line pt-4">
+                    <button
+                      type="button"
+                      className={btn}
+                      onClick={() => {
+                        setOpen(false);
+                        setEditing(true);
+                      }}
+                    >
+                      จับคู่บัญชี
+                    </button>
+                  </div>
+                )}
+              </div>
+            </DetailModal>
+          </>
+        ) : (
+          <span className="block pl-4 text-muted">{SIDE_LABEL[f.side as "OP" | "IP"]}</span>
+        )}
       </td>
-      <td className={TD}><Account code={smtCode} name={f.smt_account_name} /></td>
+      <td className={TD}>{all ? <Account code={smtCode} name={f.smt_account_name} /> : null}</td>
       <td className={TD}>
         {editing ? (
           <form
@@ -294,23 +436,20 @@ function FundRow({ f, accounts, admin, onSaved }: { f: FundMapRow; accounts: Acc
           >
             <AccountPicker id={pickerId} accounts={accounts} value={code} invalid={bad} onChange={setCode} />
             <button type="submit" disabled={pending || bad || !code.trim()} className={primary}>บันทึก</button>
-            <button type="button" disabled={pending} onClick={() => save(null, true)} className={btn}>ไม่ใช้กองทุนนี้</button>
+            <button type="button" disabled={pending} onClick={() => save(null, true)} className={btn}>{all ? "ไม่ใช้กองทุนนี้" : `ไม่ใช้ฝั่ง ${f.side}`}</button>
+            {!all && !inherits(f) && <button type="button" disabled={pending} onClick={() => save(null, false)} className={btn}>ใช้ตามบัญชีของกองทุน</button>}
             <button type="button" disabled={pending} onClick={() => setEditing(false)} className={btn}>ยกเลิก</button>
           </form>
-        ) : f.ignore ? (
-          <span className="text-muted">ไม่ใช้</span>
-        ) : f.account_code ? (
-          <Account code={f.account_code} name={accounts.find((a) => a.code === f.account_code)?.name} />
         ) : (
-          <span className="text-warning">ยังไม่จับคู่</span>
+          <UsedAccount f={f} accounts={accounts} />
         )}
         {error && <p role="alert" className="mt-1 text-danger">{error}</p>}
       </td>
       {admin && (
         <td className={`${TD} text-right`}>
           {!editing && (
-            <button type="button" onClick={() => setEditing(true)} className={btn} aria-label={`จับคู่บัญชีของ ${f.fund_name ?? f.fund_key}`}>
-              จับคู่บัญชี
+            <button type="button" onClick={() => setEditing(true)} className={btn} aria-label={`จับคู่บัญชีของ ${target}`}>
+              {all ? "จับคู่บัญชี" : `จับคู่ ${f.side}`}
             </button>
           )}
         </td>
@@ -320,7 +459,9 @@ function FundRow({ f, accounts, admin, onSaved }: { f: FundMapRow; accounts: Acc
 }
 
 function FundMap({ data, onSaved }: { data: ArTransferSummary; onSaved: () => void }) {
-  const unmapped = data.funds.filter((f) => !f.account_code && !f.ignore).length;
+  const unmapped = data.funds.filter((f) => f.side === "ALL" && !f.account_code && !f.ignore).length;
+  const groups = new Map<string, FundMapRow[]>(); // FUNDS_SQL เรียง ALL ก่อน OP/IP ของกองทุนเดียวกัน
+  for (const f of data.funds) groups.set(f.fund_key, [...(groups.get(f.fund_key) ?? []), f]);
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-title">
@@ -339,7 +480,7 @@ function FundMap({ data, onSaved }: { data: ArTransferSummary; onSaved: () => vo
           </thead>
           <tbody>
             {data.funds.map((f) => (
-              <FundRow key={`${f.fund_key}|${f.account_code}|${f.ignore}`} f={f} accounts={data.accounts} admin={data.admin} onSaved={onSaved} />
+              <FundRow key={`${f.fund_key}|${f.side}|${f.account_code}|${f.ignore}`} f={f} group={groups.get(f.fund_key) ?? [f]} fy={data.fy} accounts={data.accounts} admin={data.admin} onSaved={onSaved} />
             ))}
           </tbody>
         </table>

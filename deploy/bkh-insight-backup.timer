@@ -1,0 +1,11 @@
+# Runs bkh-insight-backup.service every day at 00:30 Bangkok time; Persistent catches up a run missed while the server was off.
+# Install: see the header of bkh-insight-backup.service. Check: systemctl list-timers bkh-insight-backup.timer
+[Unit]
+Description=bkh-insight nightly insight DB backup at 00:30
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 Asia/Bangkok
+Persistent=true
+
+[Install]
+WantedBy=timers.target

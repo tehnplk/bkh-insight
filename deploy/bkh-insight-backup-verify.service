@@ -1,0 +1,14 @@
+# Weekly restore test of the newest backup (scripts/backup-verify.sh), started by bkh-insight-backup-verify.timer.
+# Result: BACKUP_DIR/verify.json, shown on /admin/backup. Install: see the header of bkh-insight-backup.service.
+# Run now / check: sudo systemctl start bkh-insight-backup-verify.service; journalctl -u bkh-insight-backup-verify.service
+[Unit]
+Description=bkh-insight weekly backup restore test
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bkhadmin
+Group=bkhadmin
+WorkingDirectory=/var/www/bkh-insight
+ExecStart=/usr/bin/bash scripts/backup-verify.sh

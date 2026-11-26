@@ -61,11 +61,8 @@ export function fiscalMonths(fy: number): string[] {
 
 const inGroup = (g: Group) => (r: { scheme: string; patient_type: string }) => r.scheme === g.scheme && r.patient_type === g.patient_type;
 
-/**
- * กองทุนของกลุ่มเป็น series ของกราฟแท่งซ้อน: เฉพาะกองทุนที่มียอดในปีงบ เรียงตาม FUND_ORDER แล้ว "อื่นๆ"
- * values[เดือน][series] เดือนที่ไม่มีไฟล์ = 0 (แท่งว่าง)
- */
-export function fundBars(rows: FundRow[], g: Group, months: string[]): { funds: { key: string; color: string }[]; values: number[][]; others: string[] } {
+/** ยอดต่อ (เดือน|กองทุน) ของกลุ่ม: กองทุนที่มียอดในปีงบ เรียงตาม FUND_ORDER แล้ว "อื่นๆ" ; ค่าติดลบคงไว้ */
+function fundCells(rows: FundRow[], g: Group) {
   const order = FUND_ORDER[g.key];
   const bucket = (fund: string) => (order.includes(fund) ? fund : OTHER_FUND);
   const totals = new Map<string, number>();
@@ -81,9 +78,39 @@ export function fundBars(rows: FundRow[], g: Group, months: string[]): { funds: 
   const funds = [...order, OTHER_FUND]
     .filter((f) => (totals.get(f) ?? 0) > 0)
     .map((f) => ({ key: f, color: f === OTHER_FUND ? "--chart-other" : `--chart-${order.indexOf(f) + 1}` }));
+  return { funds, cell, others: [...others].sort() };
+}
+
+/**
+ * กองทุนของกลุ่มเป็น series ของกราฟแท่งซ้อน
+ * values[เดือน][series] เดือนที่ไม่มีไฟล์ = 0 (แท่งว่าง)
+ */
+export function fundBars(rows: FundRow[], g: Group, months: string[]): { funds: { key: string; color: string }[]; values: number[][]; others: string[] } {
+  const { funds, cell, others } = fundCells(rows, g);
   // แท่งซ้อนรับค่าติดลบไม่ได้ (ยอดหักคืนของเดือน) จึงตัดเป็น 0 ; ยอดรวมของ KPI ใช้ paid_all
   const values = months.map((m) => funds.map((f) => Math.max(0, cell.get(`${m}|${f.key}`) ?? 0)));
-  return { funds, values, others: [...others].sort() };
+  return { funds, values, others };
+}
+
+export type FundTable = {
+  /** ลำดับเดียวกับ series ของ fundBars ; values ตามลำดับ months, null = กลุ่มไม่มีไฟล์ STM เดือนนั้น ; share = สัดส่วนของยอดรวมปีงบ (0–1) */
+  funds: { key: string; values: (number | null)[]; total: number; share: number | null }[];
+  /** แถวรวม = ผลรวมทุกกองทุน (paid_total ก่อนหัก) */
+  total: { values: (number | null)[]; total: number };
+  others: string[];
+};
+
+/** ตารางสรุปรายกองทุนของกลุ่ม: ค่าจริง (ติดลบได้ ไม่ตัดเหมือนแท่ง) ; เดือนที่มีไฟล์แต่กองทุนไม่มียอด = 0 */
+export function fundTable(data: { funds: FundRow[]; months: MetricRow[] }, g: Group, months: string[]): FundTable {
+  const { funds, cell, others } = fundCells(data.funds, g);
+  const has = new Set(data.months.filter(inGroup(g)).map((r) => r.period_month.slice(0, 7)));
+  const rows = funds.map((f) => {
+    const values = months.map((m) => (has.has(m) ? (cell.get(`${m}|${f.key}`) ?? 0) : null));
+    return { key: f.key, values, total: sumOf(values) };
+  });
+  const values = months.map((m, i) => (has.has(m) ? sumOf(rows.map((r) => r.values[i])) : null));
+  const total = sumOf(values);
+  return { funds: rows.map((r) => ({ ...r, share: total ? r.total / total : null })), total: { values, total }, others };
 }
 
 export type GroupTrend = {

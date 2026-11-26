@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/stm-trend/trend.test.mjs (node >= 23.6 อ่าน .ts ได้เอง)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GROUPS, fiscalMonths, fundBars, groupOf, groupTrend } from "./trend.ts";
+import { GROUPS, fiscalMonths, fundBars, fundTable, groupOf, groupTrend } from "./trend.ts";
 
 const months = fiscalMonths(2569);
 const ucIp = groupOf("uc-ip");
@@ -98,4 +98,23 @@ test("groupTrend: UC OP อัตรา = paid_claimable ÷ claim_claimable ; �
   assert.equal(t.total.paid, 1500); // ยอดชดเชยยังเป็น paid_all
   const ip = groupTrend([row("2025-10-01", { paid_all: 50, claim_normal: 100, paid_claimable: 1, claim_claimable: 1 })], ucIp, months);
   assert.equal(ip.total.rate, 0.5);
+});
+
+test("fundTable: กองทุนชุดเดียวกับ fundBars, แถวรวม = ผลรวมกองทุน, เดือนไม่มีไฟล์ = null, ค่าติดลบคงไว้", () => {
+  const f = (period_month, fund, amount, scheme = "UCS") => ({ period_month, scheme, patient_type: "IP", fund, amount });
+  const funds = [f("2025-10-01", "IP", 100), f("2025-10-01", "INST", 20), f("2025-10-01", "VA", 5), f("2025-11-01", "IP", -10), f("2025-10-01", "CARE", 7, "OFC")];
+  const t = fundTable({ funds, months: [row("2025-10-01"), row("2025-11-01"), row("2025-12-01", { scheme: "OFC" })] }, ucIp, months);
+  assert.deepEqual(t.funds.map((r) => r.key), fundBars(funds, ucIp, months).funds.map((r) => r.key));
+  assert.deepEqual(t.funds.map((r) => r.key), ["IP", "INST", "OTHER"]);
+  assert.deepEqual(t.funds[0].values.slice(0, 3), [100, -10, null]); // ธ.ค. มีแต่ไฟล์ OFC = ไม่มีไฟล์ของกลุ่ม
+  assert.deepEqual(t.funds[1].values.slice(0, 2), [20, 0]); // มีไฟล์แต่กองทุนไม่มียอด = 0
+  assert.deepEqual(t.total.values.slice(0, 3), [125, -10, null]);
+  assert.ok(t.total.values.slice(2).every((v) => v === null));
+  assert.equal(t.total.total, 115);
+  assert.equal(t.funds.reduce((s, r) => s + r.total, 0), t.total.total);
+  assert.equal(t.funds[0].share, 90 / 115);
+  assert.deepEqual(t.others, ["VA"]);
+  const empty = fundTable({ funds: [], months: [] }, ucIp, months);
+  assert.deepEqual(empty.funds, []);
+  assert.equal(empty.total.total, 0);
 });

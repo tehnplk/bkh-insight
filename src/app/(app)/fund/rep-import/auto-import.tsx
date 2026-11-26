@@ -229,7 +229,7 @@ export function AutoImport() {
         <CloudDownload className="size-4" aria-hidden="true" />
         นำเข้าอัตโนมัติ
       </button>
-      <DetailModal open={open} onClose={() => setOpen(false)} title="นำเข้า REP และ STM จาก e-Claim" size="medium">
+      <DetailModal open={open} onClose={() => setOpen(false)} title="นำเข้า REP, STM และ Hsub จาก e-Claim" size="medium">
         {ext === "checking" || ext === "unknown" ? (
           <p className="text-sm text-muted">กำลังตรวจหา extension…</p>
         ) : ext === "missing" ? (
@@ -338,7 +338,7 @@ export function AutoImport() {
                     <li key={`${s.g}|${s.reason}`}>ข้าม {s.g}: {s.reason}{s.n > 1 ? ` (${formatCount(s.n)} ไฟล์)` : ""}</li>
                   ))}
                   <li>{sync.STM_UNSUPPORTED}</li>
-                  {plan.stats["STM OFC"]?.found ? <li className="text-warning">{sync.OFC_DATE_NOTE}</li> : null}
+                  {plan.stats["STM OFC"]?.found || plan.stats["STM BMT"]?.found ? <li className="text-warning">{sync.OFC_DATE_NOTE}</li> : null}
                 </ul>
 
                 {plan.failures.length > 0 && (
@@ -361,6 +361,9 @@ export function AutoImport() {
                           {t.date && <span className="text-muted">ออก {formatThaiDate(t.date)}</span>}
                           {t.result?.status === "imported" && t.result.rows != null && (
                             <span className="text-muted tabular-nums">{formatCount(t.result.rows)} แถว</span>
+                          )}
+                          {t.result?.status === "imported" && t.result.cases != null && (
+                            <span className="text-muted tabular-nums">{formatCount(t.result.cases)} ราย</span>
                           )}
                           {t.result?.error && <span className="text-danger">{t.result.error}</span>}
                         </li>

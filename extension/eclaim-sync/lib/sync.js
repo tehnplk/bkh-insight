@@ -13,9 +13,13 @@ export const REP_SCHEMES = ["ucs", "ofc", "lgo", "bkk", "bmt"];
 export const EXPIRED = "e-Claim หมดอายุ: login ThaiD ในแท็บ e-Claim ใหม่แล้วลองอีกครั้ง";
 export const APP_EXPIRED = "BKH Insight หมดอายุ: login ใหม่แล้วลองอีกครั้ง";
 export const CANCELLED = "ยกเลิกแล้ว";
-export const STM_UNSUPPORTED = "ข้าม STM BKK/BMT/SSS/LGO: ยังไม่รองรับ";
+export const STM_UNSUPPORTED = "ข้าม STM BKK/SSS/LGO: ยังไม่รองรับ";
 export const OFC_NO_ZONE = "ไม่รู้ zone/จังหวัด: อ่านจากหน้า Statement OFC ของ e-Claim ไม่ได้ (เปิดหน้านั้นในแท็บ e-Claim ได้หรือไม่ หรือใส่ --zone= --province= เมื่อรันคำสั่ง)";
-export const OFC_DATE_NOTE = "STM OFC ใช้ \"ออกรายงานวันที่\" ในไฟล์เป็นวันที่ออก STM เพราะรายการบน e-Claim ไม่มีวันที่ออก (รอยืนยันกับไฟล์จริง)";
+export const STM_PATH = "/api/fund/stm-import";
+export const HSUB_PATH = "/api/fund/stm-import/hsub";
+export const HSUB_NO_STM = "ยังไม่มี STM UC ผู้ป่วยนอกงวดเดียวกันในระบบ: นำเข้า STM งวดนั้นก่อน";
+export const HSUB_STM_FAILED = "ไม่มี STM คู่: นำเข้า STM งวดเดียวกันไม่สำเร็จ";
+export const OFC_DATE_NOTE = "STM OFC/BMT ใช้ \"ออกรายงานวันที่\" ในไฟล์เป็นวันที่ออก STM เพราะรายการบน e-Claim ไม่มีวันที่ออก (รอยืนยันกับไฟล์จริง)";
 
 /** หยุดทั้งรอบพร้อมข้อความ (หมดอายุ, ไม่มีแท็บ, ยกเลิก) ; Error อื่นนับเป็นไม่สำเร็จรายการเดียว */
 export class Stop extends Error {}
@@ -91,8 +95,8 @@ export function beToIso(s) {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? `${y}-${pad(mo)}-${pad(d)}` : null;
 }
 
-// ชนิด REP ที่ /api/fund/rep-import อ่านได้และนำเข้าไฟล์จริงแล้ว (rep.ts) ; ORF ไม่มีตัวอ่าน
-const REP_OK = /^(IP|OP|OP_APPEAL\w*|IPCS|OPCS|IPLGO|OPLGO|OPBKK|OPBMT)$/;
+// ชนิด REP ที่ /api/fund/rep-import อ่านได้ (rep.ts): UC IP/OP/OP_APPEAL_* และสิทธิอื่น IP/OP × CS/LGO/BKK/BMT รวม _APPEAL ; ORF ไม่มีตัวอ่าน
+const REP_OK = /^(IP|OP|OP_APPEAL\w*|(IP|OP)(CS|LGO|BKK|BMT)(_APPEAL\w*)?)$/;
 const REP_FILE = /^eclaim_\d+_[A-Za-z0-9_]+?_\d{8}_\d+\.ecd$/;
 
 /** eclaim_{hcode}_{TYPE}_{yyyymmdd พ.ศ.}_{n}.ecd -> TYPE */
@@ -109,6 +113,12 @@ export const xlsName = (fn) => fn.replace(/\.ecd$/, ".xls");
 
 export const UC_DOC = /^\d+_(OP|IP)UCS\d{6}_\d+$/;
 export const OFC_DOC = /^\d+_(OP|IP)\d{6}_\d+$/;
+
+/** เลขที่ STM UC ผู้ป่วยนอก -> งวดของรายงาน Hsub: "11252_OPUCS256910_01" -> "6910_OP_01" (= period_month + run_no ของ stm_file) ; อื่นๆ null */
+export function hsubPeriod(doc) {
+  const m = /^\d+_OPUCS\d\d(\d{2})(\d{2})_(\d+)$/.exec(doc ?? "");
+  return m ? `${m[1]}${m[2]}_OP_${m[3].padStart(2, "0")}` : null;
+}
 
 /**
  * อาร์กิวเมนต์ของทุกการเรียก name(...) ใน HTML (เช่น onclick="downloadBill('a','b')") เป็น string[] ต่อครั้ง
@@ -198,12 +208,36 @@ export function parseUcStmList(html) {
 /**
  * รายการ STM OFC (StatementReportWebActionList) -> [{ hcode, maininscl, personType, gyear, gmonth, revision, doc, argc }]
  * shortcut: ลำดับอาร์กิวเมนต์ getReportNCHReportRepOFC เดาจากลำดับ field ของ POST ดาวน์โหลด ผิดแล้ว "ตรวจรายการ" จะฟ้อง
+ * หน้า STM BMT (bmt/BmtViewAction) ใช้ getReportNCHReportRep ลำดับเดียวกัน (พบจริง: '11252','BMT','1','2027','10','21','11252_OP202610_21' gyear = ปีงบ)
  */
-export function parseOfcStmList(html) {
+export function parseOfcStmList(html, fn = "getReportNCHReportRepOFC") {
   const seen = new Set();
-  return callArgs(html, "getReportNCHReportRepOFC")
+  return callArgs(html, fn)
     .map((a) => ({ hcode: a[0], maininscl: a[1], personType: a[2], gyear: a[3], gmonth: a[4], revision: a[5], doc: a[6], argc: a.length }))
     .filter((r) => !seen.has(r.doc) && seen.add(r.doc));
+}
+
+/**
+ * รายการรายงานพึงจ่าย รพ.สต. (statement_hsub/viewPage.do, TYPE_STMT 2 = พึงจ่าย) -> [{ period, gyear, issued, argc }]
+ * แถว: ลำดับ | ปีงบ | STMT_PERIOD | วันที่ออก Statement | ปุ่ม downloadReportExcel('6910_OP_01', '2027')
+ * ไม่พบ "พบข้อมูลทั้งหมด N รายการ" หรือจำนวนไม่ตรง (เช่น แบ่งหน้า) = throw ไม่ให้ตกหล่นเงียบ
+ */
+export function parseHsubList(html) {
+  const out = [];
+  for (const tr of html.replace(/<!--[\s\S]*?-->/g, "").split(/<tr[\s>]/i).slice(1)) {
+    const calls = callArgs(tr, "downloadReportExcel");
+    if (!calls.length) continue;
+    const dates = cellsOf(tr).filter((c) => /^\d{2}\/\d{2}\/25\d\d$/.test(c));
+    for (const a of calls) out.push({ period: a[0], gyear: a[1], issued: dates.length === 1 ? dates[0] : null, argc: a.length });
+  }
+  const total = /พบข้อมูลทั้งหมด\s*([\d,]+)\s*รายการ/.exec(html)?.[1];
+  if (total == null) {
+    // แนบข้อความต้นหน้า (หน้ารายการไม่มีข้อมูลผู้ป่วย) ไว้ดูว่า e-Claim ตอบอะไร
+    const got = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(`หน้ารายการ Hsub ไม่ตรงที่คาด (ไม่พบจำนวนรายการ)${got ? `: ${got}` : ""}`);
+  }
+  if (Number(total.replace(/,/g, "")) !== out.length) throw new Error(`รายการ Hsub อ่านได้ ${out.length} จาก ${total} (หน้าเปลี่ยนหรือแบ่งหน้า แจ้งผู้ดูแลแก้ parseHsubList)`);
+  return out;
 }
 
 // ---------- คำขอไป e-Claim: ผู้เรียกส่งแค่ชนิดกับค่า URL สร้างที่นี่ที่เดียว และตรวจทุกค่าก่อน (extension ไม่ยิง URL ที่หน้าเว็บส่งมา) ----------
@@ -216,6 +250,7 @@ const FIELD = {
   m: /^([1-9]|1[0-2])$/, ye: /^25\d\d$/, scheme: /^(ucs|ofc|lgo|bkk|bmt)$/, hcode: /^\d{5}$/, fn: REP_FILE,
   fy: /^20\d\d$/, mm: /^(0[1-9]|1[0-2])$/, y: /^20\d\d$/,
   doc: code, personType: /^\d{1,2}$/, hname: /^[^\0-\x1f<>]{0,200}$/u, provinceName: /^[^\0-\x1f<>]{0,200}$/u,
+  period: /^\d{4}_OP_\d{2}$/,
   zone: code, province: code, maininscl: code, gyear: /^20\d\d$/, gmonth: /^(0?[1-9]|1[0-2])$/, revision: /^\d{1,3}$/,
 };
 
@@ -232,10 +267,21 @@ const REQ = {
     zone: p.zone, province_id: p.province, hcode: p.hcode, maininscl: "OFC", gyear: p.y, gmonth: p.mm, ddlPerson_type: "" })}`, null]],
   ofcFile: [["hcode", "maininscl", "personType", "gyear", "gmonth", "revision", "doc"], (p) => ["/webComponent/nch/RepStatementOFCReportExcelWebAction.do",
     qs({ hcode: p.hcode, maininscl: p.maininscl, person_type: p.personType, gyear: p.gyear, gmonth: p.gmonth, revision: p.revision, documentno: p.doc })]],
+  // STM BMT (ขสมก.): รายการต่อเดือนปฏิทิน (ddlYear ค.ศ., ddlMonth ไม่เติม 0 ตามที่ทดสอบกับหน้าจริง) × OP/IP ไม่ต้องใช้ zone/จังหวัด ; ดาวน์โหลด field เดียวกับ ofcFile
+  bmtList: [["hcode", "y", "m", "personType"], (p) => [`/webComponent/bmt/BmtViewAction.do?${qs({
+    ddlZone: "", ddlProvince: "", ddlLHospital: p.hcode, maininscl: "BMT", ddlStatus: "", ddlYear: p.y, ddlMonth: p.m, ddlPerson_type: p.personType, chkhcode: "N" })}`, null]],
+  bmtFile: [["hcode", "maininscl", "personType", "gyear", "gmonth", "revision", "doc"], (p) => ["/webComponent/bmt/StatementReportExcelWebAction.do",
+    qs({ hcode: p.hcode, maininscl: p.maininscl, person_type: p.personType, gyear: p.gyear, gmonth: p.gmonth, revision: p.revision, documentno: p.doc })]],
+  hsubList: [["fy"], (p) => ["/webComponent/statement_hsub/viewPage.do", qs({ PAGE_HEAD: "", TYPE_STMT: "2", GYEAR: p.fy, STMT_PERIOD: "" })]],
+  // field ครบตามฟอร์ม op43-excel-form ของหน้า (ZONE/PROVINCE/HCODE ว่าง, gyear/hcode_report_excel เป็น hidden ค่าคงที่ของหน้า)
+  hsubFile: [["fy", "period"], (p) => [`/webComponent/statement_hsub/DownloadExcelPage.do?${qs({
+    return_gyear: p.fy, return_stmt_period: p.period, TYPE_STMT: "2", ZONE: "", PROVINCE: "", HCODE: "", VAR_HCODE2: "", gyear_report_excel: "2019", hcode_report_excel: "13814" })}`, null]],
 };
 
-export const PARSERS = { repList: parseRepList, ucsList: parseUcStmList, ofcList: parseOfcStmList };
-const FILE_KINDS = ["repFile", "ucsFile", "ofcFile"];
+export const PARSERS = {
+  repList: parseRepList, ucsList: parseUcStmList, ofcList: parseOfcStmList, bmtList: (h) => parseOfcStmList(h, "getReportNCHReportRep"), hsubList: parseHsubList,
+};
+const FILE_KINDS = ["repFile", "ucsFile", "ofcFile", "bmtFile", "hsubFile"];
 
 /** ชนิดคำขอ + ค่า -> { url, body } (path ของ e-Claim) ; ชนิดหรือค่าผิดคืน { error } */
 export function ecRequest(kind, p) {
@@ -305,17 +351,18 @@ async function step(signal, delayMs) {
   if (signal?.aborted) throw new Stop(CANCELLED);
 }
 
+/** key ของทุกแถวที่นำเข้าแล้ว (key เป็น array = object ของ field เหล่านั้นต่อแถว) */
 async function appValues(io, path, key) {
   const r = await io.done(path, key);
   if (r.status === 401) throw new Stop(APP_EXPIRED);
   if (r.status) throw new Stop(`อ่านรายการที่นำเข้าแล้วจาก ${path} ไม่ได้ (HTTP ${r.status})`);
-  return new Set(r.values);
+  return r.values;
 }
 
 /**
  * @typedef {{ found: number, already: number, pending: number, imported: number, failed: number, skipped: number }} GroupStat
- * @typedef {{ status: string, rows?: number, error?: string }} ImportResult
- * @typedef {{ g: string, name: string, kind: string, p: Record<string, string | number>, path: string, fields: Record<string, string>, repNo?: string | null, date?: string, result?: ImportResult }} Todo
+ * @typedef {{ status: string, rows?: number, cases?: number, error?: string }} ImportResult
+ * @typedef {{ g: string, name: string, kind: string, p: Record<string, string | number>, path: string, fields: Record<string, string>, repNo?: string | null, date?: string, stmDoc?: string, result?: ImportResult }} Todo
  * @typedef {{ hcode: string | null, stats: Record<string, GroupStat>, skips: { g: string, reason: string, n: number }[], failures: { g: string, what: string, msg: string }[], todo: Todo[] }} Plan
  */
 
@@ -335,7 +382,7 @@ function fail(res, g, what, msg) {
 }
 
 /**
- * อ่านรายการ REP ทุกสิทธิ, STM UC และ STM OFC ในช่วง from..to (YYYY-MM ค.ศ.) แล้วแยกว่านำเข้าแล้ว / จะนำเข้า / ข้าม
+ * อ่านรายการ REP ทุกสิทธิ, STM UC, Hsub (รายงานพึงจ่าย รพ.สต.), STM OFC และ STM BMT ในช่วง from..to (YYYY-MM ค.ศ.) แล้วแยกว่านำเข้าแล้ว / จะนำเข้า / ข้าม
  * คืน { hcode, stats, skips, failures, todo: [{ g, name, kind, p, path, fields, repNo?, date? }] }
  * Stop = หยุดทั้งรอบ ; ข้อผิดพลาดของรายการเดียวลง failures แล้วทำต่อ
  * @param {{ from: string, to: string, hcode?: string, zone?: string, province?: string }} opt
@@ -348,7 +395,8 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
   const res = { hcode: null, stats: {}, skips: [], failures: [], todo: [] };
   const ms = months(opt.from, opt.to);
   const [fyFrom, fyTo] = [fiscalYear(opt.from), fiscalYear(opt.to)];
-  const total = ms.length * REP_SCHEMES.length + (fyTo - fyFrom + 1) * 12 + ms.length;
+  const [lo, hi] = [`${opt.from}-01`, `${opt.to}-31`]; // ช่วงวันที่ออก Statement (STM UC, Hsub)
+  const total = ms.length * REP_SCHEMES.length + (fyTo - fyFrom + 1) * 13 + ms.length * 3; // REP, STM UC 12 + Hsub 1 ต่อปีงบ, OFC 1 + BMT 2 ต่อเดือน
   let done = 0;
   const list = async (g, label, kind, p) => {
     await step(signal, delayMs);
@@ -364,8 +412,9 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
     }
   };
 
-  const repDone = await appValues(io, "/api/fund/rep-import", "file_name");
-  const stmDone = await appValues(io, "/api/fund/stm-import", "doc_no");
+  const repDone = new Set(await appValues(io, "/api/fund/rep-import", "file_name"));
+  const stmRows = await appValues(io, STM_PATH, ["id", "doc_no", "has_hsub"]);
+  const stmDone = new Set(stmRows.map((r) => r.doc_no));
   const hcode = opt.hcode ?? [...repDone].map((n) => /^eclaim_(\d+)_/.exec(n)?.[1]).find(Boolean);
   if (!hcode || !FIELD.hcode.test(hcode)) throw new Stop("ไม่รู้รหัสหน่วยบริการ: นำเข้าไฟล์ REP ด้วยมือก่อนอย่างน้อย 1 ไฟล์ (หรือใส่ --hcode= เมื่อรันคำสั่ง)");
   res.hcode = hcode;
@@ -401,7 +450,6 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
   // shortcut: 12 request ต่อปีงบ ลดเหลือเฉพาะเดือนในช่วงเมื่อยืนยันความหมายของ month กับหน้าจริงแล้ว
   {
     const g = "STM UCS";
-    const [lo, hi] = [`${opt.from}-01`, `${opt.to}-31`];
     const seen = new Set();
     for (let fy = fyFrom; fy <= fyTo; fy++) {
       for (let mm = 1; mm <= 12; mm++) {
@@ -434,6 +482,66 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
     }
   }
 
+  // Hsub: หนึ่ง request ต่อปีงบ (GYEAR = ปีงบของวันที่ออก) ; จับคู่ STM UC OP ด้วยงวด YYMM_OP_NN ตรงตัว (ไม่เดาจากเดือน)
+  // STM คู่ที่จะนำเข้าในรอบนี้อยู่ก่อนใน todo จึงนำเข้า STM ก่อน แล้ว run หา stm_file_id ตอนถึงคิว
+  {
+    const g = "Hsub รพ.สต.";
+    const stmBy = new Map();
+    for (const r of stmRows) if (hsubPeriod(r.doc_no)) stmBy.set(hsubPeriod(r.doc_no), r);
+    for (const t of res.todo) {
+      const k = t.kind === "ucsFile" ? hsubPeriod(String(t.p.doc)) : null;
+      if (k && !stmBy.has(k)) stmBy.set(k, { doc_no: String(t.p.doc) });
+    }
+    const seen = new Set();
+    for (let fy = fyFrom; fy <= fyTo; fy++) {
+      for (const it of await list(g, `ปีงบ ${fy + 543}`, "hsubList", { fy })) {
+        if (seen.has(it.period)) continue;
+        seen.add(it.period);
+        const issued = beToIso(it.issued);
+        if (issued && (issued < lo || issued > hi)) continue;
+        const s = stat(res, g);
+        s.found++;
+        if (it.argc < 2 || !FIELD.period.test(it.period) || !FIELD.fy.test(it.gyear)) {
+          fail(res, g, it.period || "?", `รูปแบบปุ่มดาวน์โหลดไม่ตรงที่คาด (${it.argc} ค่า)`);
+          continue;
+        }
+        if (!issued) {
+          fail(res, g, it.period, "ไม่พบวันที่ออก Statement ในรายการ");
+          continue;
+        }
+        const stm = stmBy.get(it.period);
+        if (!stm) {
+          skip(res, g, HSUB_NO_STM);
+          continue;
+        }
+        if (stm.has_hsub) {
+          s.already++;
+          continue;
+        }
+        s.pending++;
+        res.todo.push({
+          g, name: `Hsub_${it.period}.xls`, kind: "hsubFile", p: { fy: it.gyear, period: it.period }, path: HSUB_PATH, date: issued,
+          fields: stm.id ? { stm_file_id: String(stm.id) } : {}, stmDoc: stm.doc_no,
+        });
+      }
+    }
+  }
+
+  // STM แบบ OFC (OFC, BMT): ปุ่มดาวน์โหลดและไฟล์แบบเดียวกัน ; ไม่ส่ง transfer_date: route ใช้ "ออกรายงานวันที่" ในไฟล์แทน (OFC_DATE_NOTE)
+  const csmbsItem = (g, it, seen, kind, name, fields) => {
+    if (seen.has(it.doc)) return;
+    seen.add(it.doc);
+    const s = stat(res, g);
+    s.found++;
+    if (it.argc < 7 || !OFC_DOC.test(it.doc)) return fail(res, g, it.doc || "?", `รูปแบบปุ่มดาวน์โหลดไม่ตรงที่คาด (${it.argc} ค่า)`);
+    if (stmDone.has(it.doc)) return void s.already++;
+    s.pending++;
+    res.todo.push({
+      g, name, kind, path: STM_PATH, fields,
+      p: { hcode: it.hcode, maininscl: it.maininscl, personType: it.personType, gyear: it.gyear, gmonth: it.gmonth, revision: it.revision, doc: it.doc },
+    });
+  };
+
   // STM OFC: zone/จังหวัดจาก option (--zone/--province) หรือหน้า Statement OFC ที่ io.select อ่านในแท็บ e-Claim
   {
     const g = "STM OFC";
@@ -446,24 +554,20 @@ export async function plan(opt, io, { signal, onProgress = () => {}, delayMs = D
       const seen = new Set();
       for (const { y, m } of ms) {
         for (const it of await list(g, `${pad(m)}/${y + 543}`, "ofcList", { zone, province, hcode, y, mm: pad(m) })) {
-          if (seen.has(it.doc)) continue;
-          seen.add(it.doc);
-          const s = stat(res, g);
-          s.found++;
-          if (it.argc < 7 || !OFC_DOC.test(it.doc)) {
-            fail(res, g, it.doc || "?", `รูปแบบปุ่มดาวน์โหลดไม่ตรงที่คาด (${it.argc} ค่า)`);
-            continue;
-          }
-          if (stmDone.has(it.doc)) {
-            s.already++;
-            continue;
-          }
-          s.pending++;
-          // ไม่ส่ง transfer_date: route ใช้ "ออกรายงานวันที่" ในไฟล์แทน (OFC_DATE_NOTE)
-          res.todo.push({
-            g, name: `STM_${it.doc}.xls`, kind: "ofcFile", path: "/api/fund/stm-import", fields: {},
-            p: { hcode: it.hcode, maininscl: it.maininscl, personType: it.personType, gyear: it.gyear, gmonth: it.gmonth, revision: it.revision, doc: it.doc },
-          });
+          csmbsItem(g, it, seen, "ofcFile", `STM_${it.doc}.xls`, {});
+        }
+      }
+    }
+  }
+
+  // STM BMT (ขสมก.): ไฟล์เหมือน OFC ทุกช่อง จึงส่ง scheme ให้ route บันทึกเป็น BMT ; ชื่อไฟล์มี BMT ให้แยกด้วยตาได้
+  {
+    const g = "STM BMT";
+    const seen = new Set();
+    for (const { y, m } of ms) {
+      for (const personType of ["1", "2"]) {
+        for (const it of await list(g, `${personType === "1" ? "OP" : "IP"} ${pad(m)}/${y + 543}`, "bmtList", { hcode, y, m, personType })) {
+          csmbsItem(g, it, seen, "bmtFile", `STM_BMT_${it.doc}.xls`, { scheme: "BMT" });
         }
       }
     }
@@ -497,10 +601,17 @@ async function importOne(it, io, signal, delayMs) {
  * @param {{ signal?: AbortSignal, onItem?: (it: Todo) => void, delayMs?: number }} [hooks]
  */
 export async function run(res, io, { signal, onItem = () => {}, delayMs = DELAY_MS } = {}) {
+  let stmIds; // doc_no -> stm_file.id อ่านเมื่อ Hsub ตัวแรกที่ STM คู่เพิ่งนำเข้าในรอบนี้ถึงคิว (STM อยู่ก่อนใน todo)
   for (const it of res.todo) {
     if (it.result) continue;
     let out;
     try {
+      if (it.kind === "hsubFile" && !it.fields.stm_file_id) {
+        stmIds ??= new Map((await appValues(io, STM_PATH, ["id", "doc_no"])).map((r) => [r.doc_no, String(r.id)]));
+        const id = stmIds.get(it.stmDoc);
+        if (!id) throw new Error(HSUB_STM_FAILED);
+        it.fields.stm_file_id = id;
+      }
       out = await importOne(it, io, signal, delayMs);
     } catch (e) {
       if (e instanceof Stop) throw e;

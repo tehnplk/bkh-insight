@@ -45,7 +45,20 @@ const baseColumns = [
   }),
   col.accessor("scheme", { header: "สิทธิ", cell: (c) => SCHEMES[c.getValue()] ?? c.getValue(), meta: { filter: { format: (v) => SCHEMES[v] ?? v } } }),
   col.accessor("patient_type", { header: "OP/IP", meta: { filter: true } }),
-  col.accessor("doc_no", { header: "เลขที่เอกสาร", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("doc_no", {
+    header: "เลขที่เอกสาร",
+    cell: (c) => (
+      <>
+        {c.getValue()}
+        {c.row.original.has_hsub && (
+          <span title="มีรายงานพึงจ่าย รพ.สต. แล้ว" className="ml-1.5 rounded border border-success-line bg-success-soft px-1.5 py-0.5 text-xs font-medium text-success">
+            Hsub
+          </span>
+        )}
+      </>
+    ),
+    meta: { className: "whitespace-nowrap", filter: true },
+  }),
   col.accessor("transfer_date", { header: "วันที่ออก STM", cell: (c) => formatThaiDate(c.getValue()), meta: { className: "whitespace-nowrap tabular-nums", filter: { format: (v) => formatThaiDate(v) || v } } }),
   col.accessor("row_count", { header: "จำนวนรายการ", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
   col.accessor("paid_total", { header: "ยอดชดเชย (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
@@ -70,7 +83,8 @@ const adminColumns = col.columns([
   }),
 ]);
 
-const renderDetail = (r: StmFileRow) => <StmFileDetailView id={r.id} />;
+const renderDetail = (r: StmFileRow) => <StmFileDetailView id={r.id} admin={false} />;
+const renderAdminDetail = (r: StmFileRow) => <StmFileDetailView id={r.id} admin />;
 const detailTitle = (r: StmFileRow) => <span className="break-all">{r.doc_no}</span>;
 
 const smallBtn = "inline-flex h-7 items-center rounded-md border px-2.5 font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50";
@@ -354,7 +368,7 @@ export function StmImport({ admin }: { admin: boolean }) {
           endpoint="/api/fund/stm-import"
           columns={admin ? adminColumns : columns}
           getRowId={(r) => r.id}
-          renderDetail={renderDetail}
+          renderDetail={admin ? renderAdminDetail : renderDetail}
           detailTitle={detailTitle}
           detailSize="medium"
         />

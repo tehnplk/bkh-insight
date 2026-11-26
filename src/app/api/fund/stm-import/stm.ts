@@ -1,4 +1,4 @@
-// แปลงไฟล์ Statement การโอนเงิน (STM) ของ สปสช. (UC) และกรมบัญชีกลาง (OFC) .xls BIFF8 เป็นแถวสำหรับฐาน insight
+// แปลงไฟล์ Statement การโอนเงิน (STM) ของ สปสช. (UC) และกรมบัญชีกลาง (OFC, แบบเดียวกับ ขสมก. BMT) .xls BIFF8 เป็นแถวสำหรับฐาน insight
 // ไม่อ่านคอลัมน์ชื่อ-สกุล และไม่ import ของ server จึงรันทดสอบด้วย node ได้ (stm.test.mjs)
 import { read, utils, type WorkSheet } from "xlsx";
 import { dateTime, printedAt, text } from "../rep-import/rep";
@@ -48,6 +48,7 @@ export type StmSummary = {
 export type ParsedStm = {
   docNo: string;
   hcode: string;
+  /** จากไฟล์: csmbs เป็น "OFC" เสมอ route ตัดสินสิทธิจริงด้วย csmbsScheme */
   scheme: "UCS" | "OFC";
   layout: "uc" | "csmbs";
   patientType: "OP" | "IP";
@@ -316,6 +317,21 @@ function parseUc(sheets: [string, WorkSheet][]): Omit<ParsedStm, "docNo" | "hcod
 }
 
 // ---------- OFC / CSMBS (OP{yyyymm} / IP{yyyymm}) ----------
+// STM ของ ขสมก. (BMT) และ BKK เป็นไฟล์แบบเดียวกับ OFC ทุกช่อง (หัวตาราง เลขที่เอกสาร) ในไฟล์จึงแยกสิทธิไม่ได้ ดู csmbsScheme
+
+/** สิทธิที่ผู้นำเข้าระบุให้ STM แบบ csmbs ได้ (นำเข้าอัตโนมัติส่ง BMT) */
+export const CSMBS_SCHEMES = ["OFC", "BMT"];
+
+/**
+ * สิทธิของไฟล์ STM แบบ csmbs: scheme ของ REP ในไฟล์ (rep_row ที่ไม่ใช่ UCS) ก่อน เพราะเป็นหลักฐานจากไฟล์ REP จริง
+ * แล้วค่อยค่าที่ผู้นำเข้าระบุ ไม่มีทั้งคู่ = OFC ; REP หลายสิทธิ หรือไม่ตรงกับที่ระบุ = throw
+ */
+export function csmbsScheme(sent: string | null, repSchemes: string[]): string {
+  if (repSchemes.length > 1) throw new Error(`REP ในไฟล์เป็นหลายสิทธิ (${repSchemes.join(", ")})`);
+  const rep = repSchemes[0] ?? null;
+  if (rep && sent && rep !== sent) throw new Error(`REP ในไฟล์เป็นสิทธิ ${rep} ไม่ตรงกับ STM ${sent} ที่ระบุ`);
+  return rep ?? sent ?? "OFC";
+}
 
 const OFC_DETAIL_HEAD: [number, string][] = [
   [0, "REP"], [1, "ลำดับที่"], [2, "HN"], [3, "AN"], [4, "PID"], [6, "วันเข้ารักษา"], [7, "วันจำหน่าย"], [8, "PROJCODE"],
@@ -402,6 +418,120 @@ function parseOfc(detailWs: WorkSheet, summaryWs: WorkSheet) {
   }
   const paidTotal = baht([...sumRep.values()].reduce((a, b) => a + b, 0));
   return { rows, summaries, paidTotal, deduction: 0, netTotal: paidTotal };
+}
+
+// ---------- รายงานพึงจ่าย รพ.สต. (Hsub) ----------
+// รายรายเหมือนชีตรายละเอียด UC แต่มีคอลัมน์หน่วยบริการ 6 คอลัมน์ (11–16) กองทุนเลื่อน 6 ช่อง ไม่มี OPBKK/VA/COVID/แหล่งข้อมูล/SEQ NO
+// และแถวรวมไม่มีป้าย "รวม" offset จึงไม่เท่ากันทั้งแถว ใช้ ucDetail ไม่ได้ ; อ่านด้วย helper ชุดเดียวกัน
+// คืนเฉพาะยอดรวมต่อ (ส่วน, รพ.สต., REP) ไม่คืนข้อมูลรายผู้ป่วย (PDPA: ผู้ป่วยของ รพ.สต.)
+
+export type HsubSummary = { section: StmSection; hcode: string; rep_no: string; cases: number; amounts: Record<string, number>; net: number };
+
+export type ParsedHsub = {
+  /** HCODE_PAID = หน่วยบริการที่รับเงินแทน (ต้องเป็นโรงพยาบาลเอง) */
+  hcodePaid: string;
+  /** YYYY-MM-01 (ค.ศ.) จาก REP ของข้อมูลปกติ (YYMM พ.ศ.) */
+  periodMonth: string;
+  printedAt: string | null;
+  cases: number;
+  netTotal: number;
+  amounts: Record<string, number>;
+  summaries: HsubSummary[];
+};
+
+const HSUB_HEAD: [number, string][] = [[0, "REP"], [1, "ลำดับที่"], [2, "TRAN_ID"], [11, "หน่วยบริการ"], [17, "เรียกเก็บ"], [18, "กองทุน IP"], [42, "ยอดชดเชยทั้งสิ้น"]];
+const HSUB_HEAD2: [number, string][] = [
+  [13, "HCODE"], [16, "HCODE_PAID"], [27, "OP"], [28, "IP"], [30, "HC"], [32, "AE"], [34, "INST"], [35, "DMIS"], [38, "Palliative care"],
+  [39, "DMISHD"], [40, "PP"], [41, "FS"],
+];
+const HSUB_FUNDS = UC_FUNDS.slice(0, 15); // OP..FS คอลัมน์ 27–41
+const HSUB_TOTAL = 42;
+
+/** อ่านรายงานพึงจ่าย รพ.สต. ส่วนที่มีแถวรวมต้องตรงกับผลรวมรายราย (ไม่ตรง = throw) ไม่มีแถวรวมใช้ผลรวมรายราย */
+export function parseHsub(buf: Uint8Array): ParsedHsub {
+  let wb;
+  try {
+    wb = read(buf, { type: "buffer" });
+  } catch {
+    throw new Error("อ่านไฟล์ไม่ได้ ไม่ใช่ไฟล์ Excel");
+  }
+  const sheet = norm(wb.SheetNames[0]);
+  const aoa = toAoa(wb.Sheets[wb.SheetNames[0]] ?? {});
+  const title = norm(aoa[0]?.[0]);
+  if (!title.startsWith("รายงานพึงจ่าย")) throw new StmUnsupportedError("ไม่ใช่ไฟล์รายงานพึงจ่าย รพ.สต.");
+  const printed = /(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/.exec(title); // ค.ศ. ต่างจาก STM ที่เป็น พ.ศ.
+
+  const groups = new Map<string, { s: HsubSummary; amounts: Map<string, number>; net: number }>(); // cents
+  const detail: Totals = new Map();
+  const sums: Totals = new Map();
+  const paidBy = new Set<string>();
+  let section: StmSection | null = null;
+  let head = false;
+  for (let r = 0; r < aoa.length; r++) {
+    const v = aoa[r] ?? [];
+    const c0 = norm(v[0]);
+    if (c0 === "ความหมายแต่ละคอลัมน์") break;
+    const s = sectionOf(c0, sheet);
+    if (s) {
+      section = s;
+      head = false;
+      continue;
+    }
+    if (c0 === "REP" && norm(v[2]) === "TRAN_ID") {
+      checkKeys(sheet, v, HSUB_HEAD);
+      checkKeys(sheet, aoa[r + 1] ?? [], HSUB_HEAD2);
+      head = true;
+      continue;
+    }
+    if (!section || !head) continue;
+    if (!c0 && amount(v[HSUB_TOTAL]) !== null) {
+      add(sums, section, cents(amount(v[HSUB_TOTAL]) ?? 0)); // แถวรวมของส่วน (ไม่มีป้าย)
+      continue;
+    }
+    if (!digits(v[0]) || !digits(v[2])) continue;
+    const paid = amount(v[HSUB_TOTAL]);
+    if (paid === null) throw new Error(`แถว ${r + 1} ไม่มียอดชดเชยทั้งสิ้น`);
+    const hcode = norm(v[13]);
+    if (!/^\d{5}$/.test(hcode)) throw new Error(`แถว ${r + 1} HCODE ไม่ถูกต้อง`);
+    paidBy.add(norm(v[16]));
+    const k = `${section}|${hcode}|${c0}`;
+    const g = groups.get(k) ?? { s: { section, hcode, rep_no: c0, cases: 0, amounts: {}, net: 0 }, amounts: new Map(), net: 0 };
+    groups.set(k, g);
+    g.s.cases++;
+    g.net += cents(paid);
+    for (const [f, n] of Object.entries(funds(v, range(27, HSUB_FUNDS.length), HSUB_FUNDS))) g.amounts.set(f, (g.amounts.get(f) ?? 0) + cents(n));
+    add(detail, section, cents(paid));
+  }
+  if (!groups.size) throw new Error("ไม่พบรายการในไฟล์");
+  // ไฟล์ดิบจาก e-Claim ไม่มีแถวรวม (แถวรวมเกิดจากผู้ใช้ใส่สูตรเอง) จึงตรวจเฉพาะส่วนที่มีแถวรวม
+  for (const [s, t] of sums) {
+    const d = detail.get(s) ?? 0;
+    if (d !== t) throw new Error(`ยอดรวมไม่ตรงกัน (${s}): รายการ ${fmt(d)}, แถวรวม ${fmt(t)}`);
+  }
+  if (paidBy.size !== 1) throw new Error(`HCODE_PAID ในไฟล์ไม่เป็นค่าเดียว (${[...paidBy].join(", ")})`);
+
+  const all = [...groups.values()];
+  // เดือน = REP ล่าสุดของข้อมูลปกติ เพราะ STM งวดเดือนนี้มี REP ค้างของเดือนก่อนในข้อมูลปกติได้ (6910_OP_01 มี REP 6909…)
+  // และอุทธรณ์อาจเป็น REP เก่า ; ไม่มีข้อมูลปกติใช้ทุก REP
+  const normal = all.filter((g) => g.s.section === "normal");
+  const months = [...new Set((normal.length ? normal : all).map((g) => g.s.rep_no.slice(0, 4)))].sort();
+  const ym = months.at(-1)!;
+  if (months.some((m) => !/^\d{4}$/.test(m) || +m.slice(2) < 1 || +m.slice(2) > 12)) throw new Error(`REP ในไฟล์ระบุเดือนไม่ได้ (${months.join(", ")})`);
+
+  const total = new Map<string, number>();
+  const summaries = all.map((g) => {
+    for (const [f, c] of g.amounts) total.set(f, (total.get(f) ?? 0) + c);
+    return { ...g.s, amounts: Object.fromEntries([...g.amounts].map(([f, c]) => [f, baht(c)])), net: baht(g.net) };
+  });
+  return {
+    hcodePaid: [...paidBy][0],
+    periodMonth: `${2500 + +ym.slice(0, 2) - 543}-${ym.slice(2)}-01`,
+    printedAt: printed ? dateTime(printed[1]) : null,
+    cases: summaries.reduce((a, s) => a + s.cases, 0),
+    netTotal: baht(all.reduce((a, g) => a + g.net, 0)),
+    amounts: Object.fromEntries([...total].map(([f, c]) => [f, baht(c)])),
+    summaries,
+  };
 }
 
 // ---------- entry ----------

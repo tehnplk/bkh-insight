@@ -6,6 +6,10 @@ import { clearPersistedFilters, setStorageUser } from "@/lib/persisted-filter";
 import { Icon } from "./icons";
 import { adminSection } from "./nav-items";
 
+/** จุดแจ้งเตือนต่อลิงก์ในเมนู (key = href) danger = สีแดง notice = สี accent */
+export type MenuAlerts = Record<string, { level: "notice" | "danger"; reason: string }>;
+const dotClass = (level: "notice" | "danger") => `size-2 shrink-0 rounded-full ${level === "danger" ? "bg-danger" : "bg-accent"}`;
+
 // Thai leading vowels (เ แ โ ใ ไ) are written before the consonant; skip them so "เอก" gives "อ", not "เ".
 const initial = (name: string) => ([...name.trim()].find((c) => !/[เแโใไ]/.test(c)) ?? "?").toUpperCase();
 
@@ -21,12 +25,15 @@ export function ProfileMenu({
   name,
   userKey,
   admin = false,
+  alerts = {},
   signOut,
 }: {
   name: string;
   /** id ของผู้ใช้ใช้แยกค่าที่จำใน localStorage ต่อผู้ใช้ (เช่น ลำดับคอลัมน์) */
   userKey: string;
   admin?: boolean;
+  /** จุดแจ้งเตือนที่ลิงก์ admin และ avatar (ไม่ส่ง = ไม่มี) */
+  alerts?: MenuAlerts;
   signOut: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -34,6 +41,8 @@ export function ProfileMenu({
   const adminId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const alertList = Object.values(alerts);
+  const topAlert = alertList.find((a) => a.level === "danger") ?? alertList[0];
 
   // บอก storage ว่าใครใช้ browser นี้อยู่ (ค่าที่จำต่อผู้ใช้จะได้ไม่ปนกันบนเครื่องที่ใช้ร่วมกัน)
   useEffect(() => setStorageUser(userKey), [userKey]);
@@ -93,13 +102,15 @@ export function ProfileMenu({
       >
         <span
           aria-hidden="true"
-          className="grid size-7 shrink-0 place-items-center rounded-full border border-accent-line bg-accent-soft text-xs font-semibold text-accent-text"
+          className="relative grid size-7 shrink-0 place-items-center rounded-full border border-accent-line bg-accent-soft text-xs font-semibold text-accent-text"
         >
           {initial(name)}
+          {topAlert && <span className={`absolute -top-0.5 -right-0.5 ring-2 ring-surface ${dotClass(topAlert.level)}`} />}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium transition-opacity duration-150 collapsed:opacity-0 motion-reduce:transition-none">
           {name}
         </span>
+        {topAlert && <span className="sr-only">({topAlert.reason})</span>}
         <Icon
           name="chevron"
           className={`size-3.5 shrink-0 text-muted transition-transform duration-200 collapsed:opacity-0 motion-reduce:transition-none ${open ? "rotate-90" : "-rotate-90"}`}
@@ -127,7 +138,12 @@ export function ProfileMenu({
                 // Client navigation keeps the shell mounted, so close the popover by hand.
                 <Link key={link.href} href={link.href} role="menuitem" tabIndex={-1} onClick={() => menuRef.current?.hidePopover()} className={itemClass}>
                   <Icon name={adminSection.icon} className="size-4 shrink-0 text-muted" />
-                  {link.label}
+                  <span className="min-w-0 flex-1 truncate">{link.label}</span>
+                  {alerts[link.href] && (
+                    <span title={alerts[link.href].reason} className={dotClass(alerts[link.href].level)}>
+                      <span className="sr-only">{alerts[link.href].reason}</span>
+                    </span>
+                  )}
                 </Link>
               ))}
             </div>

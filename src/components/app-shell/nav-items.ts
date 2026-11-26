@@ -117,5 +117,6 @@ export const adminSection: NavSection = {
     { label: "ปิดงวดลูกหนี้", href: "/admin/ar-periods" },
     { label: "หน่วยบริการใน CUP", href: "/admin/cup" },
     { label: "บันทึกการเข้าถึง", href: "/admin/access-log" },
+    { label: "สำรองข้อมูล", href: "/admin/backup" },
   ],
 };
