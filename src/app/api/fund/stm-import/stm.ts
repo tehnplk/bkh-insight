@@ -550,7 +550,8 @@ export function parseStm(buf: Uint8Array): ParsedStm {
   const first = toAoa(sheets[0]?.[1] ?? {});
   const docNo = docNoOf(first);
 
-  const uc = byName.has("รายงานพึงรับ") && sheets.some(([n]) => /^รายละเอียด\(ข้อมูลปกติ\) \d+ (OP|IP)$/.test(n));
+  // STM อุทธรณ์อย่างเดียว (สปสช. อุทธรณ์/เรียกคืน เช่น 6908_OP_11) มีแต่ชีต "รายละเอียด(ข้อมูลอุทธรณ์) OP" ยอดติดลบได้
+  const uc = byName.has("รายงานพึงรับ") && sheets.some(([n]) => /^รายละเอียด\(ข้อมูล(ปกติ|อุทธรณ์)\)( \d+)? (OP|IP)$/.test(n));
   const ofc = byName.has("พึงรับ") && byName.has("สรุป(พึงรับ)");
   if (!uc && !ofc) throw new StmUnsupportedError("ไม่ใช่ไฟล์ STM รูปแบบที่รองรับ (UC หรือ OFC)");
   if (!docNo) throw new Error("ไม่พบเลขที่เอกสารในไฟล์");

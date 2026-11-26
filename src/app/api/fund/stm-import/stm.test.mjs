@@ -92,6 +92,33 @@ function ucBook({ summaryTotal = 13845.5 } = {}) {
   return write(wb, { type: "buffer", bookType: "xlsx" });
 }
 
+// STM อุทธรณ์อย่างเดียว (สปสช. เรียกคืน): ไม่มีชีตรายละเอียดข้อมูลปกติ ยอดติดลบ
+function ucAppealOnlyBook() {
+  const doc = "11252_IPUCS256907_07";
+  const detail = [
+    ...top(doc), ["ข้อมูลอุทธรณ์"], [], ...ucDetailHead(),
+    ucRow("690700201", 1, "726700001", { paid: -1200.25, an: "690000123" }),
+    ucRow("690700201", 2, "726700002", { paid: 200, an: "690000124" }),
+    ucSum(-1000.25),
+  ];
+  const sh1 = Object.assign(Array(28).fill(null), { 0: "งวด", 1: "HCODE", 2: "REP NO.", 3: "ประเภท", 4: "ทั้งหมดที่ผ่าน", 5: "เรียกเก็บ", 6: "พรบ.", 7: "พึงรับ", 23: "พึงรับทั้งหมด", 24: "COVID", 25: "แหล่งข้อมูล" });
+  const sh2 = Object.assign(Array(28).fill(null), { 7: "OP", 8: "IP", 10: "HC", 12: "AE", 14: "INST", 15: "DMIS", 22: "OPBKK" });
+  const sRow = Object.assign(Array(28).fill("0.00"), { 0: "6907_IP_07", 1: "11252", 2: "690700201", 3: "ข้อมูลอุทธรณ์", 4: "2", 5: "3,000.50", 8: "-1,000.25", 23: -1000.25, 25: "NHSO" });
+  const summary = [...top(doc), ["ข้อมูลปกติ"], [], sh1, sh2, [], Object.assign(Array(28).fill(null), { 22: "รวม", 23: 0 }), [],
+    ["ข้อมูลอุทธรณ์"], [], sh1, sh2, [], sRow, Object.assign(Array(28).fill(null), { 22: "รวม", 23: -1000.25 })];
+  const rHead = ["ประเภท", "จำนวน REP ที่ส่ง", "จำนวนราย (ผ่าน A)", "ผลรวม ADJRW", "จ่ายชดเชย", "ยอดหักเงินเดือน สป."];
+  const receivable = [
+    ["ออกรายงานวันที่ 10/09/2569 เวลา 10:00"], [], [], [], [], [`เลขที่เอกสาร ${doc}`], [], [],
+    ["ข้อมูลปกติ"], [], rHead, [null, null, null, null, "รวม", 0],
+    ["ข้อมูลอุทธรณ์"], [], rHead, ["ผู้ป่วยใน", "1", "2", "1.2000", -1000.25, 0], [null, null, null, null, "รวม", -1000.25],
+  ];
+  const wb = utils.book_new();
+  for (const [name, aoa] of [[" รายงานพึงรับ ", receivable], [" รายงานสรุป IP", summary], [" รายละเอียด(ข้อมูลอุทธรณ์) IP", detail]]) {
+    utils.book_append_sheet(wb, utils.aoa_to_sheet(aoa), name);
+  }
+  return write(wb, { type: "buffer", bookType: "xlsx" });
+}
+
 // ---------- OFC ----------
 
 const ofcHead = [
@@ -159,6 +186,14 @@ test("UC: normal + appeal + D1 sections, totals checked, stops at the column not
   const [s] = p.summaries;
   assert.deepEqual([s.period_label, s.passed, s.claim_total, s.source], ["6812_OP_01", 2, 3000.5, "FDH"]);
   assert.deepEqual(s.amounts, { OP: 12000 });
+});
+
+test("UC: appeal-only STM (recall) is read with negative totals", () => {
+  const p = parseStm(ucAppealOnlyBook());
+  assert.deepEqual([p.layout, p.scheme, p.docNo, p.patientType, p.periodMonth, p.runNo], ["uc", "UCS", "11252_IPUCS256907_07", "IP", "2026-07-01", 7]);
+  assert.deepEqual(p.rows.map((r) => [r.section, r.paid_total, r.an]), [["appeal", -1200.25, "690000123"], ["appeal", 200, "690000124"]]);
+  assert.deepEqual(p.summaries.map((s) => [s.section, s.rep_no, s.paid_total]), [["appeal", "690700201", -1000.25]]);
+  assert.deepEqual([p.paidTotal, p.deduction, p.netTotal], [-1000.25, 0, -1000.25]);
 });
 
 test("UC: a total that disagrees between sheets rejects the file", () => {
