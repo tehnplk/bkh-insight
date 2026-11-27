@@ -3,12 +3,13 @@ import { auth } from "@/auth";
 import { escapeLike, insightQuery } from "@/lib/db";
 import { parseColumnFilters, parseGridQuery, type GridPage } from "@/lib/grid-query";
 import { columnFilterWhere, loadFacet, type ColumnFilterDefs, type SqlValue } from "@/lib/column-filter-sql";
+import { formatBaht } from "@/lib/number-format";
 import { todayIso } from "@/lib/thai-date";
 import { xlsxResponse } from "@/lib/xlsx";
 import { LEDGER_START } from "../ar-sync/ledger";
 import { locked } from "../ar-sync/sync";
-import { parseSettleBody, planSettle, shouldClose, type SettleCounts, type SettleFileRow, type SettleResult } from "./settle";
-import { BATCH_COUNTS_SQL, BATCH_INSERT_SQL, SETTLE_INSERT_SQL, loadFile } from "./sql";
+import { REP_DISABLED_MSG, REP_SETTLE_ENABLED, repGateReason, parseSettleBody, planSettle, shouldClose, type SettleCounts, type SettleFileRow, type SettleResult } from "./settle";
+import { BATCH_COUNTS_SQL, BATCH_INSERT_SQL, REP_BATCH_INSERT_SQL, REP_SETTLE_INSERT_SQL, SETTLE_INSERT_SQL, loadFile, loadRep, repNotMigrated } from "./sql";
 
 // ตัดลูกหนี้ด้วย STM แบบ manual ทีละไฟล์ STM: GET รายการไฟล์ + สถานะการตัด (สัญญา DataGrid), POST ตัดหนี้ของไฟล์หนึ่งไฟล์
 // ผู้ที่ login ทุกคนตัดได้ (รวม super user) บันทึกชื่อผู้ตัดใน ar_settle_batch ; ตัดผิดแก้ด้วยคำขอปรับปรุงลูกหนี้ (ไม่มียกเลิกชุด)
@@ -80,26 +81,45 @@ class SettleError extends Error {
 const cents = (v: string | number) => Math.round(Number(v) * 100);
 
 /**
- * POST { stm_file_id, receipt_date, receipt_no, close?: key[], keep?: key[] } (key = "OP:<vn>" | "IP:<an>")
+ * POST { stm_file_id | rep_no, receipt_date, receipt_no, close?: key[], keep?: key[] } (key = "OP:<vn>" | "IP:<an>")
  * คำนวณแผนใหม่จากฐานภายใต้ lock ของ ar_ledger (ไม่เชื่อยอดจาก client) รับชำระทุกรายที่จับคู่ได้ของไฟล์
- * ปิดส่วนต่างตาม close (ติ๊กเพิ่ม) / keep (เอาค่าเริ่มต้นออก) ; กดซ้ำไม่ลงซ้ำ (unique ของ stm_row_id + ไม่มีบรรทัดที่ยังไม่ตัดแล้ว)
+ * ปิดส่วนต่างตาม close (ติ๊กเพิ่ม) / keep (เอาค่าเริ่มต้นออก) ; กดซ้ำไม่ลงซ้ำ (unique ของ stm_row_id / rep_tran_id + ไม่มีบรรทัดที่ยังไม่ตัดแล้ว)
+ * rep_no = ตัดด้วย REP ของสิทธิที่ไม่มี STM (REP_ACCOUNTS) แถว source stm อ้าง rep_tran_id แทน stm_row_id
+ *   ต้องผ่าน repGate (เงินโอน SMT ของ REP ลงรับแล้วและยอดตรง) ไม่งั้น 409 ; ใบเสร็จ/entry_date = ใบเสร็จของเงินโอน (ไม่ใช้ค่าจาก client)
  */
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
   const body = parseSettleBody(await request.json().catch(() => null), todayIso(), LEDGER_START);
   if ("error" in body) return Response.json({ error: body.error }, { status: 400 });
+  if (body.rep_no && !REP_SETTLE_ENABLED) return Response.json({ error: REP_DISABLED_MSG }, { status: 409 });
   const by = session.user.name ?? "";
   if (!by) return Response.json({ error: "ไม่พบชื่อผู้ใช้ใน session" }, { status: 400 });
   try {
     const result = await locked(async (tx): Promise<SettleResult> => {
-      const data = await loadFile(tx, body.stm_file_id);
-      if (!data) throw new SettleError("ไม่พบไฟล์ STM นี้", 404);
-      const entries = planSettle(data.lines, data.debts, { entryDate: body.receipt_date, close: (r) => shouldClose(r, body.close, body.keep) });
+      const rep = body.rep_no;
+      const repData = rep ? await loadRep(tx, rep) : null;
+      const data = rep ? repData : await loadFile(tx, body.stm_file_id!);
+      if (!data) throw new SettleError(rep ? "ไม่พบ REP นี้ในสิทธิที่ตัดด้วย REP ได้" : "ไม่พบไฟล์ STM นี้", 404);
+      let receipt = { receipt_date: body.receipt_date, receipt_no: body.receipt_no };
+      if (repData) {
+        const reason = repGateReason(repData.gate, formatBaht);
+        if (reason || !repData.gate.receipt) throw new SettleError(reason ?? "ไม่พบใบเสร็จของเงินโอน", 409);
+        receipt = repData.gate.receipt;
+      }
+      const entries = planSettle(data.lines, data.debts, { entryDate: receipt.receipt_date, close: (r) => shouldClose(r, body.close, body.keep) });
       if (!entries.length) throw new SettleError("ไม่มีรายการที่ตัดหรือปิดส่วนต่างได้ (ตัดไปแล้ว หรือยังไม่พบหนี้)", 409);
-      if (!body.receipt_no && entries.some((e) => e.kind === "settle")) throw new SettleError("กรอกเลขที่ใบเสร็จ", 400);
-      const [{ id }] = await tx<{ id: string }>(BATCH_INSERT_SQL, [body.stm_file_id, body.receipt_date, body.receipt_no, by, session.user.userId ?? null]);
-      const rows = await tx<{ kind: "settle" | "diff"; amount: string; shifted: boolean }>(SETTLE_INSERT_SQL, [JSON.stringify(entries), id]);
+      // REP: ใบเสร็จอยู่ที่เงินโอน (แถวที่ migration ถือว่ารับแล้วไม่มีเลขที่ได้)
+      if (!rep && !receipt.receipt_no && entries.some((e) => e.kind === "settle")) throw new SettleError("กรอกเลขที่ใบเสร็จ", 400);
+      const user = [receipt.receipt_date, receipt.receipt_no, by, session.user.userId ?? null];
+      const [{ id }] = rep
+        ? await tx<{ id: string }>(REP_BATCH_INSERT_SQL, [rep, data.file.scheme, ...user])
+        : await tx<{ id: string }>(BATCH_INSERT_SQL, [body.stm_file_id, ...user]);
+      // planSettle อ้างบรรทัดใน stm_row_id ; บรรทัดของ REP คือ tran_id -> rep_tran_id
+      const rows = await tx<{ kind: "settle" | "diff"; amount: string; shifted: boolean }>(
+        rep ? REP_SETTLE_INSERT_SQL : SETTLE_INSERT_SQL,
+        [JSON.stringify(rep ? entries.map(({ stm_row_id, ...e }) => ({ ...e, rep_tran_id: stm_row_id })) : entries), id],
+      );
       // ถือ lock อยู่จึงไม่ควรชน ถ้าชนทั้งหมดให้ ROLLBACK ไม่ทิ้งชุดว่างไว้
       if (!rows.length) throw new SettleError("รายการถูกตัดไปแล้ว", 409);
       const sum = (k: "settle" | "diff") => rows.filter((r) => r.kind === k).reduce((s, r) => s + cents(r.amount), 0) / 100;
@@ -113,6 +133,6 @@ export async function POST(request: NextRequest) {
     return Response.json(result);
   } catch (e) {
     if (e instanceof SettleError) return Response.json({ error: e.message }, { status: e.status });
-    throw e;
+    return repNotMigrated(e);
   }
 }

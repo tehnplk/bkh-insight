@@ -182,6 +182,34 @@ test("ADP.TYPE and drug split in rules match the exported ADP/DRU", async () => 
   }
 });
 
+test("C555: CHA.CHRGITEM and home drug match between export, count and rules; 16–18 → 19; items grouped by ADP TYPE category", async () => {
+  const { exportSql, CHRGITEM, HOME_DRUG } = await import("../files/sql.ts");
+  assert.ok(CHRGITEM.includes("WHEN inc.drg_chrgitem_id IN (16, 17, 18) THEN '19'") && CHRGITEM.includes(`IF(${HOME_DRUG}, '04', '03')`));
+  const lpad = (s) => s.split(CHRGITEM).join("").includes("LPAD(COALESCE(inc.drg_chrgitem_id");
+  for (const t of FDH_TYPES) {
+    const cha = exportSql(t, "CHA");
+    assert.ok(cha.includes(`${CHRGITEM} AS \`CHRGITEM\``) && cha.includes(`COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}, pt.cid`), `${t} export CHA`);
+    assert.ok(countDef(t, "CHA").sql.includes(`COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}, pt.cid`), `${t} count CHA`);
+    assert.ok(exportSql(t, "DRU").includes(`CASE WHEN ${HOME_DRUG} THEN '2' ELSE '1' END AS \`USE_STATUS\``), `${t} export DRU`);
+    for (const f of ["ADP", "DRU", "CHA", "CHT"]) {
+      const sql = ruleSummarySql(t, f);
+      assert.ok(sql.includes(`${CHRGITEM} AS CHRGITEM`) && !lpad(sql), `${t} ${f} rule`);
+      assert.ok(sql.includes(`CASE WHEN ${HOME_DRUG} THEN '2' ELSE '1' END AS USE_STATUS`), `${t} ${f} dru_s`);
+    }
+    assert.ok(!lpad(cha) && !lpad(countDef(t, "CHA").sql), t);
+    assert.ok(ruleSummarySql(t, "CHA").includes("WHEN 8 THEN CHRGITEM ELSE '19' END") && ruleSummarySql(t, "CHA").includes("ABS(COALESCE(A, 0) - T)"), `${t} C555 ITEM_CAT`);
+  }
+});
+
+test("INS: OWNRPID/OWNNAME from the right holder of this pttype (same as e-Claim), RELINSCL empty, no parent CID", async () => {
+  const { exportSql } = await import("../files/sql.ts");
+  for (const t of FDH_TYPES) {
+    const ins = exportSql(t, "INS");
+    assert.ok(ins.includes("COALESCE(ap.nhso_ownright_pid, '') AS `OWNRPID`, COALESCE(ap.nhso_ownright_name, '') AS `OWNNAME`"), t);
+    assert.ok(ins.includes("'' AS `RELINSCL`") && !/father|mother/.test(ins), t);
+  }
+});
+
 test("C555: every file and rule uses the same line amount/rate; no raw sum_price total left", async () => {
   const { exportSql, ITEM_LINE, ITEM_RATE } = await import("../files/sql.ts");
   const raw = /SUM\(op\.sum_price\)|ROUND\(op\.sum_price, 2\) AS|THEN op\.sum_price ELSE/;

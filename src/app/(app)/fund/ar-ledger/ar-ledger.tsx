@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { copyable } from "@/components/copy-button/copy-button";
 import type { GridPage } from "@/lib/grid-query";
@@ -14,6 +15,7 @@ import { CaseResync } from "../_components/case-resync";
 import { AdjustRequestForm, AdjustRequests, CashReceiptForm, Journal, TrialBalance } from "./ar-ledger-extras";
 import { fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { KIND_LABEL } from "@/app/api/fund/ar-sync/ledger";
+import { REP_ACCOUNTS } from "@/app/api/fund/ar-settle/settle";
 import type { AccountBalance, ArLedgerSummary } from "@/app/api/fund/ar-ledger/route";
 import type { LedgerEntry } from "@/app/api/fund/ar-ledger/entries/route";
 import type { SyncLog } from "@/app/api/fund/ar-sync/sync";
@@ -166,7 +168,8 @@ const detailTitle = (r: LedgerEntry) => (
   </>
 );
 
-function LedgerDetail({ row, account, canReceive, onResync }: { row: LedgerEntry; account: ReactNode; canReceive: boolean; onResync: () => void }) {
+/** repSettle = บัญชีที่ตัดรายตัวด้วย REP (อปท.) แทนการบันทึกรับเงินเอง */
+function LedgerDetail({ row, account, canReceive, repSettle, onResync }: { row: LedgerEntry; account: ReactNode; canReceive: boolean; repSettle: boolean; onResync: () => void }) {
   return (
     <div className="text-sm">
       <Facts>
@@ -190,6 +193,12 @@ function LedgerDetail({ row, account, canReceive, onResync }: { row: LedgerEntry
         <DebtorItems vn={row.vn} an={row.an} debtor={row.kind === "set" ? Number(row.amount) : undefined} />
       )}
       {canReceive && <CashReceiptForm patientType={row.patient_type} debtRef={row.ref} onDone={onResync} />}
+      {repSettle && (
+        <p className="mt-4 border-t border-line pt-4 text-muted">
+          ลูกหนี้บัญชีนี้ตัดรายตัวด้วย REP เมื่อเงินโอน SMT ของ REP ลงรับแล้ว ·{" "}
+          <Link href="/fund/ar-settle?doc=rep" className={`rounded text-foreground underline underline-offset-2 ${focusRing}`}>ไปหน้าตัดลูกหนี้ (REP อปท.)</Link>
+        </p>
+      )}
       <AdjustRequestForm patientType={row.patient_type} debtRef={row.ref} />
     </div>
   );
@@ -215,9 +224,10 @@ export function ArLedger() {
     </>
   );
   // ไม่ remount DataGrid (จะปิด modal) แถวในตารางจึงเห็นรายการใหม่เมื่อโหลดตารางครั้งถัดไป
-  // รับเงินเองได้เฉพาะบัญชีที่ไม่ตัดด้วย STM (route ตรวจซ้ำ)
+  // รับเงินเองได้เฉพาะบัญชีที่ไม่ตัดรายตัว (STM/REP) (route ตรวจซ้ำ)
   const canReceive = !!selected?.code && !selected.settles_by_stm;
-  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} canReceive={canReceive} onResync={retry} />;
+  const repSettle = !!selected?.code && Object.values(REP_ACCOUNTS).flat().includes(selected.code);
+  const renderDetail = (r: LedgerEntry) => <LedgerDetail row={r} account={accountLabel} canReceive={canReceive} repSettle={repSettle} onResync={retry} />;
 
   return (
     <div className="flex flex-col gap-5">

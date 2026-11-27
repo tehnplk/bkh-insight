@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { insightQuery } from "@/lib/db";
+import { todayIso } from "@/lib/thai-date";
+import { fiscalYearOf } from "../../uc-dashboard/dashboard";
 import { closedThrough } from "../../ar-trial-balance/trial-balance";
 import { loadAccounts, loadFunds, loadPending, loadSummaryRows, parseFy, type AccountOption, type FundMapRow } from "../data";
 import { pendingBatches, summarize, type PendingBatch, type SummaryRow } from "../transfer";
@@ -10,7 +12,7 @@ export type ArTransferSummary = {
   fy: number;
   /** เดือนของปีงบ YYYY-MM ต.ค.→ก.ย. */
   months: string[];
-  /** ยอดรับแล้วต่อบัญชีต่อเดือนตามวันที่ใบเสร็จ + รอออกใบเสร็จ (pending) ไม่นับที่ยกเลิก */
+  /** ยอดรับแล้วต่อบัญชีต่อเดือนตามวันที่ใบเสร็จ + รอออกใบเสร็จ ณ วันนี้ทุกปีงบ (pending, เฉพาะ fy ปัจจุบัน ปีงบก่อน = 0) ไม่นับที่ยกเลิก */
   summary: SummaryRow[];
   /** ชุดโอนที่รอออกใบเสร็จทุกปีงบ (ไม่ขึ้นกับ fy) */
   pending: PendingBatch[];
@@ -33,7 +35,8 @@ export async function GET(request: NextRequest) {
   const body: ArTransferSummary = {
     fy,
     months: fyMonths(fy),
-    summary: summarize(rows),
+    // รอออกใบเสร็จเป็นยอด ณ วันนี้ทุกปีงบ แสดงเฉพาะปีงบปัจจุบัน
+    summary: summarize(fy === fiscalYearOf(todayIso()) ? rows : rows.filter((r) => r.receipt_date)),
     pending: pendingBatches(pending),
     funds,
     accounts,

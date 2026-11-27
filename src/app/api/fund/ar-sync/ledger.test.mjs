@@ -383,3 +383,65 @@ test("planRecompute admit: reverse main + CR on set date, touched = settledSkip,
   const after = [rs(mainState(1, 0)), rs(crState(1, 0)), states[2], states[3]];
   assert.ok(planRecompute(after, rules, new Map(), admitted).every((p) => p.entries.length === 0));
 });
+
+// ---- แยกค่าพาหนะส่งต่อของ UC IP (.202) เป็นหนี้ CR (.217) ----
+test("planIpd CR: new .202 splits refer on dchdate, sum = uc_money, idempotent ; full CR ; non-.202 not split", () => {
+  const w = { from: "2025-10-01", to: "2025-10-31" };
+  const today = "2026-11-27";
+  const cr = new Map([["A1", 50000], ["A2", 50000], ["A3", 50000]]);
+  const rows = [ipd("A1", 10000), ipd("A2", 500), ipd("A3", 1000, { pttype: "S1", hipdata_code: "SSS", hospmain: "10676" })];
+  const out = planIpd(rows, new Map(), rules, w, today, cr);
+  assert.deepEqual(out.map((e) => [e.kind, e.ref, e.account_code, e.amount, e.entry_date]), [
+    ["set", "A1", "1102050101.202", "9500.00", "2025-10-03"],
+    ["set", "A1:CR", "1102050101.217", "500.00", "2025-10-03"],
+    ["set", "A2", "1102050101.202", "500.00", "2025-10-03"],
+    ["adjust", "A2", "1102050101.202", "-500.00", "2025-10-03"],
+    ["set", "A2:CR", "1102050101.217", "500.00", "2025-10-03"],
+    ["set", "A3", "1102050101.302", "1000.00", "2025-10-03"],
+    ["diff", "A3", "1102050101.302", "-450.00", "2025-10-03"],
+  ]);
+  assert.equal(out[1].an, "A1");
+  assert.equal(out[1].note, "แยกค่าพาหนะส่งต่อไปบัญชี CR");
+  assert.deepEqual(planIpd(rows, applied(new Map(), out), rules, w, today, cr), []);
+});
+
+test("planIpd CR: existing unsplit splits on dchdate, change adjusts on sync date, touched not split, settled CR keeps, reverse closes both once", () => {
+  const w = { from: "2025-10-01", to: "2025-10-31" };
+  const today = "2026-11-27";
+  const cr = new Map([["A1", 50000]]);
+  let states = new Map([["A1", ist("A1", 1000000)]]);
+  const first = planIpd([ipd("A1", 10000)], states, rules, w, today, cr);
+  assert.deepEqual(first.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["adjust", "A1", "-500.00", "2025-10-03"], ["set", "A1:CR", "500.00", "2025-10-03"]]);
+  states = applied(states, first);
+  // HOSxP: ยอดรวม 12,000 ค่าพาหนะ 1,000
+  const next = planIpd([ipd("A1", 12000)], states, rules, w, today, new Map([["A1", 100000]]));
+  assert.deepEqual(next.map((e) => [e.kind, e.ref, e.amount, e.entry_date]), [["adjust", "A1:CR", "500.00", today], ["adjust", "A1", "1500.00", today]]);
+  // ปรับด้วยมือ/ตัดแล้ว (touched) และยังไม่เคยแยก: ไม่แยก
+  assert.deepEqual(planIpd([ipd("A1", 10000)], new Map([["A1", { ...ist("A1", 1000000), touched: true }]]), rules, w, today, cr), []);
+  // CR ตัดด้วย STM แล้ว: ไม่ย้ายยอดระหว่างสอง ref ยอดที่เปลี่ยนลงหนี้หลัก
+  const paid = new Map([["A1", ist("A1", 950000)], ["A1:CR", { ...ist("A1:CR", 50000), an: "A1", account_code: "1102050101.217", settled: true }]]);
+  assert.deepEqual(planIpd([ipd("A1", 11000)], paid, rules, w, today, new Map()).map((e) => [e.ref, e.amount]), [["A1", "1000.00"]]);
+  // finance_lock กลับเป็น N: กลับรายการทั้งหนี้หลักและ CR ครั้งเดียว (ref CR ไม่ถูกนับเป็น AN)
+  const rev = planIpd([], states, rules, w, today, cr);
+  assert.deepEqual(rev.map((e) => [e.kind, e.ref, e.amount]), [["reverse", "A1", "-9500.00"], ["reverse", "A1:CR", "-500.00"]]);
+  const gone = applied(states, rev);
+  assert.deepEqual(planIpd([], gone, rules, w, today, cr), []);
+  // ปิดสิทธิอีกครั้ง: CR กลับมาตามยอด หนี้หลักรับส่วนที่เหลือ
+  const relock = planIpd([ipd("A1", 10000)], gone, rules, w, today, cr);
+  assert.deepEqual(relock.map((e) => [e.ref, e.amount, e.note]), [["A1:CR", "500.00", "แยกค่าพาหนะส่งต่อไปบัญชี CR"], ["A1", "9500.00", "ปิดสิทธิอีกครั้ง"]]);
+});
+
+test("planRecompute IP CR: splits .202 on set date, touched skipped and counted, keeps .217, idempotent ; OP vn map not used for IP", () => {
+  const rs = (s) => ({ ...s, set_date: "2025-10-03" });
+  const states = [rs(ist("A1", 1000000)), rs({ ...ist("A2", 800000), touched: true }), rs(ist("A3", 20000))];
+  const ipCr = new Map([["A1", 50000], ["A2", 50000], ["A3", 50000]]);
+  const plan = planRecompute(states, rules, new Map([["A1", 99999]]), new Set(), ipCr);
+  assert.deepEqual(plan.map((p) => [p.state.ref, p.to, p.entries.map((e) => [e.kind, e.ref, e.account_code, e.amount, e.entry_date]), p.settledSkip]), [
+    ["A1", "1102050101.202", [["adjust", "A1", "1102050101.202", "-500.00", "2025-10-03"], ["set", "A1:CR", "1102050101.217", "500.00", "2025-10-03"]], false],
+    ["A2", "1102050101.202", [], true],
+    ["A3", "1102050101.202", [["adjust", "A3", "1102050101.202", "-200.00", "2025-10-03"], ["set", "A3:CR", "1102050101.217", "200.00", "2025-10-03"]], false],
+  ]);
+  const cr = (an, b) => rs({ ...ist(`${an}:CR`, b), an, account_code: "1102050101.217" });
+  const after = [rs(ist("A1", 950000)), cr("A1", 50000), states[1], { ...states[2], balance: 0 }, cr("A3", 20000)];
+  assert.ok(planRecompute(after, rules, new Map(), new Set(), ipCr).every((p) => p.entries.length === 0 && p.to === p.state.account_code));
+});

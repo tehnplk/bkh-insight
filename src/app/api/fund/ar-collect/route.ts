@@ -12,27 +12,26 @@ import {
 
 // SQL ผ่าน prove-query แล้ว (insight/his, 25 พ.ย. 2569) ห้ามเปลี่ยน logic ถ้าไม่ได้ prove ใหม่
 // ค่ารักษา = ยอดตั้งหนี้จาก HOSxP (set/adjust/cancel/reverse), ส่วนต่าง = diff ของหนี้, รับแล้ว = settle ทุก source, คงเหลือ = ผลรวมทุกแถวของหนี้
-// Q1 ตารางกลุ่ม ($1 start, $2 end)
+// Q1 ตารางกลุ่ม ($1 start, $2 end) ; รวมต่อ (key, กลุ่ม) ไม่ใช่ต่อบัญชี: AN ที่แยก CR (.202 + .217 กลุ่มเดียวกัน) นับครั้งเดียว
 const GROUPS_SQL = `WITH s AS (
-  SELECT patient_type, ref, COALESCE(vn, an) AS k, account_code
-  FROM ar_ledger
-  WHERE kind = 'set' AND source IN ('rcpt_debt', 'ipt') AND ref_date BETWEEN $1::date AND $2::date
+  SELECT l.patient_type, l.ref, COALESCE(l.vn, l.an) AS k, a.collect_group
+  FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code
+  WHERE l.kind = 'set' AND l.source IN ('rcpt_debt', 'ipt') AND l.ref_date BETWEEN $1::date AND $2::date
 ), d AS (
-  SELECT s.patient_type, s.k, s.account_code,
+  SELECT s.patient_type, s.k, s.collect_group,
     COALESCE(SUM(l.amount) FILTER (WHERE l.source IN ('rcpt_debt', 'ipt') AND l.kind IN ('set', 'adjust', 'cancel', 'reverse')), 0) AS cost,
     COALESCE(SUM(l.amount) FILTER (WHERE l.source IN ('rcpt_debt', 'ipt') AND l.kind = 'diff'), 0) AS diff,
     COALESCE(-SUM(l.amount) FILTER (WHERE l.kind = 'settle'), 0) AS received,
     SUM(l.amount) AS balance
   FROM s JOIN ar_ledger l ON l.patient_type = s.patient_type AND l.ref = s.ref
-  GROUP BY s.patient_type, s.k, s.account_code
+  GROUP BY s.patient_type, s.k, s.collect_group
 )
 SELECT g.id AS grp, g.name, g.send_mode, d.patient_type,
   COUNT(*) AS visits,
   COUNT(*) FILTER (WHERE d.balance <= 0) AS closed,
   SUM(d.cost) AS cost, SUM(d.cost + d.diff) AS debt, SUM(d.diff) AS diff, SUM(d.received) AS received, SUM(d.balance) AS balance
 FROM d
-LEFT JOIN ar_account a ON a.code = d.account_code
-LEFT JOIN ar_collect_group g ON g.id = a.collect_group
+LEFT JOIN ar_collect_group g ON g.id = d.collect_group
 GROUP BY g.id, g.name, g.send_mode, g.sort, d.patient_type
 ORDER BY g.sort NULLS LAST, d.patient_type`;
 // Q2 ตารางขวาของกลุ่ม ($1 start, $2 end, $3 patient_type, $4 กลุ่ม)

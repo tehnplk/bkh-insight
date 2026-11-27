@@ -202,3 +202,23 @@ test("fundDetail: ยอดโอนแล้วแยก OP/IP/ไม่ระ�
   assert.deepEqual(d.sides, [{ side: "OP", n: 2, total: 10.3 }, { side: null, n: 1, total: 1 }]);
   assert.equal(d.lines.find((l) => l.batch_no === "I1").side, "IP");
 });
+
+test("LGO: ฝั่งจาก patient_type ของ REP (refDocNo 9 หลัก) ; งบปีก่อนไม่ย้ายไปบัญชีปีก่อน ; แถวหักติดลบนำเข้าตามเดิม ; ไม่พบ REP = mapping ALL", () => {
+  const lgo = (extra) => row({
+    budgetSource: "LGO", postingDate: "25690925", batchNo: "3477", refDocNo: "690100077", mouGrpCode: "68086001",
+    mophId: "1102050102.801/802", mophDesc: "ลูกหนี้ค่ารักษา - เบิกจ่ายตรง อปท. OP/IP", efundDesc: "กรณีจ่ายตรงหน่วยบริการ", total: 53873.81, ...extra,
+  });
+  const fk = "LGO|1102050102.801/802|086001";
+  const map = new Map([
+    [mapKey(fk, "ALL"), { account_code: null, ignore: false }],
+    [mapKey(fk, "OP"), { account_code: "1102050102.801", ignore: false }],
+    [mapKey(fk, "IP"), { account_code: "1102050102.802", ignore: false }],
+  ]);
+  const sides = new Map([["690100077", "IP"], ["681200022", "OP"]]);
+  const rows = [lgo(), lgo({ refDocNo: "681200022", batchNo: "9", total: -50 }), lgo({ refDocNo: "690999999", batchNo: "8" })];
+  const p = planImport(rows, map, new Map(), sides);
+  assert.deepEqual(p.inserts.map((x) => [x.ref_doc_no, x.account_code, x.amount]), [["690100077", "1102050102.802", 53873.81], ["681200022", "1102050102.801", -50]]);
+  assert.deepEqual([p.counts.new, p.counts.unmapped], [2, 1]);
+  assert.equal(receiptAccount({ smt_key: smtKey(lgo()), account_code: "1102050102.802", edited: false }, "2026-10-01"), "1102050102.802");
+  assert.equal(fundDetail(rows, fk).lines.some((l) => l.prior_year), false);
+});

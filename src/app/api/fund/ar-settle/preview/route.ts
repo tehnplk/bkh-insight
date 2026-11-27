@@ -3,11 +3,11 @@ import { auth } from "@/auth";
 import { escapeLike, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse } from "@/lib/xlsx";
-import { GROUP_LABEL, STATUS_LABEL, SETTLE_GROUPS, previewRows, summarize, type PreviewRow, type SettleGroup, type SettlePreviewPage, type SettleStatus, type SettleSummary } from "../settle";
+import { GROUP_LABEL, REP_DISABLED_MSG, REP_NO_RE, REP_SETTLE_ENABLED, STATUS_LABEL, SETTLE_GROUPS, previewRows, summarize, type PreviewRow, type SettleGroup, type SettlePreviewPage, type SettleStatus, type SettleSummary } from "../settle";
 import { periodKey, stmKey } from "../../smt-reconcile/reconcile";
-import { loadBatches, loadFile, loadMissing, loadOpenFrom } from "../sql";
+import { REP_BATCHES_SQL, loadBatches, loadFile, loadMissing, loadOpenFrom, loadRep, repNotMigrated } from "../sql";
 
-// ตัวอย่างการตัดของไฟล์ STM หนึ่งไฟล์ (GET ?id=) หนึ่งแถวต่อหนี้ของ VN/AN กรอง/เรียง/แบ่งหน้าในหน่วยความจำ (ไฟล์ละไม่กี่พันบรรทัด)
+// ตัวอย่างการตัดของไฟล์ STM หนึ่งไฟล์ (GET ?id=) หรือ REP หนึ่งเลขที่ (GET ?rep=, scheme ที่ไม่มี STM เช่น LGO) หนึ่งแถวต่อหนี้ของ VN/AN กรอง/เรียง/แบ่งหน้าในหน่วยความจำ (ไฟล์ละไม่กี่พันบรรทัด)
 // summary คิดจากทั้งไฟล์ (ไม่ขึ้นกับตัวกรอง) ให้แถบกลุ่มและแผนตามค่าเริ่มต้นของ checkbox
 
 const SORTABLE = ["group", "ref", "hn", "rep_no", "account_code", "balance", "paid", "remaining"] as const;
@@ -43,17 +43,25 @@ export async function GET(request: NextRequest) {
   if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const params = request.nextUrl.searchParams;
   const id = params.get("id") ?? "";
-  if (!/^\d{1,15}$/.test(id)) return Response.json({ error: "id ของไฟล์ไม่ถูกต้อง" }, { status: 400 });
+  const repNo = params.get("rep");
+  if (repNo !== null && !REP_SETTLE_ENABLED) return Response.json({ error: REP_DISABLED_MSG }, { status: 404 });
+  if (repNo !== null ? !REP_NO_RE.test(repNo) : !/^\d{1,15}$/.test(id)) return Response.json({ error: "id ของไฟล์หรือเลขที่ REP ไม่ถูกต้อง" }, { status: 400 });
   const parsed = parseGridQuery(params, SORTABLE);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   const cf = parseColumnFilters(params, FILTERABLE);
   if (!cf.ok) return Response.json({ error: cf.error }, { status: 400 });
   const { page, pageSize, sort, dir, q, format } = parsed.query;
 
-  const data = await loadFile(insightQuery, id);
-  if (!data) return Response.json({ error: "ไม่พบไฟล์ STM นี้" }, { status: 404 });
+  const doc = repNo !== null ? "rep" : "stm";
+  const data = await (repNo !== null ? loadRep(insightQuery, repNo).catch(repNotMigrated) : loadFile(insightQuery, id));
+  if (data instanceof Response) return data;
+  if (!data) return Response.json({ error: repNo !== null ? "ไม่พบ REP นี้ในสิทธิที่ตัดด้วย REP ได้" : "ไม่พบไฟล์ STM นี้" }, { status: 404 });
+  // REP: ไม่มีกลุ่ม "REP งวดนี้ STM ไม่จ่าย" ; ใบเสร็จมาจากเงินโอน SMT ของ REP (rep_gate)
   const [missing, batches, open_from, transfer_receipt] = await Promise.all([
-    loadMissing(insightQuery, data.file), loadBatches(insightQuery, id), loadOpenFrom(insightQuery), transferReceipt(data.file),
+    doc === "rep" ? [] : loadMissing(insightQuery, data.file),
+    doc === "rep" ? insightQuery<SettleSummary["batches"][number]>(REP_BATCHES_SQL, [data.file.id, data.file.scheme]) : loadBatches(insightQuery, id),
+    loadOpenFrom(insightQuery),
+    doc === "rep" ? null : transferReceipt(data.file),
   ]);
   const rows = previewRows(data.lines, data.debts, missing, data.file.patient_type);
 
@@ -84,14 +92,14 @@ export async function GET(request: NextRequest) {
       { key: "tran_id", header: "TRAN_ID", width: 14 },
       { key: "account_code", header: "บัญชี", width: 16 },
       { key: "balance", header: "หนี้คงเหลือ (บาท)", width: 16, type: "money" },
-      { key: "paid", header: "STM จ่าย (บาท)", width: 16, type: "money" },
+      { key: "paid", header: `${doc === "rep" ? "REP" : "STM"} จ่าย (บาท)`, width: 16, type: "money" },
       { key: "remaining", header: "คงเหลือหลังตัด (บาท)", width: 16, type: "money" },
     ], filtered.map((r) => ({ ...r, group_label: GROUP_LABEL[r.group], status_label: STATUS_LABEL[r.status] })));
   }
   const body: SettlePreviewPage = {
     rows: filtered.slice((page - 1) * pageSize, page * pageSize),
     total: filtered.length,
-    summary: { file: data.file, open_from, batches, transfer_receipt, ...summarize(rows) },
+    summary: { doc, rep_gate: "gate" in data ? data.gate : undefined, file: data.file, open_from, batches, transfer_receipt, ...summarize(rows) },
   };
   return Response.json(body);
 }

@@ -10,11 +10,71 @@ export type SettleFileRow = {
   row_count: number; net_total: string; paid_rows: number; settled_rows: number; settled_amount: string;
   last_receipt_no: string | null; last_receipt_date: string | null;
 };
+/** แถวของรายการ REP ที่ใช้ตัดได้ (GET /api/fund/ar-settle/rep) หนึ่งแถวต่อเลขที่ REP ; net_total = ชดเชยสุทธิรวม (net_nhso + net_affiliation) */
+export type SettleRepRow = {
+  id: string; rep_no: string; scheme: string; rep_type: string; patient_type: PatientType; printed_on: string | null;
+  row_count: number; net_total: string; paid_rows: number; settled_rows: number; settled_amount: string;
+  last_receipt_no: string | null; last_receipt_date: string | null;
+  /** เงินโอน SMT ของ REP (repGate) หรือ done = ตัดครบทุกบรรทัดที่จ่ายแล้ว ; transfer_total null = ยังไม่โอน */
+  transfer_status: RepGateStatus | "done"; transfer_total: number | null;
+};
+/**
+ * scheme ของ REP ที่ใช้ตัดหนี้รายตัวได้ (ไม่มี STM) -> บัญชีลูกหนี้ที่ตัดได้ ; REP ของ scheme อื่นใช้ดูสถานะเคลมเท่านั้น (ตัดด้วย STM)
+ * จำกัดบัญชีตาม scheme ไม่ใช้ settles_by_stm อย่างเดียว กัน REP อปท. ไปตัดหนี้ UC ของ visit เดียวกัน
+ */
+export const REP_ACCOUNTS: Record<string, string[]> = { LGO: ["1102050102.801", "1102050102.802"] };
+// อปท. ไม่มี STM (งานประกันยืนยัน 27 พ.ย. 2569) ; REP ไม่ใช่หลักฐานการได้เงิน จึงตัดได้เฉพาะ REP ที่เงินโอน SMT ของใบนั้นลงรับแล้วและยอดตรง (repGate)
+export const REP_SETTLE_ENABLED: boolean = true;
+export const REP_DISABLED_MSG = "ตัดลูกหนี้ด้วย REP ยังไม่เปิดใช้";
+
+/** เงินโอน SMT ของ REP (ar_transfer source smt, budgetSource = scheme, ref_doc_no = rep_no, ไม่ยกเลิก) รวมเป็นก้อน ; receipt = ใบเสร็จล่าสุดของแถวที่รับแล้ว */
+export type RepTransferAgg = {
+  n: number; pending_n: number; other_n: number; total: string | number | null;
+  receipt_no: string | null; receipt_date: string | null; receipts: number;
+};
+export type RepGateStatus = "none" | "pending" | "other_account" | "mismatch" | "ready";
+export const REP_GATE_LABEL: Record<RepGateStatus, string> = {
+  none: "ยังไม่โอน", pending: "รอออกใบเสร็จ", other_account: "เงินโอนลงบัญชีอื่น", mismatch: "ยอดไม่ตรง", ready: "พร้อมตัด",
+};
+export type RepGate = {
+  status: RepGateStatus; transfer_total: number; rep_total: number;
+  /** ใบเสร็จที่ใช้ตัด (= entry_date) ; หลายใบใช้ใบล่าสุด (receipts > 1) */
+  receipt: { receipt_no: string | null; receipt_date: string; receipts: number } | null;
+};
+
+/**
+ * REP ตัดได้เมื่อ (ก) มีเงินโอน SMT ของ REP และรับแล้วทุกแถว ลงบัญชีลูกหนี้ของ scheme ทุกแถว (other_n = 0 ; งบปีก่อนหรือแก้บัญชีเอง = ตัดซ้ำกับรายได้)
+ * (ข) ผลรวมยอดโอนทุกแถว (รวมแถวหักติดลบ) = ชดเชยรวมของ REP ทุกบรรทัด ระดับสตางค์ ; REP อุทธรณ์ที่ย้าย tran_id ไปทำให้ยอด REP เดิมเปลี่ยน = ไม่ตรง
+ */
+export function repGate(repTotal: string | number, t: RepTransferAgg): RepGate {
+  const rep = cents(repTotal), tr = cents(t.total ?? 0);
+  const status: RepGateStatus = !t.n ? "none" : t.pending_n ? "pending" : t.other_n ? "other_account" : tr !== rep ? "mismatch" : "ready";
+  return {
+    status, transfer_total: tr / 100, rep_total: rep / 100,
+    receipt: t.receipt_date ? { receipt_no: t.receipt_no, receipt_date: t.receipt_date, receipts: t.receipts } : null,
+  };
+}
+
+/** เหตุที่ตัดไม่ได้ (null = พร้อม) ; fmt = formatBaht ของผู้เรียก (ไฟล์นี้ import ค่าไม่ได้) */
+export function repGateReason(g: RepGate, fmt: (n: number) => string): string | null {
+  switch (g.status) {
+    case "none": return "ยังไม่พบเงินโอน SMT ของ REP นี้ ดึงจาก SMT ที่หน้าเงินโอนที่ได้รับ";
+    case "pending": return "เงินโอนของ REP นี้รอออกใบเสร็จ ลงรับที่หน้าเงินโอนที่ได้รับก่อน";
+    case "other_account": return "เงินโอนของ REP นี้ลงบัญชีอื่นที่ไม่ใช่ลูกหนี้ของสิทธินี้ แก้บัญชีที่หน้าเงินโอนที่ได้รับ";
+    case "mismatch": return `ยอดโอน ${fmt(g.transfer_total)} บาท ไม่ตรงยอด REP ${fmt(g.rep_total)} บาท`;
+    default: return null;
+  }
+}
+/** หนี้ที่ REP ของ scheme ตัดได้ = บัญชีใน REP_ACCOUNTS เท่านั้น (แทนค่า settles_by_stm ของ DebtRow ที่ planSettle ใช้) */
+export const repDebts = (scheme: string, debts: DebtRow[]): DebtRow[] =>
+  debts.map((d) => ({ ...d, settles_by_stm: !!d.account_code && (REP_ACCOUNTS[scheme] ?? []).includes(d.account_code) }));
 export type SettleCounts = { settle: number; diff: number; settle_amount: number; diff_amount: number; shifted: number; skipped: number };
 export type SettleBatch = { id: string; receipt_date: string; receipt_no: string | null; settled_by: string; settled_at: string; counts: Partial<SettleCounts> };
 /** ผลของ POST /api/fund/ar-settle */
 export type SettleResult = SettleCounts & { batch_id: string };
 export type SettleSummary = {
+  /** เอกสารที่ใช้ตัด: stm = ไฟล์ STM (file.id = stm_file.id) / rep = เลขที่ REP (file.id = doc_no = rep_no) */
+  doc: "stm" | "rep";
   file: Pick<SettleFileRow, "id" | "scheme" | "patient_type" | "doc_no" | "period_month" | "run_no" | "transfer_date" | "net_total">;
   /** วันแรกของงวดที่ยังเปิด (null = ยังไม่เคยปิดงวด) วันใบเสร็จก่อนนี้จะถูกเลื่อนเป็นวันนี้ */
   open_from: string | null;
@@ -24,13 +84,17 @@ export type SettleSummary = {
   batches: SettleBatch[];
   /** ใบเสร็จของเงินโอน SMT งวดเดียวกัน (ar_transfer ที่ลงรับแล้ว ต้น refDocNo = period) ใช้เป็นค่าเริ่มต้น ; null = ไม่พบหรือมีหลายใบ */
   transfer_receipt?: { period: string; receipt_no: string; receipt_date: string } | null;
+  /** doc rep: เงื่อนไขเงินโอน SMT ของ REP + ใบเสร็จที่ใช้ตัด (ไม่ให้แก้) */
+  rep_gate?: RepGate;
 };
 export type SettlePreviewPage = GridPage<PreviewRow> & { summary: SettleSummary };
 
-/** บรรทัด STM ของไฟล์ (SQL S2) vn/an จาก stm_row หรือ rep_row ด้วย tran_id ; done = ลง ar_ledger แล้ว */
+/** บรรทัด STM ของไฟล์ (SQL S2) vn/an จาก stm_row หรือ rep_row ด้วย tran_id ; done = ลง ar_ledger แล้ว ; REP: id = tran_id, paid_total = ชดเชยสุทธิ */
 export type StmLine = {
   id: string; patient_type: PatientType; rep_no: string; tran_id: string | null; hn: string | null;
   vn: string | null; an: string | null; paid_total: string | number; done: boolean;
+  /** ส่วนของ paid_total ที่ STM จ่ายค่าพาหนะส่งต่อ (UC IP: fund_amounts AE) ให้หนี้ CR (.217) ก่อน ; ไม่มี = แบ่งตามคงเหลือ */
+  cr_paid?: string | number | null;
 };
 /** หนี้ของ VN/AN (SQL S3) balance = บาท รวมทุก source ของหนี้ (HOSxP + stm + manual) */
 export type DebtRow = Omit<RefState, "balance" | "cancelled"> & { settles_by_stm: boolean; balance: string | number };
@@ -46,7 +110,7 @@ export const GROUP_LABEL: Record<SettleGroup, string> = {
 };
 export const STATUS_LABEL = {
   match: "ตรงยอด", under: "ได้รับต่ำกว่า", over: "ได้รับสูงกว่า", recall: "ถูกเรียกคืน",
-  no_ref: "ไม่พบ VN/AN", no_debt: "ยังไม่ลงสมุด", not_stm: "บัญชีไม่ตัดด้วย STM", no_account: "ยังไม่ระบุบัญชี", zero: "STM จ่าย 0",
+  no_ref: "ไม่พบ VN/AN", no_debt: "ยังไม่ลงสมุด", not_stm: "บัญชีไม่ตัดด้วย STM", no_account: "ยังไม่ระบุบัญชี", zero: "จ่าย 0",
   missing: "STM ไม่จ่าย", settled: "ตัดครบ", partial: "รับบางส่วน",
 } as const;
 export type SettleStatus = keyof typeof STATUS_LABEL;
@@ -193,9 +257,20 @@ export function planSettle(lines: StmLine[], debts: DebtRow[], opts: { entryDate
       pttype: d.pttype, hipdata_code: d.hipdata_code, hospmain: d.hospmain, hospmain_chwpart: d.hospmain_chwpart, account_code: d.account_code,
       amount: baht(amount), note, stm_row_id: lineId,
     });
+    // หนี้ CR (ref "<an>:CR" ของ ar-sync) รับส่วนค่าพาหนะ (cr_paid) ก่อน ไม่เกินคงเหลือ ; ที่เหลือแบ่งให้หนี้หลัก (ไม่มีหนี้หลักที่ตัดได้ = หนี้ CR)
+    const crDebts = item.debts.filter((d) => d.ref.endsWith(":CR"));
+    const mains = item.debts.filter((d) => !d.ref.endsWith(":CR"));
     for (const line of pendingOf(item)) {
       let rest = cents(line.paid_total);
-      const sorted = [...item.debts].sort((a, b) => b.balance - a.balance || a.ref.localeCompare(b.ref));
+      // ไม่มีหนี้หลัก = แบ่งรอบเดียวด้านล่าง (unique (stm_row_id, ref, kind) ห้ามสองแถว settle ของหนี้เดียวในบรรทัดเดียว)
+      let crPay = mains.length && rest > 0 ? Math.min(cents(line.cr_paid ?? 0), rest) : 0;
+      for (const d of crDebts) {
+        const alloc = Math.min(Math.max(d.balance, 0), crPay);
+        if (alloc <= 0) continue;
+        entries.push(row(d, "settle", -alloc, "รับชำระตาม STM", line.id));
+        [d.balance, crPay, rest] = [d.balance - alloc, crPay - alloc, rest - alloc];
+      }
+      const sorted = [...(mains.length ? mains : crDebts)].sort((a, b) => b.balance - a.balance || a.ref.localeCompare(b.ref));
       sorted.forEach((d, i) => {
         const alloc = i === sorted.length - 1 ? rest : Math.min(Math.max(d.balance, 0), rest);
         rest -= alloc;
@@ -214,13 +289,19 @@ export function planSettle(lines: StmLine[], debts: DebtRow[], opts: { entryDate
 export const MAX_RECEIPT_NO = 50;
 const MAX_KEYS = 10_000;
 const KEY_RE = /^(OP:\d{12}|IP:\d{1,12})$/;
-export type SettleBody = { stm_file_id: string; receipt_date: string; receipt_no: string | null; close: Set<string>; keep: Set<string> };
+/** เลขที่ REP 9 หลัก (บางชนิดยาวกว่า) ตามคอลัมน์ rep_no varchar(12) */
+export const REP_NO_RE = /^\d{6,12}$/;
+/** เอกสารหนึ่งอย่าง: stm_file_id หรือ rep_no (อีกตัว null) */
+export type SettleBody = { stm_file_id: string | null; rep_no: string | null; receipt_date: string; receipt_no: string | null; close: Set<string>; keep: Set<string> };
 
-/** body ของ POST /api/fund/ar-settle ; receipt_date ตั้งแต่ min (วันเริ่มสมุด) ถึง today ; receipt_no ว่าง = null (route บังคับเมื่อมีรับชำระ) */
+/** body ของ POST /api/fund/ar-settle { stm_file_id | rep_no, ... } ; receipt_date ตั้งแต่ min (วันเริ่มสมุด) ถึง today ; receipt_no ว่าง = null (route บังคับเมื่อมีรับชำระ) */
 export function parseSettleBody(raw: unknown, today: string, min: string): SettleBody | { error: string } {
   const b = (raw ?? {}) as Record<string, unknown>;
-  const id = String(b.stm_file_id ?? "");
-  if (!/^\d{1,15}$/.test(id)) return { error: "stm_file_id ไม่ถูกต้อง" };
+  const id = b.stm_file_id == null ? null : String(b.stm_file_id);
+  const rep = b.rep_no == null ? null : String(b.rep_no);
+  if ((id === null) === (rep === null)) return { error: "ระบุ stm_file_id หรือ rep_no อย่างใดอย่างหนึ่ง" };
+  if (id !== null && !/^\d{1,15}$/.test(id)) return { error: "stm_file_id ไม่ถูกต้อง" };
+  if (rep !== null && !REP_NO_RE.test(rep)) return { error: "rep_no ไม่ถูกต้อง" };
   const date = b.receipt_date;
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || date < min || date > today)
     return { error: "วันที่ออกใบเสร็จต้องอยู่ระหว่างวันเริ่มสมุดลูกหนี้ถึงวันนี้" };
@@ -230,5 +311,5 @@ export function parseSettleBody(raw: unknown, today: string, min: string): Settl
   const keys = (v: unknown) => (v == null ? [] : Array.isArray(v) && v.length <= MAX_KEYS && v.every((k) => typeof k === "string" && KEY_RE.test(k)) ? (v as string[]) : null);
   const close = keys(b.close), keep = keys(b.keep);
   if (!close || !keep) return { error: "รายการปิดส่วนต่างไม่ถูกต้อง" };
-  return { stm_file_id: id, receipt_date: date, receipt_no: no || null, close: new Set(close), keep: new Set(keep) };
+  return { stm_file_id: id, rep_no: rep, receipt_date: date, receipt_no: no || null, close: new Set(close), keep: new Set(keep) };
 }

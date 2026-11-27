@@ -5,7 +5,7 @@ import { inList, loadLookups } from "@/app/api/fund/_lib/fund";
 import { loadSubfunds } from "@/app/api/fund/_lib/subfund";
 import { byChunks, loadFundRules } from "@/app/api/admin/ar-funds/sql";
 import {
-  ADMIT_NOTE, CR_SPLIT, LEDGER_START, addDays, chunkRange, crRef, dailyWindows, isCrRef, monthRange, planCancels, planIpd, planOpd, planRecompute, resolve, toCents,
+  ADMIT_NOTE, CR_SPLIT, IP_CR_SPLIT, LEDGER_START, addDays, chunkRange, crRef, dailyWindows, isCrRef, monthRange, planCancels, planIpd, planOpd, planRecompute, resolve, toCents,
   type AccountRule, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RecomputeState, type Recomputed, type RefState,
   type Right, type Source, type SyncCase,
 } from "./ledger";
@@ -112,9 +112,8 @@ type RawState<T> = Omit<T, "balance" | "diff"> & { balance: string; diff: string
 const toState = <T,>(r: RawState<T>) => ({ ...r, balance: toCents(r.balance), diff: toCents(r.diff) }) as T;
 
 async function loadStates(tx: InsightTx, source: Source, refs: string[], window?: { from: string; to: string }) {
-  // OPD โหลดหนี้ CR ของ debt_id มาด้วย (planOpd/planCancels ใช้ทั้งสอง ref)
-  const all = source === "rcpt_debt" ? refs.flatMap((r) => [r, crRef(r)]) : refs;
-  const rows = await tx<RawState<RefState>>(STATES_SQL, [source, all, window?.from ?? null, window?.to ?? null]);
+  // โหลดหนี้ CR ของ debt_id/AN มาด้วย (plan* ใช้ทั้งสอง ref)
+  const rows = await tx<RawState<RefState>>(STATES_SQL, [source, refs.flatMap((r) => [r, crRef(r)]), window?.from ?? null, window?.to ?? null]);
   return new Map(rows.map((r) => [r.ref, toState<RefState>(r)]));
 }
 
@@ -162,6 +161,16 @@ async function loadCr(visits: { vn: string | null; date: string | null }[]): Pro
   return out;
 }
 const debtVisits = (debts: HisDebt[]) => debts.map((d) => ({ vn: d.vn, date: d.vstdate ?? d.debt_date }));
+
+/** ค่าพาหนะส่งต่อ (สตางค์) ต่อ AN = กองทุนย่อย IP_CR_SPLIT.codes ของ loadSubfunds (opitemrece ตาม AN ด้วย ix_an) ; อ่าน his ก่อนถือ lock ; error = ทั้งรอบล้ม */
+async function loadIpCr(ans: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!ans.length) return out;
+  for (const [an, funds] of await loadSubfunds("IP", [...new Set(ans)], await loadLookups(), { codes: [...IP_CR_SPLIT.codes] }))
+    out.set(an, funds.reduce((sum, f) => sum + toCents(f.amount), 0));
+  return out;
+}
+const lockedAns = (rows: HisIpd[]) => rows.filter((r) => toCents(r.uc_money) > 0).map((r) => r.an);
 /** ถือ advisory lock ของ ar_ledger ตลอด transaction (ar-sync และตัดลูกหนี้ /fund/ar-settle) */
 export const locked = <T>(fn: (tx: InsightTx) => Promise<T>) => insightTransaction(async (tx) => (await tx(LOCK_SQL), fn(tx)));
 
@@ -192,9 +201,10 @@ async function syncIpd(w: { from: string; to: string }, rules: AccountRules, tod
   for (const c of chunkRange(w.from, w.to)) {
     const rows = await hisQuery<HisIpd>(IPD_SQL(BY_RANGE.ipd), [c.from, c.to]);
     bump(counts, "ipd_rows", rows.length);
+    const cr = await loadIpCr(lockedAns(rows));
     await locked(async (tx) => {
       const states = await loadStates(tx, "ipt", rows.map((r) => r.an), c);
-      await insert(tx, planIpd(rows, states, rules, c, today), syncId, counts);
+      await insert(tx, planIpd(rows, states, rules, c, today, cr), syncId, counts);
     });
   }
 }
@@ -282,7 +292,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
     opd ? hisQuery<HisCancel>(OPD_CANCEL_SQL(BY_CASE.cancel), [id]) : [],
     opd ? [] : hisQuery<HisIpd>(IPD_SQL(BY_CASE.ipd), [id, LEDGER_START]),
   ]);
-  const cr = await loadCr(debtVisits(debts));
+  const [cr, ipCr] = await Promise.all([loadCr(debtVisits(debts)), loadIpCr(lockedAns(ipd))]);
   return locked(async (tx) => {
     const [before] = await tx<CaseState>(CASE_SQL, [source, id]);
     if (before.settled) throw new CaseSettledError("รายนี้ตัดหนี้แล้ว (STM, เงินรับล่วงหน้า, เหมาจ่าย หรือรับเงิน) ดึงใหม่ไม่ได้ ถ้ายอดต้องแก้ให้ขอปรับปรุงลูกหนี้");
@@ -302,7 +312,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
     } else {
       // states จาก [an] ตรงๆ: AN ที่ finance_lock ไม่ใช่ Y แล้ว (his ไม่คืนแถว) จึงกลับรายการได้
       const states = await loadStates(tx, source, [id]);
-      entries += await insert(tx, planIpd(ipd, states, rules, { from: LEDGER_START, to: today }, today), syncId, counts);
+      entries += await insert(tx, planIpd(ipd, states, rules, { from: LEDGER_START, to: today }, today, ipCr), syncId, counts);
     }
     const [after] = await tx<CaseState>(CASE_SQL, [source, id]);
     await tx("UPDATE ar_sync_log SET counts = $2, finished_at = now() WHERE id = $1", [syncId, JSON.stringify(counts)]);
@@ -344,7 +354,7 @@ export type RecomputeResult = {
   no_rule: { refs: number; amount: number };
   /** หนี้ที่ตัดแล้ว ไม่ลง diff/ไม่แยก CR เพิ่ม */
   settled_skipped: number;
-  /** หนี้ .201 ที่แยก/ปรับยอด HC + INST ไปหนี้ CR (.216) amount = ยอดที่ย้ายเข้า CR (ลบ = ย้ายกลับ) */
+  /** หนี้ที่แยก/ปรับยอดไปหนี้ CR (OP .201 HC + INST -> .216, IP .202 ค่าพาหนะส่งต่อ -> .217) amount = ยอดที่ย้ายเข้า CR (ลบ = ย้ายกลับ) */
   cr_split: { refs: number; amount: number };
   /** หนี้ที่ข้อมูลสิทธิ (สิทธิ IPD, ที่ตั้งหน่วยบริการประจำ) เปลี่ยนตาม HOSxP */
   coverage_updated: number;
@@ -360,7 +370,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 /** ข้อมูลสิทธิจาก HOSxP: OPD = ที่ตั้งของหน่วยบริการประจำ (hospcode) ; IPD = สิทธิ an_stat + hospmain ของ ipt_pttype (query C) */
 async function hisCoverage(states: RecomputeState[]) {
   const hospmains = [...new Set(states.flatMap((s) => (s.patient_type === "OP" && s.hospmain ? [s.hospmain] : [])))];
-  const ans = states.flatMap((s) => (s.patient_type === "IP" ? [s.ref] : []));
+  const ans = states.flatMap((s) => (s.patient_type === "IP" && !isCrRef(s.ref) ? [s.ref] : []));
   const hosp = new Map<string, { chwpart: string | null; type: string | null }>();
   for (let i = 0; i < hospmains.length; i += HIS_CHUNK) {
     const part = hospmains.slice(i, i + HIS_CHUNK);
@@ -377,7 +387,7 @@ async function hisCoverage(states: RecomputeState[]) {
       const h = s.hospmain ? hosp.get(s.hospmain) : undefined;
       return { ...s, hospmain_chwpart: h?.chwpart ?? null, hospmain_type: h?.type ?? null };
     }
-    const r = ipd.get(s.ref); // finance_lock ไม่ใช่ Y แล้ว = คงข้อมูลเดิม
+    const r = ipd.get(s.an ?? s.ref); // หนี้ CR ใช้ข้อมูลของ AN เดียวกัน ; finance_lock ไม่ใช่ Y แล้ว = คงข้อมูลเดิม
     return r
       ? { ...s, pttype: str(r.pttype), hipdata_code: str(r.hipdata_code), hospmain: str(r.hospmain), hospmain_chwpart: str(r.hospmain_chwpart), hospmain_type: str(r.hospmain_type) }
       : s;
@@ -424,7 +434,7 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
 
 /**
  * คำนวณบัญชีของทุกหนี้ใน ledger ใหม่ตามกติกาปัจจุบัน (ar_right/ar_account_rule) ; apply = false คือดูผลอย่างเดียว ไม่เขียน
- * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด, แยก HC + INST ของ .201 เป็นหนี้ CR
+ * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด, แยก HC + INST ของ .201 และค่าพาหนะส่งต่อของ .202 เป็นหนี้ CR
  * และกลับรายการหนี้ของสิทธิที่ไม่ตั้งลูกหนี้และหนี้ OPD ของ visit ที่ admit แล้ว ลงวันเดียวกับแถว set ใน transaction เดียวที่ถือ lock ของ ar_ledger กดซ้ำได้
  * งวดที่ปิดแล้ว: trigger ar_ledger_period_guard ห้าม UPDATE แถวในงวดปิด ทั้งชุดจึง ROLLBACK
  */
@@ -438,11 +448,14 @@ export async function recomputeLedger(apply: boolean): Promise<RecomputeResult> 
   // ยอด HC + INST ของหนี้ OPD ที่ลง .201 ตามกติกาปัจจุบัน (ตามเดือนของวันรับบริการ = ref_date)
   const cr = await loadCr(current.map(fresh).filter((s) => s.patient_type === "OP" && !isCrRef(s.ref) && !s.cancelled && !admitted.has(s.vn ?? "") && resolve(s, rules).account_code === CR_SPLIT.from)
     .map((s) => ({ vn: s.vn, date: s.ref_date })));
+  // ค่าพาหนะส่งต่อของหนี้ IP ที่ลง .202 ตามกติกาปัจจุบัน
+  const ipCr = await loadIpCr(current.map(fresh).filter((s) => s.patient_type === "IP" && !isCrRef(s.ref) && !s.cancelled && resolve(s, rules).account_code === IP_CR_SPLIT.from)
+    .map((s) => s.ref));
   return locked(async (tx) => {
     const before = (await tx<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
     const states = before.map(fresh);
     const changedCoverage = states.filter((s, i) => coverageKey(s) !== coverageKey(before[i]));
-    const plan = planRecompute(states, rules, cr, admitted);
+    const plan = planRecompute(states, rules, cr, admitted, ipCr);
     const out = summarize(plan, apply, changedCoverage.length);
     if (!apply) return out;
     if (changedCoverage.length)

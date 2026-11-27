@@ -80,6 +80,12 @@ export const fundName = (r: Pick<SmtTransferRow, "efundDesc" | "fundDescr">) => 
 /** ฝั่งของแถว SMT จากเลขงวด REP/STM ต้น refDocNo ("6909_IP_02", "6909_OP_01_อุทธรณ์") ; null = ไม่ระบุ (DDSA..., OP REFER..., งบจัดสรร) */
 export const rowSide = (r: Pick<SmtTransferRow, "refDocNo">): "OP" | "IP" | null => (/^\d{4}_(OP|IP)_/.exec(trim(r.refDocNo))?.[1] as "OP" | "IP" | undefined) ?? null;
 
+/**
+ * งบปีก่อนย้ายไป PRIOR_YEAR_ACCOUNT เฉพาะ UC ; LGO ลงลูกหนี้ .801/.802 เสมอ เพราะตัดรายตัวด้วย REP
+ * และส่วนต่างของหนี้ปีงบก่อนลง 3102010102.102 ตอนตัด (PRIOR_DIFF_ACCOUNT) ไม่ใช่ตอนรับเงิน
+ */
+const priorYearRule = (source: string | null | undefined) => trim(source) === "UC";
+
 /** คีย์ของ Map mapping ต่อ (fund_key, side) */
 export const mapKey = (fundKey: string, side: FundSide) => `${fundKey}#${side}`;
 
@@ -95,13 +101,18 @@ export function findMapping(map: Map<string, FundMapEntry>, fk: string, side: "O
  * งบปีก่อนวันโอนลง PRIOR_YEAR_ACCOUNT ; แถวเดิมที่การเงินแก้ ยกเลิก หรือลงรับแล้วไม่แตะ (ใบเสร็จออกตามยอดนั้นแล้ว)
  * แถวใหม่/แถวที่อัปเดตเป็นรอออกใบเสร็จ ยังไม่ลงบัญชี งวดที่ปิดจึงไม่กัน (งวดปิดดูที่วันที่ใบเสร็จตอนลงรับ)
  */
-export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>): ImportPlan {
+export function planImport(
+  rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>,
+  /** ฝั่งของเลขที่ REP (refDocNo ของ LGO ไม่มี _OP_/_IP_) จาก rep_row ; ไม่พบ = ใช้ mapping ALL */
+  repSides: Map<string, "OP" | "IP"> = new Map(),
+): ImportPlan {
   const counts: ImportCounts = { new: 0, updated: 0, unchanged: 0, kept: 0, unmapped: 0, ignored: 0, pending: 0 };
   const plan: ImportPlan = { inserts: [], updates: [], newFunds: [], unmapped: [], counts };
   const unmapped = new Map<string, UnmappedFund>();
   const sides = new Map<string, { op: boolean; ip: boolean; r: SmtTransferRow }>();
+  const sideOf = (r: SmtTransferRow) => rowSide(r) ?? repSides.get(trim(r.refDocNo)) ?? null;
   for (const r of rows) {
-    const side = rowSide(r);
+    const side = sideOf(r);
     if (side) {
       const s = sides.get(fundKey(r)) ?? { op: false, ip: false, r };
       if (side === "OP") s.op = true;
@@ -114,7 +125,7 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
     }
     if (!cents(r.total)) continue;
     const fk = fundKey(r);
-    const m = findMapping(map, fk, rowSide(r));
+    const m = findMapping(map, fk, side);
     if (!m) {
       plan.newFunds.push({ fund_key: fk, side: "ALL", fund_name: fundName(r), smt_account_name: trim(r.mophDesc) || null });
       map.set(mapKey(fk, "ALL"), { account_code: null, ignore: false }); // กองทุนเดียวกันแถวถัดไปไม่เพิ่มซ้ำ
@@ -133,7 +144,7 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
       continue;
     }
     const by = budgetYear(r.mouGrpCode);
-    const account = by !== null && by < transferFy(r.postingDate) ? PRIOR_YEAR_ACCOUNT.code : mapped;
+    const account = priorYearRule(r.budgetSource) && by !== null && by < transferFy(r.postingDate) ? PRIOR_YEAR_ACCOUNT.code : mapped;
     const key = smtKey(r);
     const date = smtIso(r.postingDate);
     const amount = cents(r.total) / 100;
@@ -188,7 +199,7 @@ export function fundDetail(rows: SmtDetailRow[], key: string): FundDetail {
         group: trim(r.fundGroupDescr) || null, fund: fundName(r), account: trim(r.mophId) || null, account_name: trim(r.mophDesc) || null,
         amount: r.amount ?? r.total, wait: r.wait ?? 0, debt: r.debt ?? 0, total: r.total,
         status: PAYMENT_STATUS[r.pmntStts] ?? r.pmntStts, paid: r.pmntStts === "P", count: r.countRecord ?? null,
-        prior_year: by !== null && by < transferFy(r.postingDate),
+        prior_year: priorYearRule(r.budgetSource) && by !== null && by < transferFy(r.postingDate),
         side: rowSide(r),
       };
     })
@@ -335,7 +346,7 @@ const isoFy = (d: string) => +d.slice(0, 4) + 543 + (+d.slice(5, 7) >= 10 ? 1 : 
  */
 export function receiptAccount(r: { smt_key: string | null; account_code: string; edited: boolean }, receiptDate: string): string {
   const by = keyBudgetYear(r.smt_key);
-  return !r.edited && by !== null && by < isoFy(receiptDate) ? PRIOR_YEAR_ACCOUNT.code : r.account_code;
+  return !r.edited && priorYearRule(r.smt_key?.split("|")[0]) && by !== null && by < isoFy(receiptDate) ? PRIOR_YEAR_ACCOUNT.code : r.account_code;
 }
 
 export const MAX_RECEIPT_NO = 30;

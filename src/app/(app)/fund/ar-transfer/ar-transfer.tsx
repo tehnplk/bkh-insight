@@ -60,14 +60,14 @@ function Amount({ row }: { row: TransferRow }) {
   );
 }
 
-/** stm = บัญชีลูกหนี้ที่ตัดด้วย STM: เงินโอนใช้กระทบยอดเท่านั้น ไม่ลงสมุดรายวัน (ลงตอนตัดรายตัวด้วย STM) */
+/** stm = บัญชีลูกหนี้ที่ตัดรายตัว (STM หรือ REP ของ อปท.): เงินโอนใช้กระทบยอดเท่านั้น ไม่ลงสมุดรายวัน (ลงตอนตัดรายตัว) */
 const Account = ({ code, name, stm }: { code: string | null; name?: string | null; stm?: boolean }) =>
   code ? (
     <>
       <span className="whitespace-nowrap tabular-nums">{code}</span>
       {stm && (
-        <span title="เงินโอนนี้ลงบัญชีตอนตัดลูกหนี้รายตัวด้วย STM ที่หน้าตัดลูกหนี้" className="ml-1.5 rounded border border-line bg-surface-sunken px-1 text-xs whitespace-nowrap text-muted">
-          ไม่ลงสมุดรายวัน · ตัดด้วย STM
+        <span title="เงินโอนนี้ลงบัญชีตอนตัดลูกหนี้รายตัวด้วย STM หรือ REP ที่หน้าตัดลูกหนี้" className="ml-1.5 rounded border border-line bg-surface-sunken px-1 text-xs whitespace-nowrap text-muted">
+          ไม่ลงสมุดรายวัน · ตัดรายตัว (STM/REP)
         </span>
       )}
       {name && <span className="block text-grid-sub text-subtle">{name}</span>}
@@ -204,8 +204,9 @@ function ReceiptForm({ min, target, onDone }: { min: string; target: Record<stri
       }}
       className="flex flex-col gap-2 text-sm"
     >
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1">
+      {/* ป้ายอยู่หน้าช่องแบบเดียวกับ ThaiDatePicker */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2">
           <span className="text-muted">เลขที่ใบเสร็จ</span>
           <input required maxLength={MAX_RECEIPT_NO} value={no} onChange={(e) => setNo(e.target.value)} className={`${FIELD} w-40 tabular-nums`} />
         </label>
@@ -305,11 +306,14 @@ function Detail({ row, accounts, closedThrough, onDone }: { row: TransferRow; ac
 
 /* ---------- ยอดรับต่อบัญชีต่อเดือน ---------- */
 
-function SummaryTable({ data }: { data: ArTransferSummary }) {
+/** current = ปีงบปัจจุบัน: แสดงคอลัมน์รอออกใบเสร็จ (ยอด ณ วันนี้ทุกปีงบ ไม่ผูกกับปีงบที่เลือก จึงไม่แสดงในปีงบก่อน) */
+function SummaryTable({ data, current }: { data: ArTransferSummary; current: boolean }) {
   const byCode = new Map(data.accounts.map((a) => [a.code, a]));
   const monthTotal = (m: string) => Math.round(data.summary.reduce((s, r) => s + (r.months[m] ?? 0) * 100, 0)) / 100;
   const grand = Math.round(data.summary.reduce((s, r) => s + r.total * 100, 0)) / 100;
   const pendingGrand = Math.round(data.summary.reduce((s, r) => s + r.pending * 100, 0)) / 100;
+  // 12 เดือน + รวม ต้องพอดีกรอบที่จอ 1920 (ปีงบ 2569 ล้น 88px ด้วย px-3) จึงลด padding ของคอลัมน์เดือน
+  const MTH = "px-1.5 py-2.5 font-medium", MTD = "px-1.5 py-1.5";
   return (
     <div className="overflow-x-auto rounded-lg border border-line">
       <table className="w-full border-collapse text-sm">
@@ -318,10 +322,10 @@ function SummaryTable({ data }: { data: ArTransferSummary }) {
           <tr>
             <th scope="col" className={TH}>บัญชี</th>
             {data.months.map((m) => (
-              <th key={m} scope="col" className={`${TH} text-right whitespace-nowrap`}>{monthLabel(m)}</th>
+              <th key={m} scope="col" className={`${MTH} text-right whitespace-nowrap`}>{monthLabel(m)}</th>
             ))}
             <th scope="col" className={`${TH} text-right whitespace-nowrap`}>รวม (บาท)</th>
-            <th scope="col" className={`${TH} text-right whitespace-nowrap`}>รอออกใบเสร็จ (บาท)</th>
+            {current && <th scope="col" className={`${TH} text-right`}>รอออกใบเสร็จ ณ วันนี้ (บาท)</th>}
           </tr>
         </thead>
         <tbody>
@@ -329,20 +333,20 @@ function SummaryTable({ data }: { data: ArTransferSummary }) {
             <tr key={r.account_code} className="border-t border-line">
               <th scope="row" className={`${TD} text-left font-normal`}><Account code={r.account_code} name={byCode.get(r.account_code)?.name} stm={byCode.get(r.account_code)?.stm} /></th>
               {data.months.map((m) => (
-                <td key={m} className={`${TD} ${num}`}><Money value={r.months[m]} /></td>
+                <td key={m} className={`${MTD} ${num}`}><Money value={r.months[m]} /></td>
               ))}
               <td className={`${TD} ${num} font-semibold`}>{formatBaht(r.total)}</td>
-              <td className={`${TD} ${num} ${r.pending ? "text-warning" : ""}`}>{r.pending ? formatBaht(r.pending) : dash}</td>
+              {current && <td className={`${TD} ${num} ${r.pending ? "text-warning" : ""}`}>{r.pending ? formatBaht(r.pending) : dash}</td>}
             </tr>
           ))}
           {data.summary.length > 1 && (
             <tr className="border-t border-line bg-surface-sunken font-semibold">
               <th scope="row" className={`${TD} text-left`}>รวม</th>
               {data.months.map((m) => (
-                <td key={m} className={`${TD} ${num}`}>{data.summary.some((r) => m in r.months) ? formatBaht(monthTotal(m)) : dash}</td>
+                <td key={m} className={`${MTD} ${num}`}>{data.summary.some((r) => m in r.months) ? formatBaht(monthTotal(m)) : dash}</td>
               ))}
               <td className={`${TD} ${num}`}>{formatBaht(grand)}</td>
-              <td className={`${TD} ${num}`}>{pendingGrand ? formatBaht(pendingGrand) : dash}</td>
+              {current && <td className={`${TD} ${num}`}>{pendingGrand ? formatBaht(pendingGrand) : dash}</td>}
             </tr>
           )}
         </tbody>
@@ -389,7 +393,7 @@ function PendingReceipts({ data, onDone }: { data: ArTransferSummary; onDone: (m
             </thead>
             <tbody>
               {data.pending.map((b) => (
-                <tr key={b.key} className="border-t border-line align-top">
+                <tr key={b.key} className="border-t border-line align-middle">
                   <td className={`${TD} whitespace-nowrap tabular-nums`}>{formatThaiDate(b.transfer_date)}</td>
                   <td className={`${TD} whitespace-nowrap tabular-nums`}>
                     {b.batch ?? <span className="text-muted">เพิ่มเอง</span>}
@@ -822,7 +826,7 @@ export function ArTransfer() {
           <PendingReceipts data={d} onDone={done} />
           <section className="flex flex-col gap-2">
             <h2 className="text-title">ยอดรับต่อบัญชีตามวันที่ใบเสร็จ ปีงบ {d.fy}</h2>
-            <SummaryTable data={d} />
+            <SummaryTable data={d} current={d.fy === currentFy} />
           </section>
           <section className="flex flex-col gap-2">
             <h2 className="text-title">รายการโอนตามวันที่โอน ปีงบ {d.fy}</h2>

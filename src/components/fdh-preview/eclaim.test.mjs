@@ -61,6 +61,9 @@ test("CHA OP: drug group 3 becomes 4 (no AN), merged with existing 4 of the same
     { ...base, CHRGITEM: "07", AMOUNT: "50.00", claim_amount: "50.00" },
   ]), [{ ...base, CHRGITEM: "41", AMOUNT: "120.50" }, { ...base, CHRGITEM: "71", AMOUNT: "50.00" }]);
   assert.deepEqual(chaRows([{ ...base, AN: "a1", CHRGITEM: "03", AMOUNT: "10.00", claim_amount: "10.00" }]), [{ ...base, AN: "a1", CHRGITEM: "31", AMOUNT: "10.00" }]);
+  // SQL ส่งยากลับบ้านของผู้ป่วยในเป็น 04 และหมวด 16–18 เป็น 19 (CHRGITEM ของ sql.ts) → 41 และ J1
+  assert.deepEqual(chaRows([{ ...base, AN: "a1", CHRGITEM: "04", AMOUNT: "5.00", claim_amount: "5.00" }, { ...base, AN: "a1", CHRGITEM: "19", AMOUNT: "575.00", claim_amount: "575.00" }]),
+    [{ ...base, AN: "a1", CHRGITEM: "41", AMOUNT: "5.00" }, { ...base, AN: "a1", CHRGITEM: "J1", AMOUNT: "575.00" }]);
 });
 
 test("CLINIC comes from ec_clinic (spclty.provis_code), not the FDH CLINIC", () => {

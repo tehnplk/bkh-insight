@@ -4,7 +4,7 @@ import { todayIso } from "@/lib/thai-date";
 import { locked } from "../ar-sync/sync";
 import { closedThrough } from "../ar-trial-balance/trial-balance";
 import { fail, sessionUser } from "../fwf-card/data";
-import { fyStartOf, type CapTotals } from "./capitation";
+import { capBlock, fyStartOf, type CapTotals } from "./capitation";
 import {
   BATCHES_SQL, BATCH_COUNTS_SQL, BATCH_INSERT_SQL, ENTRY_INSERT_SQL, MONTH_ERROR, loadAccounts, notMigrated, parseMonth, planAccount,
   type AccountPlan, type CapBatch,
@@ -14,6 +14,8 @@ import {
 export type CapAccountPreview = {
   code: string; name: string; clear_code: string; clear_short_code: string | null;
   pool_received: number; pool_used: number; pool_before: number; pool_after: number; totals: CapTotals; blocked: string | null; can_confirm: boolean;
+  /** เงินโอนเข้า clear_code ที่โอนถึงสิ้นเดือนแต่ยังรอออกใบเสร็จ (ยังไม่นับใน pool) มี = ยืนยันไม่ได้ */
+  pending: number; pending_n: number;
 };
 /** response ของ GET ?month= : แผนตัดหนี้ ณ สิ้นเดือน (เดือนนี้ = ถึงวันนี้) และชุดที่ตัดแล้วล่าสุด */
 export type CapPreview = {
@@ -27,14 +29,8 @@ class CapError extends Error {
   }
 }
 
-/** เหตุที่ยืนยันไม่ได้ (null = ได้) ; เดือนที่ปิดงวดแล้วไม่ตัด เพราะรายได้/ส่วนต่างของงวดที่ปิดต้องไม่เปลี่ยน */
-function blockOf(p: AccountPlan, ended: boolean, month: string, through: string | null) {
-  if (!ended) return "ยืนยันได้เมื่อจบเดือนแล้ว";
-  if (through && month <= through) return `งวดถึงเดือน ${through} ปิดแล้ว ตัดหนี้ของเดือนที่ปิดไม่ได้`;
-  if (!p.account.clear_short_code) return `ยังไม่กำหนดบัญชีส่วนต่างของ ${p.account.code}`;
-  if (!p.plan.entries.length) return "ไม่มีหนี้คงเหลือที่ต้องตัด";
-  return null;
-}
+const blockOf = (p: AccountPlan, ended: boolean, month: string, through: string | null) =>
+  capBlock({ ended, month, through, ...p.account, pending_n: p.pending_n, entries: p.plan.entries.length });
 
 export async function GET(request: NextRequest) {
   if (!(await sessionUser())) return fail("unauthorized", 401);
@@ -49,7 +45,7 @@ export async function GET(request: NextRequest) {
         const blocked = blockOf(p, m.ended, m.month, through);
         return {
           ...p.account, pool_received: p.received, pool_used: p.used, pool_before: p.plan.pool_before, pool_after: p.plan.pool_after,
-          totals: p.plan.totals, blocked, can_confirm: !blocked,
+          totals: p.plan.totals, blocked, can_confirm: !blocked, pending: p.pending, pending_n: p.pending_n,
         };
       }),
     };
