@@ -4,6 +4,8 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { DataGrid, gridColumnHelper, type SummaryGrid } from "@/components/data-grid/data-grid";
 import { ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
+import { copyable } from "@/components/copy-button/copy-button";
+import { SettleDetailView } from "./settle-detail";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate, todayIso } from "@/lib/thai-date";
 import { Money, focusRing, num } from "@/app/(app)/fund/_components/ui";
@@ -57,6 +59,17 @@ function CloseBox({ row }: { row: PreviewRow }) {
     />
   );
 }
+
+/** modal รายละเอียดของแถว อ่านสถานะ checkbox ปิดส่วนต่างตอนนี้จาก context */
+function RowDetail({ doc, id, row }: { doc: "stm" | "rep"; id: string; row: PreviewRow }) {
+  const { changed } = useContext(ToggleContext);
+  const closeOn = row.closable && (changed.get(row.key)?.on ?? row.close_default);
+  return <SettleDetailView doc={doc} id={id} row={row} status={<StatusChip status={row.status} />} closeOn={closeOn} />;
+}
+const detailTitle = (r: PreviewRow) => {
+  const label = r.patient_type === "OP" ? "VN" : "AN";
+  return r.ref ? <>{label} {copyable(r.ref, label)}</> : `${label} ไม่พบ · TRAN_ID ${r.tran_id ?? "–"}`;
+};
 
 const col = gridColumnHelper<PreviewRow>();
 /** doc = ชื่อเอกสารที่จ่าย (STM / REP) ในหัวคอลัมน์ยอดจ่าย */
@@ -304,6 +317,10 @@ export function SettleFile({ doc, id, patientType, onChanged }: { doc: "stm" | "
           columns={COLUMNS[doc][patientType]}
           getRowId={(r) => r.key}
           renderSummary={renderSummary}
+          renderDetail={(r) => <RowDetail doc={doc} id={id} row={r} />}
+          detailTitle={detailTitle}
+          detailSize="medium"
+          detailInColumn="ref"
           renderFooter={(d, grid) => <SettleForm s={d.summary} grid={grid} onChanged={onChanged} />}
           exportPlacement="summary"
           searchSize="compact"

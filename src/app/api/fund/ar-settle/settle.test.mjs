@@ -1,7 +1,7 @@
 // รัน: node --test src/app/api/fund/ar-settle/settle.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSettleBody, planSettle, previewRows, repDebts, repGate, repGateReason, shouldClose, summarize } from "./settle.ts";
+import { debtKey, debtPlans, lineKey, parseSettleBody, planSettle, previewRows, repDebts, repGate, repGateReason, shouldClose, summarize } from "./settle.ts";
 
 const debt = (ref, balance, o = {}) => ({
   source: "ipt", ref, vn: null, an: "A1", patient_type: "IP", ref_date: "2026-10-01", pttype: "89", hipdata_code: "UCS",
@@ -163,4 +163,17 @@ test("repGate: ตัดด้วย REP ได้เมื่อเงินโ
   assert.deepEqual([two.status, two.receipt.receipts], ["ready", 2]);
   // REP อุทธรณ์ย้าย tran_id ออกไป ยอด REP เดิมลด = ไม่ตรง ต้องตรวจเอง
   assert.equal(repGate("43700.35", agg({ total: "43950.35" })).status, "mismatch");
+});
+
+test("debtPlans: แผนต่อหนี้ของรายเดียวตาม planSettle (CR ก่อน, ส่วนต่างเมื่อติ๊ก) ; บัญชีที่ไม่ตัดด้วย STM คงเดิม ; lineKey/debtKey = key ของแถวตัวอย่าง", () => {
+  const ds = [debt("A1", "1000.00"), debt("A1:CR", "300.00", { account_code: "1102050101.217" }), debt("A1:X", "50.00", { settles_by_stm: false })];
+  const l = line({ paid_total: "900", cr_paid: "300" });
+  assert.deepEqual(debtPlans([l], ds, "2026-11-20"), [
+    { ref: "A1", before: 1000, settle: -600, after: 400, diff: -400 },
+    { ref: "A1:CR", before: 300, settle: -300, after: 0, diff: 0 },
+    { ref: "A1:X", before: 50, settle: 0, after: 50, diff: 0 },
+  ]);
+  const [r] = preview([l], ds);
+  assert.deepEqual([lineKey(l), debtKey(ds[0]), r.key], ["IP:A1", "IP:A1", "IP:A1"]);
+  assert.equal(lineKey(line({ id: "7", an: null })), "row:7");
 });
