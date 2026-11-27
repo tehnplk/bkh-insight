@@ -54,13 +54,14 @@ const CLAIM_STATUS_SQL = `IF(${IS_OFC_SQL},
          ${STATUS_SQL})`;
 const RCPT_SQL = `(SELECT GROUP_CONCAT(r.rcpno ORDER BY r.finance_number SEPARATOR ', ') FROM rcpt_print r
          WHERE r.vn = o.vn AND r.status = 'OK')`;
-// visit ที่ admit (ovst.an = ipt.an) HOSxP ย้ายรายการไป AN (vn เป็น NULL) ; รายการที่ยังมี vn = visit คือค้างฝั่งผู้ป่วยนอก
-// ix_vn เป็น covering index (Using index) ไม่อ่านแถว MyISAM ; ตรวจเฉพาะ visit ที่มี an (31 วันราว 700 visit) วัดแล้วไม่เพิ่มเวลา
-const LEFT_EXISTS = "EXISTS (SELECT 1 FROM opitemrece r FORCE INDEX (ix_vn) WHERE r.vn = o.vn)";
+// visit ที่ admit (ovst.an = ipt.an) HOSxP ย้ายเฉพาะรายการลูกหนี้ไป AN (vn เป็น NULL) ; ค้างฝั่งผู้ป่วยนอก = รายการที่ยังมี vn = visit
+// และ paidst 00 ค้างชำระ / 02 ลูกหนี้สิทธิ (01/03 ผู้ป่วยจ่ายแล้ว, 04 ส่วนลด ไม่นับ) ; ix_vn type=ref ตรวจเฉพาะ visit ที่มี an
+const LEFT_ITEMS = "FROM opitemrece r FORCE INDEX (ix_vn) WHERE r.vn = o.vn AND r.paidst IN ('00','02')";
+const LEFT_EXISTS = `EXISTS (SELECT 1 ${LEFT_ITEMS})`;
 const NOT_ADMIT = "(o.an IS NULL OR o.an = '')";
 const ADMIT_SQL = `CASE WHEN ${NOT_ADMIT} THEN 'none' WHEN ${LEFT_EXISTS} THEN 'left' ELSE 'clear' END`;
 // null = ไม่มีรายการค้าง (SUM ของ 0 แถวเป็น NULL อยู่แล้ว แต่กัน sum_price เป็น NULL ทุกแถว)
-const OPD_LEFT_SQL = `IF(o.an <> '', (SELECT IF(COUNT(*) = 0, NULL, IFNULL(SUM(r.sum_price), 0)) FROM opitemrece r FORCE INDEX (ix_vn) WHERE r.vn = o.vn), NULL)`;
+const OPD_LEFT_SQL = `IF(o.an <> '', (SELECT IF(COUNT(*) = 0, NULL, IFNULL(SUM(r.sum_price), 0)) ${LEFT_ITEMS}), NULL)`;
 const FROM = `FROM ovst o
 LEFT JOIN patient p ON p.hn = o.hn
 LEFT JOIN vn_stat vs ON vs.vn = o.vn

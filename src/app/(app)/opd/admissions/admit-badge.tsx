@@ -79,7 +79,7 @@ function AdmitDetail({ row }: { row: VisitRow }) {
         ) : row.opd_left == null ? (
           <p className="rounded-lg border border-line px-4 py-8 text-center text-muted">ไม่มีรายการค้างฝั่งผู้ป่วยนอก</p>
         ) : (
-          // opitemrece ที่ vn = visit (HOSxP ย้ายรายการที่ admit ไป AN แล้ว ที่เหลือคือค้างฝั่งผู้ป่วยนอก)
+          // opitemrece ที่ vn = visit ทุกแถว: รายการที่ผู้ป่วยจ่ายแล้ว (paidst 01/03/04) มีป้ายบอกและไม่อยู่ในยอดลูกหนี้สิทธิ
           <DebtorItems vn={row.vn} an={null} />
         )}
       </div>

@@ -55,7 +55,7 @@ export type RawVisit = {
   rcpt_no: string | null;
   /** ovst.an (ว่าง = ไม่ได้ admit) */
   an: string | null;
-  /** ยอดรายการที่ยังค้างฝั่งผู้ป่วยนอกของ visit ที่ admit (opitemrece ที่ vn = visit) ไม่มีรายการ/ไม่ admit = null */
+  /** ยอดรายการที่ยังค้างฝั่งผู้ป่วยนอกของ visit ที่ admit (opitemrece ที่ vn = visit และ paidst 00/02) ไม่มีรายการ/ไม่ admit = null */
   opd_left: number | string | null;
   /** fdh_claim_status ของ HOSxP (สถานะเคลม) ไม่มีแถว = null */
   fdh_resv: string | null;
