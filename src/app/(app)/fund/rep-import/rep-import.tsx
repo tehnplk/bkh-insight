@@ -29,6 +29,13 @@ const columns = col.columns([
   col.accessor("file_date", { header: "วันที่ไฟล์", cell: (c) => (c.getValue() ? formatThaiDate(c.getValue()!) : dash), meta: { className: "whitespace-nowrap", filter: { format: (v) => formatThaiDate(v) || v } } }),
   col.accessor("file_name", { header: "ชื่อไฟล์", meta: { className: "whitespace-nowrap", filter: true } }),
   col.accessor("rep_type", { header: "ประเภท", meta: { className: "whitespace-nowrap", filter: true } }),
+  col.accessor("rep_no", {
+    header: "REP No.",
+    // หลายเลข = "เลขแรก–เลขท้าย (จำนวน)" รายการเต็มใน title
+    cell: ({ row: { original: r } }) =>
+      !r.rep_no ? dash : r.rep_count! > 1 ? <span title={r.rep_list!}>{r.rep_no}–{r.rep_list!.slice(r.rep_list!.lastIndexOf(" ") + 1)} ({r.rep_count})</span> : r.rep_no,
+    meta: { className: "whitespace-nowrap tabular-nums", filter: true },
+  }),
   col.accessor("row_count", { header: "จำนวนแถว", cell: (c) => formatCount(c.getValue()), meta: { className: num, filter: true } }),
   col.accessor("passed", { header: "ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num, filter: true } }),
   col.accessor("failed", { header: "ไม่ผ่าน", cell: (c) => (c.getValue() === null ? dash : formatCount(c.getValue()!)), meta: { className: num, filter: true } }),
@@ -170,7 +177,7 @@ export function RepImport() {
         getRowId={(r) => r.id}
         renderDetail={renderDetail}
         detailTitle={detailTitle}
-        detailSize="medium"
+        detailSize="wide"
       />
     </div>
   );

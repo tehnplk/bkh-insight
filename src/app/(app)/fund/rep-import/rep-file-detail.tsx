@@ -1,10 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
+import { copyable } from "@/components/copy-button/copy-button";
 import { formatBaht, formatCount } from "@/lib/number-format";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { RepFileDetail } from "@/app/api/fund/rep-import/detail/file-detail";
-import { Skeleton, btn, num, useJson } from "../_components/ui";
+import type { RepLineRow } from "@/app/api/fund/rep-import/rows/route";
+import { Money, Skeleton, btn, num, useJson } from "../_components/ui";
+import { DebtorItems, RepDetail } from "../uc-debtor/uc-debtor-detail";
 
 const dash = <span className="text-muted">–</span>;
 const th = "px-3 py-1.5 font-medium whitespace-nowrap";
@@ -33,6 +37,90 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="text-base font-semibold">{title}</h3>
       <div className="mt-3">{children}</div>
     </section>
+  );
+}
+
+// ---- รายการในไฟล์ (DataGrid แบบ localState ใน modal) ----
+const STATUS: Record<RepLineRow["status"], { label: string; tone: string }> = {
+  pass: { label: "ผ่าน", tone: "border-success-line bg-success-soft text-success" },
+  c: { label: "ติด C", tone: "border-danger-line bg-danger-soft text-danger" },
+  deny: { label: "Deny", tone: "border-danger-line bg-danger-soft text-danger" },
+};
+const StatusChip = ({ s }: { s: RepLineRow["status"] }) => (
+  <span className={`rounded border px-1.5 py-0.5 whitespace-nowrap ${STATUS[s].tone}`}>{STATUS[s].label}</span>
+);
+const money = (v: string | null) => <Money value={v == null ? null : Number(v)} />;
+const nowrap = "whitespace-nowrap tabular-nums";
+const date = (v: string | null) => (v ? formatThaiDate(v) : dash);
+
+const col = gridColumnHelper<RepLineRow>();
+const lineColumns = (ip: boolean) =>
+  col.columns([
+    col.accessor("status", {
+      header: "สถานะ",
+      enableSorting: false,
+      cell: (c) => {
+        // DENY ซ้ำกับป้าย รหัส Deny รายตัวอยู่ในรายละเอียด
+        const codes = c.row.original.error_codes.filter((e) => e !== "DENY").join(", ");
+        return (
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <StatusChip s={c.getValue()} />
+            {codes && <span className="text-muted tabular-nums">{codes}</span>}
+          </span>
+        );
+      },
+      meta: { filter: { format: (v) => STATUS[v as RepLineRow["status"]]?.label ?? v } },
+    }),
+    col.accessor("ref", { header: ip ? "AN" : "VN", cell: (c) => c.getValue() ?? dash, meta: { className: nowrap } }),
+    col.accessor("hn", { header: "HN", cell: (c) => c.getValue() ?? dash, meta: { className: nowrap } }),
+    col.accessor("tran_id", { header: "TRAN_ID", meta: { className: nowrap } }),
+    col.accessor("rep_no", { header: "REP No.", meta:{ className: nowrap, filter: true } }),
+    col.accessor("admit_at", { header: ip ? "วันเข้ารักษา" : "วันที่รับบริการ", cell: (c) => date(c.getValue()), meta: { className: nowrap } }),
+    ...(ip ? [col.accessor("discharge_at", { header: "วันจำหน่าย", cell: (c) => date(c.getValue()), meta: { className: nowrap } })] : []),
+    col.accessor("main_inscl", { header: "สิทธิ", cell: (c) => c.getValue() ?? dash, meta: { className: nowrap, filter: true } }),
+    ...(ip ? [col.accessor("adjrw", { header: "AdjRW", cell: (c) => c.getValue() ?? dash, meta: { className: num } })] : []),
+    col.accessor("claim_total", { header: "เรียกเก็บ (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
+    col.accessor("compensation", { header: "ชดเชยสุทธิ (บาท)", cell: (c) => money(c.getValue()), meta: { className: num } }),
+    col.accessor("stm_paid", {
+      header: "STM จ่าย (บาท)",
+      enableSorting: false,
+      cell: (c) => <span title={c.row.original.stm_docs ?? undefined}>{money(c.getValue())}</span>,
+      meta: { className: num },
+    }),
+  ]);
+const LINE_COLUMNS = { op: lineColumns(false), ip: lineColumns(true) };
+
+const lineTitle = (r: RepLineRow) => {
+  const label = r.patient_type === "IP" ? "AN" : "VN";
+  return r.ref ? <>{label} {copyable(r.ref, label)}</> : `TRAN_ID ${r.tran_id}`;
+};
+
+/** รายละเอียดแถว REP หนึ่งแถว: ข้อมูลแถว + REP ของแถวนั้นและประวัติของ VN/AN (RepDetail) + รายการค่าใช้จ่ายใน HOSxP */
+function LineDetail({ r }: { r: RepLineRow }) {
+  const ip = r.patient_type === "IP";
+  return (
+    <div className="text-sm">
+      <dl className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-6 gap-y-3">
+        <Fact label="สถานะ"><StatusChip s={r.status} /></Fact>
+        <Fact label="TRAN_ID">{copyable(r.tran_id, "TRAN_ID")}</Fact>
+        <Fact label="HN">{copyable(r.hn, "HN")}</Fact>
+        <Fact label="สิทธิ (REP)">{[r.scheme, r.main_inscl].filter(Boolean).join(" · ")}</Fact>
+        <Fact label={ip ? "วันเข้ารักษา" : "วันที่รับบริการ"}>{r.admit_at && formatThaiDate(r.admit_at)}</Fact>
+        {ip && <Fact label="วันจำหน่าย">{r.discharge_at && formatThaiDate(r.discharge_at)}</Fact>}
+        <Fact label="STM จ่าย (บาท)">
+          {r.stm_paid == null ? (
+            <span className="text-muted">ยังไม่พบใน STM</span>
+          ) : (
+            <>
+              {formatBaht(Number(r.stm_paid))}
+              <span className="block text-xs break-all text-muted">{r.stm_docs}</span>
+            </>
+          )}
+        </Fact>
+      </dl>
+      <RepDetail type={ip ? "ipd" : "opd"} tranId={r.tran_id} />
+      {r.ref && <DebtorItems vn={ip ? null : r.ref} an={ip ? r.ref : null} />}
+    </div>
   );
 }
 
@@ -75,6 +163,21 @@ export function RepFileDetailView({ id }: { id: string }) {
         <Kpi label="ยอดเบิกรวม (บาท)" value={formatBaht(k.claim_total)} />
         <Kpi label="ยอดชดเชยรวม (บาท)" value={formatBaht(k.compensation)} />
       </dl>
+
+      <Section title="รายการ">
+        <DataGrid<RepLineRow>
+          endpoint="/api/fund/rep-import/rows"
+          params={{ id }}
+          localState={{}}
+          columns={LINE_COLUMNS[f.rep_type.startsWith("IP") ? "ip" : "op"]}
+          getRowId={(r) => r.tran_id}
+          renderDetail={(r) => <LineDetail r={r} />}
+          detailTitle={lineTitle}
+          detailSize="medium"
+          detailInColumn="ref"
+          searchSize="compact"
+        />
+      </Section>
 
       <Section title="กองทุนที่พบ">
         {funds.length ? (

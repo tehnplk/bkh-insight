@@ -74,10 +74,13 @@ export function UcDebtorDetail({ row, status }: { row: UcDebtorRow; status: Reac
   );
 }
 
-/** REP ของ visit (opd, repKey = VN) หรือ admission (ipd, repKey = AN): ยอดจัดสรร, Error และประวัติการส่ง โหลดเมื่อแสดง */
-export function RepDetail({ type, repKey }: { type: "opd" | "ipd"; repKey: string }) {
+/**
+ * REP ของ visit (opd, repKey = VN) หรือ admission (ipd, repKey = AN): ยอดจัดสรร, Error และประวัติการส่ง โหลดเมื่อแสดง
+ * tranId = แสดงแถว REP นั้นแทนแถวล่าสุด (ใช้ได้แม้แถวไม่มี VN/AN) ประวัติยังเป็นของ VN/AN ของแถว
+ */
+export function RepDetail({ type, repKey, tranId }: { type: "opd" | "ipd"; repKey?: string; tranId?: string }) {
   const { loading, data, error, retry } = useJson<RepDetailResponse>(
-    `/api/fund/uc-debtor/detail?${new URLSearchParams({ type, key: repKey })}`,
+    `/api/fund/uc-debtor/detail?${new URLSearchParams(tranId ? { tran: tranId } : { type, key: repKey ?? "" })}`,
   );
   return loading ? (
     <div className="mt-6"><Skeleton rows={6} /></div>
@@ -153,7 +156,7 @@ function RepSections({ data, latest: l, ipd }: { data: RepDetailResponse; latest
           <Fact label="เรียกเก็บ (บาท)"><Money value={l.claim_total} /></Fact>
           <Fact label="ชดเชยสุทธิ สปสช. (บาท)"><Money value={l.net_nhso} /></Fact>
           <Fact label="ชดเชยสุทธิ ต้นสังกัด (บาท)"><Money value={l.net_affiliation} /></Fact>
-          <Fact label="REP">{data.history[0].rep_no}</Fact>
+          <Fact label="REP">{l.rep_no}</Fact>
           <Fact label="กองทุนหลัก / ย่อย">{pair(join(l.main_fund), join(l.sub_fund))}</Fact>
           <Fact label="สิทธิหลัก / ย่อย">{pair(l.main_inscl, l.sub_inscl)}</Fact>
           {ipd && <Fact label="DRG">{l.drg}</Fact>}
@@ -254,6 +257,13 @@ function RepSections({ data, latest: l, ipd }: { data: RepDetailResponse; latest
                     {h.tran_id}
                     {i === 0 && " "}
                     {i === 0 && <span className="ml-1 rounded bg-accent-soft px-1.5 text-xs text-accent-text">ล่าสุด</span>}
+                    {/* แถวที่เปิดจาก ?tran= ไม่ใช่แถวล่าสุด */}
+                    {i > 0 && h.tran_id === l.tran_id && (
+                      <>
+                        {" "}
+                        <span className="ml-1 rounded border border-line px-1.5 text-xs text-muted">รายการนี้</span>
+                      </>
+                    )}
                   </td>
                   <td className={`${td} whitespace-nowrap`}>{h.rep_no}</td>
                   <td className={`${td} break-all`}>{h.file_name}</td>

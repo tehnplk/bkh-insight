@@ -15,6 +15,10 @@ export type RepFileRow = {
   file_date: string | null;
   file_name: string;
   rep_type: string;
+  /** เลขที่ REP ของไฟล์ (ชีต Summary) น้อยสุด ; rep_list = ทุกเลขคั่น ", " (ไฟล์ปัจจุบันมีไฟล์ละเลขเดียว) */
+  rep_no: string | null;
+  rep_list: string | null;
+  rep_count: number | null;
   row_count: number;
   passed: number | null;
   failed: number | null;
@@ -33,20 +37,23 @@ export type RepImportResult = {
   error?: string;
 };
 
-const SORTABLE = ["file_date", "file_name", "rep_type", "row_count", "passed", "failed", "paid_total", "imported_at", "imported_by"] as const;
+const SORTABLE = ["file_date", "file_name", "rep_type", "rep_no", "row_count", "passed", "failed", "paid_total", "imported_at", "imported_by"] as const;
 
-// ยอดผ่าน/ไม่ผ่าน/ชดเชย จากชีต Summary ของไฟล์ $1 = คำค้น (null หรือ LIKE pattern)
+// เลขที่ REP และยอดผ่าน/ไม่ผ่าน/ชดเชย จากชีต Summary ของไฟล์ (PK rep_file_id, rep_no) $1 = คำค้น (null หรือ LIKE pattern)
+// REP ของแถว (rep_row.rep_no) ไม่ใช้ เพราะไฟล์อุทธรณ์มีเลข REP เดิมของแต่ละแถวปน
 const LIST_FROM = `FROM rep_file f
 LEFT JOIN LATERAL (
-  SELECT sum(passed)::int AS passed, sum(failed)::int AS failed, sum(paid_total) AS paid_total
+  SELECT min(rep_no) AS rep_no, string_agg(DISTINCT rep_no, ', ' ORDER BY rep_no) AS rep_list, count(DISTINCT rep_no)::int AS rep_count,
+    sum(passed)::int AS passed, sum(failed)::int AS failed, sum(paid_total) AS paid_total
   FROM rep_summary WHERE rep_file_id = f.id
 ) s ON true`;
-const LIST_WHERE = "WHERE ($1::text IS NULL OR f.file_name ILIKE $1 OR f.rep_type ILIKE $1)";
+const LIST_WHERE = "WHERE ($1::text IS NULL OR f.file_name ILIKE $1 OR f.rep_type ILIKE $1 OR s.rep_list ILIKE $1)";
 // ตัวกรองหัวคอลัมน์ (allowlist) ยกเว้นยอดเงิน
 const FILTER_DEFS: ColumnFilterDefs = {
   file_date: { expr: "to_char(f.file_date, 'YYYY-MM-DD')" },
   file_name: { expr: "f.file_name" },
   rep_type: { expr: "f.rep_type" },
+  rep_no: { expr: "s.rep_list" },
   row_count: { expr: "f.row_count" },
   passed: { expr: "s.passed" },
   failed: { expr: "s.failed" },
@@ -70,7 +77,7 @@ export async function GET(request: NextRequest) {
     return Response.json(await loadFacet(insightQuery, FILTER_DEFS, cf.query.facet, cf.query.facetQ, LIST_FROM, { sql: where, params: args as SqlValue[] }, "pg"));
   }
   // sort มาจาก allowlist จึงใช้เป็นชื่อคอลัมน์ได้
-  const select = `SELECT f.id, f.file_date, f.file_name, f.rep_type, f.row_count, s.passed, s.failed, s.paid_total, f.imported_at, f.imported_by
+  const select = `SELECT f.id, f.file_date, f.file_name, f.rep_type, s.rep_no, s.rep_list, s.rep_count, f.row_count, s.passed, s.failed, s.paid_total, f.imported_at, f.imported_by
 ${LIST_FROM}
 ${where}
 ORDER BY ${sort ?? "imported_at"} ${dir === "desc" || !sort ? "DESC" : "ASC"} NULLS LAST, f.id DESC`;
@@ -81,6 +88,7 @@ ORDER BY ${sort ?? "imported_at"} ${dir === "desc" || !sort ? "DESC" : "ASC"} NU
       { key: "file_date", header: "วันที่ไฟล์", width: 12 },
       { key: "file_name", header: "ชื่อไฟล์", width: 44 },
       { key: "rep_type", header: "ประเภท", width: 16 },
+      { key: "rep_list", header: "REP No.", width: 14 },
       { key: "row_count", header: "จำนวนแถว", width: 12, type: "count" },
       { key: "passed", header: "ผ่าน", width: 10, type: "count" },
       { key: "failed", header: "ไม่ผ่าน", width: 10, type: "count" },
