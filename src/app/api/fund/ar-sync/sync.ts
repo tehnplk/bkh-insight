@@ -5,13 +5,13 @@ import { inList, loadLookups } from "@/app/api/fund/_lib/fund";
 import { loadSubfunds } from "@/app/api/fund/_lib/subfund";
 import { byChunks, loadFundRules } from "@/app/api/admin/ar-funds/sql";
 import {
-  CR_SPLIT, LEDGER_START, addDays, chunkRange, crRef, dailyWindows, isCrRef, monthRange, planCancels, planIpd, planOpd, planRecompute, resolve, toCents,
+  ADMIT_NOTE, CR_SPLIT, LEDGER_START, addDays, chunkRange, crRef, dailyWindows, isCrRef, monthRange, planCancels, planIpd, planOpd, planRecompute, resolve, toCents,
   type AccountRule, type AccountRules, type Entry, type HisCancel, type HisDebt, type HisIpd, type RecomputeState, type Recomputed, type RefState,
   type Right, type Source, type SyncCase,
 } from "./ledger";
 
 // SQL ฝั่ง his ผ่าน prove-query แล้ว (A/B/C) ห้ามเปลี่ยน logic ถ้าไม่ได้ prove ใหม่
-// A ตั้งหนี้ OPD: key = debt_id (1 vn มีหลาย debt_id ได้) แถว ABORT ถูกตั้ง amount = 0 จึงกรองออก ส่วนการลดยอดใช้ B
+// A ตั้งหนี้ OPD: key = debt_id (1 vn มีหลาย debt_id ได้) แถว ABORT ถูกตั้ง amount = 0 จึงกรองออก ส่วนการลดยอดใช้ B ; o.an = visit admit แล้ว (planOpd ไม่ตั้ง)
 // where ของ A/B/C เป็นค่าคงที่ในโค้ดเท่านั้น (BY_RANGE รายวัน/backfill, BY_CASE ดึงใหม่รายราย) ห้ามรับจากผู้ใช้
 const OPD_DEBT_SQL = (where: string) => `SELECT d.debt_id, d.vn, d.debt_date, d.debt_date_time, d.pttype,
        t.hipdata_code, t.pttype_eclaim_id,
@@ -19,7 +19,7 @@ const OPD_DEBT_SQL = (where: string) => `SELECT d.debt_id, d.vn, d.debt_date, d.
        COALESCE(NULLIF(vp.hospmain, ''), NULLIF(o.hospmain, '')) AS hospmain,
        hc.chwpart AS hospmain_chwpart,
        hc.hospital_type_id AS hospmain_type,
-       o.vstdate
+       o.vstdate, o.an
 FROM rcpt_debt d
 LEFT JOIN pttype t ON t.pttype = d.pttype
 LEFT JOIN visit_pttype vp ON vp.vn = d.vn AND vp.pttype = d.pttype
@@ -65,14 +65,15 @@ SELECT ${COLS}, $2 FROM jsonb_to_recordset($1::jsonb) AS x(source text, kind tex
 ON CONFLICT (source, ref, kind) WHERE kind IN ('set', 'cancel') DO NOTHING
 RETURNING source, kind`;
 // ยอดของหนี้ (x = ทุกแถวของ (patient_type, ref) เดียวกับแถว set s): balance = ค่ารักษาเต็มของ source HOSxP (ไม่นับ diff),
-//   diff = ส่วนต่างตามเพดาน/สัดส่วน (diff ของ source HOSxP), settled = ตัดหนี้แล้วด้วย source อื่น (stm/fwf/capitation/manual)
+//   diff = ส่วนต่างตามเพดาน/สัดส่วน (diff ของ source HOSxP), settled = ตัดหนี้แล้วด้วย source อื่น (stm/fwf/capitation/manual), touched = มีแถวของ source อื่น (รวม manual adjust)
 const REF_AGG = `SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff') AS balance,
   COALESCE(SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind = 'diff'), 0) AS diff,
   bool_or(x.kind = 'cancel') AS cancelled,
-  COALESCE(bool_or(x.source <> s.source AND x.kind IN ('settle', 'diff')), false) AS settled`;
+  COALESCE(bool_or(x.source <> s.source AND x.kind IN ('settle', 'diff')), false) AS settled,
+  bool_or(x.source <> s.source) AS touched`;
 const SET_COLS = "s.source, s.ref, s.vn, s.an, s.patient_type, s.ref_date, s.pttype, s.hipdata_code, s.hospmain, s.hospmain_chwpart, s.hospmain_type, s.account_code";
 // แถว set ของ ref + ยอดของหนี้ ; $3/$4 = ช่วง ref_date (IPD หา AN ที่หายไปจากผล) OPD ส่ง null
-const STATES_SQL = `SELECT ${SET_COLS}, b.balance, b.diff, b.cancelled, b.settled
+const STATES_SQL = `SELECT ${SET_COLS}, b.balance, b.diff, b.cancelled, b.settled, b.touched
 FROM ar_ledger s
 CROSS JOIN LATERAL (SELECT ${REF_AGG} FROM ar_ledger x WHERE x.patient_type = s.patient_type AND x.ref = s.ref) b
 WHERE s.source = $1 AND s.kind = 'set' AND (s.ref = ANY($2::text[]) OR s.ref_date BETWEEN $3::date AND $4::date)`;
@@ -130,7 +131,7 @@ async function insert(tx: InsightTx, entries: Entry[], syncId: string | null, co
 
 const bump = (c: SyncCounts, k: string, n = 1) => (c[k] = (c[k] ?? 0) + n);
 
-// ovst PK (vn) เฉพาะ visit ที่มี HC/INST
+// visit ที่ admit แล้ว (ovst PK vn) ทีละ 1,000: loadCr ตัด HC/INST และ recomputeLedger กลับรายการหนี้ OPD
 const ADMITTED_SQL = (n: number) => `SELECT vn FROM ovst WHERE ${inList("vn", n)} AND an IS NOT NULL`;
 
 /**
@@ -170,7 +171,7 @@ async function syncOpd(w: { from: string; to: string }, rules: AccountRules, tod
   const cr = await loadCr(debtVisits(debts));
   await locked(async (tx) => {
     const states = await loadStates(tx, "rcpt_debt", debts.map((d) => String(d.debt_id)));
-    await insert(tx, planOpd(debts, states, rules, today, cr), syncId, counts);
+    await insert(tx, planOpd(debts, states, rules, today, cr, counts), syncId, counts);
   });
 }
 
@@ -294,7 +295,7 @@ export async function runCaseSync(c: SyncCase, requestedBy: string | null): Prom
     let entries = 0;
     if (opd) {
       if (cancels.length) counts.cancel_rows = cancels.length;
-      entries += await insert(tx, planOpd(debts, await loadStates(tx, source, debts.map((d) => String(d.debt_id))), rules, today, cr), syncId, counts);
+      entries += await insert(tx, planOpd(debts, await loadStates(tx, source, debts.map((d) => String(d.debt_id))), rules, today, cr, counts), syncId, counts);
       // โหลด states ใหม่ ให้หนี้ที่เพิ่งตั้งในรอบนี้ยกเลิกได้ทันที (ลำดับเดียวกับรายวัน)
       const { entries: cancelEntries } = planCancels(cancels, await loadStates(tx, source, cancels.map((x) => String(x.debt_id))));
       entries += await insert(tx, cancelEntries, syncId, counts);
@@ -337,6 +338,8 @@ export type RecomputeResult = {
   diffs: { month: string; account: string | null; n: number; amount: number }[];
   /** หนี้ของสิทธิที่ไม่ตั้งลูกหนี้ ที่กลับรายการ (amount = ยอดที่กลับ) */
   reversed: { refs: number; amount: number };
+  /** หนี้ OPD ของ visit ที่ admit แล้ว ที่กลับรายการ (ADMIT_NOTE, รวมหนี้ CR) */
+  admit_reversed: { refs: number; amount: number };
   /** ไม่มีกติกา คงบัญชีเดิม */
   no_rule: { refs: number; amount: number };
   /** หนี้ที่ตัดแล้ว ไม่ลง diff/ไม่แยก CR เพิ่ม */
@@ -384,7 +387,7 @@ async function hisCoverage(states: RecomputeState[]) {
 /** สรุปแผนเป็นยอดต่อเดือน/บัญชี */
 function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number): RecomputeResult {
   const out: RecomputeResult = {
-    applied: apply, moves: [], diffs: [], reversed: { refs: 0, amount: 0 }, no_rule: { refs: 0, amount: 0 },
+    applied: apply, moves: [], diffs: [], reversed: { refs: 0, amount: 0 }, admit_reversed: { refs: 0, amount: 0 }, no_rule: { refs: 0, amount: 0 },
     settled_skipped: 0, cr_split: { refs: 0, amount: 0 }, coverage_updated: coverageUpdated, rows_moved: 0, rows_inserted: 0,
   };
   const moves = new Map<string, RecomputeResult["moves"][number]>();
@@ -399,7 +402,11 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
     if (p.settledSkip) out.settled_skipped++;
     const crs = p.entries.filter((e) => isCrRef(e.ref) && (e.kind === "set" || e.kind === "adjust"));
     if (crs.length) out.cr_split = { refs: out.cr_split.refs + 1, amount: out.cr_split.amount + crs.reduce((sum, e) => sum + Number(e.amount), 0) };
-    if (p.entries.some((e) => e.kind === "reverse")) out.reversed = { refs: out.reversed.refs + 1, amount: out.reversed.amount + baht };
+    const rev = p.entries.filter((e) => e.kind === "reverse");
+    if (rev.length) {
+      const k = rev[0].note === ADMIT_NOTE ? "admit_reversed" : "reversed";
+      out[k] = { refs: out[k].refs + 1, amount: out[k].amount - rev.reduce((sum, e) => sum + Number(e.amount), 0) };
+    }
     for (const e of p.entries.filter((x) => x.kind === "diff")) {
       const dk = `${month}|${e.account_code}`;
       const d = diffs.get(dk) ?? { month, account: e.account_code, n: 0, amount: 0 };
@@ -409,6 +416,7 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
   out.moves = [...moves.values()].map((m) => ({ ...m, amount: round(m.amount) }));
   out.diffs = [...diffs.values()].map((d) => ({ ...d, amount: round(d.amount) }));
   out.reversed.amount = round(out.reversed.amount);
+  out.admit_reversed.amount = round(out.admit_reversed.amount);
   out.no_rule.amount = round(out.no_rule.amount);
   out.cr_split.amount = round(out.cr_split.amount);
   return out;
@@ -417,7 +425,7 @@ function summarize(plan: Recomputed[], apply: boolean, coverageUpdated: number):
 /**
  * คำนวณบัญชีของทุกหนี้ใน ledger ใหม่ตามกติกาปัจจุบัน (ar_right/ar_account_rule) ; apply = false คือดูผลอย่างเดียว ไม่เขียน
  * apply: เติมข้อมูลสิทธิจาก HOSxP, ย้ายบัญชีทุกแถวของหนี้ (รวม stm/manual/fwf), ลง diff ตามเพดาน/สัดส่วนที่ขาด, แยก HC + INST ของ .201 เป็นหนี้ CR
- * และกลับรายการหนี้ของสิทธิที่ไม่ตั้งลูกหนี้ ลงวันเดียวกับแถว set ใน transaction เดียวที่ถือ lock ของ ar_ledger กดซ้ำได้
+ * และกลับรายการหนี้ของสิทธิที่ไม่ตั้งลูกหนี้และหนี้ OPD ของ visit ที่ admit แล้ว ลงวันเดียวกับแถว set ใน transaction เดียวที่ถือ lock ของ ar_ledger กดซ้ำได้
  * งวดที่ปิดแล้ว: trigger ar_ledger_period_guard ห้าม UPDATE แถวในงวดปิด ทั้งชุดจึง ROLLBACK
  */
 export async function recomputeLedger(apply: boolean): Promise<RecomputeResult> {
@@ -425,14 +433,16 @@ export async function recomputeLedger(apply: boolean): Promise<RecomputeResult> 
   // อ่าน his ก่อนถือ lock (เหมือน sync) จากหนี้ที่มีตอนนี้ ; หนี้ที่ตั้งระหว่างนี้ไม่มีใน map จึงคงข้อมูลเดิม (OPD = ไม่พบที่ตั้ง)
   const current = (await insightQuery<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
   const fresh = await hisCoverage(current);
+  const opVns = [...new Set(current.flatMap((s) => (s.patient_type === "OP" && s.vn ? [s.vn] : [])))];
+  const admitted = new Set((await byChunks<{ vn: string }>(opVns, ADMITTED_SQL)).map((r) => r.vn));
   // ยอด HC + INST ของหนี้ OPD ที่ลง .201 ตามกติกาปัจจุบัน (ตามเดือนของวันรับบริการ = ref_date)
-  const cr = await loadCr(current.map(fresh).filter((s) => s.patient_type === "OP" && !isCrRef(s.ref) && !s.cancelled && resolve(s, rules).account_code === CR_SPLIT.from)
+  const cr = await loadCr(current.map(fresh).filter((s) => s.patient_type === "OP" && !isCrRef(s.ref) && !s.cancelled && !admitted.has(s.vn ?? "") && resolve(s, rules).account_code === CR_SPLIT.from)
     .map((s) => ({ vn: s.vn, date: s.ref_date })));
   return locked(async (tx) => {
     const before = (await tx<RawState<RecomputeState>>(RECOMPUTE_SQL)).map((r) => toState<RecomputeState>(r));
     const states = before.map(fresh);
     const changedCoverage = states.filter((s, i) => coverageKey(s) !== coverageKey(before[i]));
-    const plan = planRecompute(states, rules, cr);
+    const plan = planRecompute(states, rules, cr, admitted);
     const out = summarize(plan, apply, changedCoverage.length);
     if (!apply) return out;
     if (changedCoverage.length)

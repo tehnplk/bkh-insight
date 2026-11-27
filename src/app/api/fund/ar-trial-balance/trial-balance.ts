@@ -69,20 +69,20 @@ export function snapshotChanges(live: TrialBalance, snap: TrialBalance): number 
 
 type Query = <T>(sql: string, params: unknown[]) => Promise<T[]>;
 
-// S1 (prove-query ผ่าน ; เพิ่ม JOIN ar_capitation_batch 25 พ.ย. 2569): $1 ต้นปีงบ, $2 ต้นเดือน, $3 สิ้นเดือนไม่เกินวันนี้ ; GROUP BY sign ให้ Dr/Cr เป็นยอดรวมแต่ละข้าง
+// S1 (prove-query ผ่าน ; เพิ่ม JOIN ar_capitation_batch 25 พ.ย. 2569, prior_year เหมือน ar-journal 27 พ.ย. 2569): $1 ต้นปีงบ, $2 ต้นเดือน, $3 สิ้นเดือนไม่เกินวันนี้ ; GROUP BY sign ให้ Dr/Cr เป็นยอดรวมแต่ละข้าง
 const TB_SQL = `SELECT CASE WHEN l.entry_date < $1 THEN 'prior' WHEN l.entry_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
   l.account_code, a.name AS account_name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code,
-  cb.clear_code, cb.clear_short_code, count(*)::int AS n, SUM(l.amount) AS amount
+  cb.clear_code, cb.clear_short_code, COALESCE(l.kind = 'diff' AND l.source IN ('stm', 'manual') AND l.ref_date < (date_trunc('year', l.entry_date + interval '3 months') - interval '3 months')::date, false) AS prior_year, count(*)::int AS n, SUM(l.amount) AS amount
 FROM ar_ledger l LEFT JOIN ar_account a ON a.code = l.account_code LEFT JOIN ar_capitation_batch cb ON cb.id = l.capitation_batch_id
 WHERE l.entry_date <= $3
-GROUP BY 1, l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, cb.clear_code, cb.clear_short_code, sign(l.amount)`;
-// เงินโอนที่ได้รับ (ar_transfer ไม่ยกเลิก) ตาม transfer_date ; ส่ง amount ติดลบ = เครดิต account_code (journalLines kind transfer)
-const TB_TRANSFER_SQL = `SELECT CASE WHEN t.transfer_date < $1 THEN 'prior' WHEN t.transfer_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
+GROUP BY 1, l.account_code, a.name, l.kind, l.source, a.revenue_code, a.diff_under_code, a.diff_over_code, cb.clear_code, cb.clear_short_code, prior_year, sign(l.amount)`;
+// เงินโอนที่ได้รับ (ar_transfer ไม่ยกเลิก ลงรับแล้ว) ตามวันที่ใบเสร็จ receipt_date ; รอออกใบเสร็จ (NULL) ยังไม่ลงบัญชี ; ส่ง amount ติดลบ = เครดิต account_code (journalLines kind transfer, ข้ามบัญชี settles_by_stm)
+const TB_TRANSFER_SQL = `SELECT CASE WHEN t.receipt_date < $1 THEN 'prior' WHEN t.receipt_date < $2 THEN 'ytd' ELSE 'month' END AS bucket,
   t.account_code, a.name AS account_name, 'transfer' AS kind, 'transfer' AS source, NULL AS revenue_code, NULL AS diff_under_code, NULL AS diff_over_code,
-  count(*)::int AS n, -SUM(t.amount) AS amount
+  COALESCE(a.settles_by_stm, false) AS settles_by_stm, count(*)::int AS n, -SUM(t.amount) AS amount
 FROM ar_transfer t LEFT JOIN ar_account a ON a.code = t.account_code
-WHERE t.cancelled_at IS NULL AND t.transfer_date <= $3
-GROUP BY 1, t.account_code, a.name, sign(t.amount)`;
+WHERE t.cancelled_at IS NULL AND t.receipt_date <= $3
+GROUP BY 1, t.account_code, a.name, a.settles_by_stm, sign(t.amount)`;
 
 /** งบทดลองของเดือน YYYY-MM ถึงวันที่ to ; query = insightQuery หรือ tx ของ insightTransaction */
 export async function loadTrialBalance(query: Query, month: string, to: string): Promise<TrialBalance> {

@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { insightQuery } from "@/lib/db";
+import { escapeLike, insightQuery } from "@/lib/db";
 import { facetRows, filterRows, parseColumnFilters, parseGridQuery, type RowGetters } from "@/lib/grid-query";
 import { xlsxResponse } from "@/lib/xlsx";
-import { GROUP_LABEL, STATUS_LABEL, SETTLE_GROUPS, previewRows, summarize, type PreviewRow, type SettleGroup, type SettlePreviewPage, type SettleStatus } from "../settle";
+import { GROUP_LABEL, STATUS_LABEL, SETTLE_GROUPS, previewRows, summarize, type PreviewRow, type SettleGroup, type SettlePreviewPage, type SettleStatus, type SettleSummary } from "../settle";
+import { periodKey, stmKey } from "../../smt-reconcile/reconcile";
 import { loadBatches, loadFile, loadMissing, loadOpenFrom } from "../sql";
 
 // ตัวอย่างการตัดของไฟล์ STM หนึ่งไฟล์ (GET ?id=) หนึ่งแถวต่อหนี้ของ VN/AN กรอง/เรียง/แบ่งหน้าในหน่วยความจำ (ไฟล์ละไม่กี่พันบรรทัด)
@@ -21,6 +22,23 @@ const LABEL: Record<string, (v: string) => string> = {
   status: (v) => STATUS_LABEL[v as SettleStatus] ?? v,
 };
 
+// ใบเสร็จของเงินโอน SMT ที่ลงรับแล้ว ต้น ref_doc_no = งวดของ STM ("6910_IP_01", "6910_IP_01_อุทธรณ์") ; กรองตรงงวดด้วย periodKey อีกชั้น
+const TRANSFER_RECEIPT_SQL = `SELECT DISTINCT ref_doc_no, receipt_no, receipt_date FROM ar_transfer
+WHERE source = 'smt' AND cancelled_at IS NULL AND receipt_no IS NOT NULL AND ref_doc_no LIKE $1`;
+
+/** ค่าเริ่มต้นใบเสร็จของ STM UC: ใช้เมื่อพบใบเดียวของงวด ; ก่อนรัน migration 202611271500 (ไม่มีคอลัมน์) = null */
+async function transferReceipt(file: SettleSummary["file"]): Promise<SettleSummary["transfer_receipt"]> {
+  if (file.scheme !== "UCS") return null;
+  const period = stmKey(file);
+  const rows = await insightQuery<{ ref_doc_no: string; receipt_no: string; receipt_date: string }>(TRANSFER_RECEIPT_SQL, [`${escapeLike(period)}%`]).catch((e) => {
+    if ((e as { code?: string }).code === "42703") return [];
+    throw e;
+  });
+  const receipts = new Map(rows.filter((r) => periodKey(r.ref_doc_no) === period).map((r) => [`${r.receipt_no}|${r.receipt_date}`, r]));
+  const [only] = receipts.values();
+  return receipts.size === 1 ? { period, receipt_no: only.receipt_no, receipt_date: only.receipt_date } : null;
+}
+
 export async function GET(request: NextRequest) {
   if (!(await auth())) return Response.json({ error: "unauthorized" }, { status: 401 });
   const params = request.nextUrl.searchParams;
@@ -34,7 +52,9 @@ export async function GET(request: NextRequest) {
 
   const data = await loadFile(insightQuery, id);
   if (!data) return Response.json({ error: "ไม่พบไฟล์ STM นี้" }, { status: 404 });
-  const [missing, batches, open_from] = await Promise.all([loadMissing(insightQuery, data.file), loadBatches(insightQuery, id), loadOpenFrom(insightQuery)]);
+  const [missing, batches, open_from, transfer_receipt] = await Promise.all([
+    loadMissing(insightQuery, data.file), loadBatches(insightQuery, id), loadOpenFrom(insightQuery), transferReceipt(data.file),
+  ]);
   const rows = previewRows(data.lines, data.debts, missing, data.file.patient_type);
 
   const needle = q.toLowerCase();
@@ -71,7 +91,7 @@ export async function GET(request: NextRequest) {
   const body: SettlePreviewPage = {
     rows: filtered.slice((page - 1) * pageSize, page * pageSize),
     total: filtered.length,
-    summary: { file: data.file, open_from, batches, ...summarize(rows) },
+    summary: { file: data.file, open_from, batches, transfer_receipt, ...summarize(rows) },
   };
   return Response.json(body);
 }

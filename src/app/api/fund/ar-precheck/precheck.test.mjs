@@ -83,7 +83,9 @@ test("OPD admitted visit keeps AN, search and sort by admit", () => {
 
 test("OPD admitted: ใบลูกหนี้ค้างเมื่อมีใบแต่รายการย้ายไป AN หมด ไม่งั้นตรวจที่ผู้ป่วยใน", () => {
   const admitted = (extra) => src("1", { an: "690000001", ...extra });
-  assert.equal(statusOf("opd", admitted({ debt_amount: "50" }), []), "stale_slip");
+  // ยังค้างในสมุด = stale_slip ; ไม่มีในสมุด (ar-sync ไม่ตั้งหนี้ visit ที่ admit) = stale_fixed
+  assert.equal(buildRows("opd", [admitted({ debt_amount: "50" })], [], [{ key: "1", booked: "50", balance: "50" }], TODAY)[0].status, "stale_slip");
+  assert.equal(statusOf("opd", admitted({ debt_amount: "50" }), []), "stale_fixed");
   assert.equal(statusOf("opd", admitted({ debt_amount: null }), []), "admitted");
   // ยังมีรายการที่ vn = ตรวจที่ผู้ป่วยใน แม้ยอดไม่ตรง ; admit นำหน้าการล็อก
   assert.equal(statusOf("opd", admitted({ finance_lock: null }), [rx("1", "999")]), "admitted");
@@ -129,13 +131,15 @@ test("OPD ล็อกแล้ว: ใบลูกหนี้ตรงรา�
   assert.equal(summarize(rows).total.mismatch, 1);
 });
 
-test("OPD ใบค้าง: ปรับปรุงในสมุดจนคงเหลือ 0 = stale_fixed (ไม่นับไม่ตรง) ; ยังไม่ลงสมุด/ติดลบ/อ่านสมุดไม่ได้ ยังเป็น stale_slip", () => {
+test("OPD ใบค้าง: สมุดคงเหลือ 0 (ปรับปรุง/กลับรายการ/ไม่ตั้งเพราะ admit) = stale_fixed (ไม่นับไม่ตรง) ; ยังค้าง/ติดลบ/อ่านสมุดไม่ได้ ยังเป็น stale_slip", () => {
   const stale = src("1", { an: "690000001", debt_amount: "50" });
   const status = (booked) => buildRows("opd", [stale], [], booked, TODAY)[0].status;
   assert.equal(status([{ key: "1", booked: "50.00", balance: "0.00" }]), "stale_fixed");
   assert.equal(status([{ key: "1", booked: "50.00", balance: "50.00" }]), "stale_slip");
   assert.equal(status([{ key: "1", booked: "50.00", balance: "-50.00" }]), "stale_slip");
-  assert.equal(status([]), "stale_slip");
+  // ar-sync ไม่ตั้งหนี้ OPD ของ visit ที่ admit: ไม่มีแถว หรือตั้งแล้วกลับรายการ (booked 0)
+  assert.equal(status([]), "stale_fixed");
+  assert.equal(status([{ key: "1", booked: "0.00", balance: "0.00" }]), "stale_fixed");
   assert.equal(status(null), "stale_slip");
   // booked ยังเป็นยอดของ HOSxP ไม่รวม manual
   assert.equal(buildRows("opd", [stale], [], [{ key: "1", booked: "50.00", balance: "0.00" }], TODAY)[0].booked, 50);

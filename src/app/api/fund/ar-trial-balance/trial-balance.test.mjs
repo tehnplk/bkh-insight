@@ -108,6 +108,20 @@ test("เหมาจ่าย: เงินโอนเข้า .214 กับ
   assert.equal(tb.missing, 0);
 });
 
+test("เงินโอนเข้าลูกหนี้ settles_by_stm ไม่ลงบัญชี: ลูกหนี้คงเหลือ = ตั้งหนี้ − STM settle ไม่หักซ้ำ ; เงินฝากเท่ายอด STM", () => {
+  const t = { account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" };
+  const tb = trialBalance([
+    g("month", "set", "1000"),
+    g("month", "settle", "-700"),
+    g("month", "transfer", "-700", { ...t, settles_by_stm: true }),
+    g("month", "transfer", "-50", { ...t, account_code: "4301020105.214" }),
+  ]);
+  assert.equal(row(tb, "ar", AR).closing_dr, 300);
+  assert.equal(row(tb, "cash", null).closing_dr, 750);
+  assert.equal(row(tb, "revenue", "4301020105.214").closing_cr, 50);
+  assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
+});
+
 test("เงินโอนงบปีก่อน (equity 3102010102.201) เป็นบัญชีงบดุล ยกมาข้ามปีงบ ไม่เข้าผลสะสมปีงบก่อน ; เรียงก่อนแถว retained", () => {
   const t = { account_code: "3102010102.201", account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" };
   const tb = trialBalance([g("prior", "set", "1000"), g("prior", "transfer", "-300", t), g("month", "transfer", "-200", t)]);
@@ -118,4 +132,15 @@ test("เงินโอนงบปีก่อน (equity 3102010102.201) เ�
   assert.ok(types.indexOf("equity") < types.indexOf("retained"));
   assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
   assert.equal(tb.missing, 0);
+});
+
+test("ส่วนต่างหนี้ปีงบก่อน (prior_year) ลง equity 3102010102.102 ยกมาข้ามปีงบ ไม่เข้าผลสะสมปีงบก่อน ; Dr = Cr", () => {
+  const p = { source: "stm", prior_year: true };
+  const tb = trialBalance([g("prior", "set", "1000"), g("ytd", "settle", "-700"), g("ytd", "diff", "-300", p), g("month", "diff", "-20", { source: "stm" })]);
+  assert.equal(row(tb, "equity", "3102010102.102").opening_dr, 300);
+  assert.equal(row(tb, "equity", "3102010102.102").closing_dr, 300);
+  assert.equal(row(tb, "diff_under", UNDER).dr, 20);
+  assert.equal(tb.rows.filter((r) => r.type === "retained").length, 1); // แค่รายได้ตั้งหนี้ปีก่อน
+  assert.equal(tb.totals.opening_dr, tb.totals.opening_cr);
+  assert.equal(tb.totals.closing_dr, tb.totals.closing_cr);
 });

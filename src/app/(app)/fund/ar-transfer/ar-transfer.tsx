@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { Download, Plus } from "lucide-react";
-import { AccountPicker, type AccountOption } from "@/components/account-picker/account-picker";
+import { AccountPicker } from "@/components/account-picker/account-picker";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
 import { ThaiDatePicker } from "@/components/thai-date-picker/thai-date-picker";
@@ -11,11 +11,12 @@ import { usePersistedFilter } from "@/lib/persisted-filter";
 import { THAI_MONTHS_SHORT, formatThaiDate, todayIso } from "@/lib/thai-date";
 import { FY_BACK, fiscalYearOf } from "@/app/api/fund/uc-dashboard/dashboard";
 import { LEDGER_START } from "@/app/api/fund/ar-sync/ledger";
-import type { TransferRow, TransferStatus, FundMapRow } from "@/app/api/fund/ar-transfer/data";
+import type { AccountOption, TransferRow, TransferStatus, FundMapRow } from "@/app/api/fund/ar-transfer/data";
 import type { ArTransferSummary } from "@/app/api/fund/ar-transfer/summary/route";
 import type { ImportResult } from "@/app/api/fund/ar-transfer/import/route";
 import type { FundDetailResult } from "@/app/api/fund/ar-transfer/fund-detail/route";
-import { ACCOUNT_RE, MAX_NOTE, PRIOR_YEAR_ACCOUNT, SOURCE_LABEL, STATUS_LABEL, type ImportCounts } from "@/app/api/fund/ar-transfer/transfer";
+import type { ReceiptResult } from "@/app/api/fund/ar-transfer/receipt/route";
+import { ACCOUNT_RE, MAX_NOTE, MAX_RECEIPT_NO, PRIOR_YEAR_ACCOUNT, SOURCE_LABEL, STATUS_LABEL, type ImportCounts, type PendingBatch } from "@/app/api/fund/ar-transfer/transfer";
 import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { Fact, Facts } from "../uc-debtor/uc-debtor-detail";
 
@@ -37,7 +38,8 @@ async function send<T = unknown>(url: string, init: RequestInit): Promise<{ ok: 
 }
 
 const STATUS_CHIP: Record<TransferStatus, string> = {
-  active: "border-success-line bg-success-soft text-success",
+  pending: "border-warning-line bg-warning-soft text-warning",
+  received: "border-success-line bg-success-soft text-success",
   cancelled: "border-line bg-surface-sunken text-muted",
 };
 const Status = ({ status }: { status: TransferStatus }) => (
@@ -58,10 +60,16 @@ function Amount({ row }: { row: TransferRow }) {
   );
 }
 
-const Account = ({ code, name }: { code: string | null; name?: string | null }) =>
+/** stm = บัญชีลูกหนี้ที่ตัดด้วย STM: เงินโอนใช้กระทบยอดเท่านั้น ไม่ลงสมุดรายวัน (ลงตอนตัดรายตัวด้วย STM) */
+const Account = ({ code, name, stm }: { code: string | null; name?: string | null; stm?: boolean }) =>
   code ? (
     <>
       <span className="whitespace-nowrap tabular-nums">{code}</span>
+      {stm && (
+        <span title="เงินโอนนี้ลงบัญชีตอนตัดลูกหนี้รายตัวด้วย STM ที่หน้าตัดลูกหนี้" className="ml-1.5 rounded border border-line bg-surface-sunken px-1 text-xs whitespace-nowrap text-muted">
+          ไม่ลงสมุดรายวัน · ตัดด้วย STM
+        </span>
+      )}
       {name && <span className="block text-grid-sub text-subtle">{name}</span>}
     </>
   ) : (
@@ -74,11 +82,13 @@ const COLUMNS = col.columns([
   col.accessor("ref_doc_no", { header: "เลขที่เอกสาร", cell: (c) => c.getValue() || dash }),
   col.accessor("fund_name", { header: "กองทุน", cell: (c) => c.getValue() || dash, meta: { filter: true } }),
   col.accessor("budget_year", { header: "งบปี", cell: (c) => c.getValue() ?? dash, enableSorting: false, meta: { className: "tabular-nums" } }),
-  col.accessor("account_code", { header: "บัญชี", cell: (c) => <Account code={c.getValue()} name={c.row.original.account_name} />, meta: { filter: true } }),
+  col.accessor("account_code", { header: "บัญชี", cell: (c) => <Account code={c.getValue()} name={c.row.original.account_name} stm={c.row.original.stm} />, meta: { filter: true } }),
   col.accessor("amount", { header: "จำนวนเงิน (บาท)", cell: (c) => <Amount row={c.row.original} />, meta: { className: num } }),
   col.accessor("source", { header: "ที่มา", cell: (c) => SOURCE_LABEL[c.getValue()], meta: { filter: { format: (v) => SOURCE_LABEL[v as TransferRow["source"]] ?? v } } }),
   col.accessor("note", { header: "หมายเหตุ", cell: (c) => c.getValue() || dash, enableSorting: false }),
   col.accessor("status", { header: "สถานะ", cell: (c) => <Status status={c.getValue()} />, meta: { filter: { format: (v) => STATUS_LABEL[v as TransferStatus] ?? v } } }),
+  col.accessor("receipt_no", { header: "เลขที่ใบเสร็จ", cell: (c) => c.getValue() || dash, meta: { className: "whitespace-nowrap tabular-nums" } }),
+  col.accessor("receipt_date", { header: "วันที่ใบเสร็จ", cell: (c) => (c.getValue() ? formatThaiDate(c.getValue()) : dash), meta: { className: "whitespace-nowrap tabular-nums" } }),
 ]);
 
 const by = (name: string | null, at: string | null) => (name ? `${name}${at ? ` · ${formatThaiDate(at)} ${at.slice(11, 16)} น.` : ""}` : null);
@@ -86,8 +96,9 @@ const closedIn = (date: string, through: string | null) => !!through && date.sli
 
 /* ---------- ฟอร์มรายการ (เพิ่มเอง/แก้) ---------- */
 
-type Draft = { transfer_date: string; ref_doc_no: string; account_code: string; amount: string; note: string };
+type Draft = { transfer_date: string; ref_doc_no: string; account_code: string; amount: string; note: string; receipt_no: string; receipt_date: string };
 
+/** withRef = ฟอร์มเพิ่มเอง: มีเลขที่เอกสาร และใบเสร็จ (ไม่กรอกเลขที่ใบเสร็จ = รอออกใบเสร็จ) */
 function TransferForm({ id, initial, accounts, withRef, submitText, onSubmit }: {
   id: string; initial: Draft; accounts: AccountOption[]; withRef: boolean; submitText: string;
   onSubmit: (d: Draft) => Promise<string | null>;
@@ -127,6 +138,17 @@ function TransferForm({ id, initial, accounts, withRef, submitText, onSubmit }: 
           <span className="text-muted">หมายเหตุ</span>
           <input maxLength={MAX_NOTE} value={d.note} onChange={(e) => setD({ ...d, note: e.target.value })} className={`${FIELD} min-w-48`} />
         </label>
+        {withRef && (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-muted">เลขที่ใบเสร็จ</span>
+              <input maxLength={MAX_RECEIPT_NO} value={d.receipt_no} onChange={(e) => setD({ ...d, receipt_no: e.target.value })} className={`${FIELD} w-36 tabular-nums`} />
+            </label>
+            {d.receipt_no.trim() && (
+              <ThaiDatePicker label="วันที่ใบเสร็จ" value={d.receipt_date} onChange={(receipt_date) => setD({ ...d, receipt_date })} min={d.transfer_date} max={todayIso()} stepper={false} />
+            )}
+          </>
+        )}
         <button type="submit" disabled={pending} className={primary}>{pending ? "กำลังบันทึก…" : submitText}</button>
       </div>
       {error && <p role="alert" className="text-danger">{error}</p>}
@@ -136,7 +158,8 @@ function TransferForm({ id, initial, accounts, withRef, submitText, onSubmit }: 
 
 const payload = (d: Draft) => ({ transfer_date: d.transfer_date, account_code: d.account_code.trim(), amount: Number(d.amount), note: d.note });
 
-function CancelForm({ id, onDone }: { id: string; onDone: (msg: string) => void }) {
+/** ฟอร์มเหตุผล + ปุ่มสีอันตราย (ยกเลิกรายการ / ยกเลิกการรับ) ; onSubmit คืนข้อความ error หรือ null */
+function ReasonForm({ label, submitText, onSubmit }: { label: string; submitText: string; onSubmit: (reason: string) => Promise<string | null> }) {
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string>();
@@ -145,20 +168,49 @@ function CancelForm({ id, onDone }: { id: string; onDone: (msg: string) => void 
       onSubmit={(e) => {
         e.preventDefault();
         setError(undefined);
-        startTransition(async () => {
-          const r = await send("/api/fund/ar-transfer", { method: "PATCH", body: JSON.stringify({ id, action: "cancel", reason }) });
-          if (!r.ok) return setError(r.error);
-          onDone("ยกเลิกรายการแล้ว");
-        });
+        startTransition(async () => setError((await onSubmit(reason)) ?? undefined));
       }}
       className="flex flex-col gap-2 text-sm"
     >
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-muted">เหตุผลที่ยกเลิก</span>
+          <span className="text-muted">{label}</span>
           <input required maxLength={MAX_NOTE} value={reason} onChange={(e) => setReason(e.target.value)} className={`${FIELD} min-w-56`} />
         </label>
-        <button type="submit" disabled={pending || !reason.trim()} className={`${btn} border-danger-line text-danger disabled:opacity-60`}>{pending ? "กำลังยกเลิก…" : "ยกเลิกรายการ"}</button>
+        <button type="submit" disabled={pending || !reason.trim()} className={`${btn} border-danger-line text-danger disabled:opacity-60`}>{pending ? "กำลังบันทึก…" : submitText}</button>
+      </div>
+      {error && <p role="alert" className="text-danger">{error}</p>}
+    </form>
+  );
+}
+
+/** เลขที่/วันที่ใบเสร็จ (ค่าเริ่มต้นวันนี้ ไม่ก่อนวันที่โอน) แล้วลงรับ ; target = ชุดโอน { transfer_date, batch } หรือ { id } */
+function ReceiptForm({ min, target, onDone }: { min: string; target: Record<string, string>; onDone: (msg: string) => void }) {
+  const today = todayIso();
+  const [no, setNo] = useState("");
+  const [date, setDate] = useState(today < min ? min : today);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string>();
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        setError(undefined);
+        startTransition(async () => {
+          const r = await send<ReceiptResult>("/api/fund/ar-transfer/receipt", { method: "POST", body: JSON.stringify({ action: "receive", ...target, receipt_no: no, receipt_date: date }) });
+          if (!r.ok) return setError(r.error);
+          onDone(`ลงรับ ${formatCount(r.body.n)} รายการ ใบเสร็จ ${no.trim()} วันที่ ${formatThaiDate(date)} แล้ว`);
+        });
+      }}
+      className="flex flex-col gap-2 text-sm"
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">เลขที่ใบเสร็จ</span>
+          <input required maxLength={MAX_RECEIPT_NO} value={no} onChange={(e) => setNo(e.target.value)} className={`${FIELD} w-40 tabular-nums`} />
+        </label>
+        <ThaiDatePicker label="วันที่ใบเสร็จ" value={date} onChange={setDate} min={min} max={today} stepper={false} />
+        <button type="submit" disabled={pending || !no.trim()} className={primary}>{pending ? "กำลังบันทึก…" : "ลงรับ"}</button>
       </div>
       {error && <p role="alert" className="text-danger">{error}</p>}
     </form>
@@ -166,33 +218,60 @@ function CancelForm({ id, onDone }: { id: string; onDone: (msg: string) => void 
 }
 
 function Detail({ row, accounts, closedThrough, onDone }: { row: TransferRow; accounts: AccountOption[]; closedThrough: string | null; onDone: (msg: string) => void }) {
-  const locked = closedIn(row.transfer_date, closedThrough);
+  // แถวรอออกใบเสร็จยังไม่ลงบัญชี แก้ได้เสมอ ; แถวที่รับแล้วดูงวดของวันที่ใบเสร็จ (server ตรวจซ้ำรวมการใช้ตัดหนี้เหมาจ่าย)
+  const locked = !!row.receipt_date && closedIn(row.receipt_date, closedThrough);
   return (
     <div className="flex flex-col gap-5">
       <Facts>
         <Fact label="จำนวนเงิน (บาท)"><span className="font-semibold"><Amount row={row} /></span></Fact>
         <Fact label="ยอดจาก SMT (บาท)"><Money value={row.smt_amount} /></Fact>
-        <Fact label="บัญชี (เครดิต)"><Account code={row.account_code} name={row.account_name} /></Fact>
+        <Fact label="บัญชี (เครดิต)"><Account code={row.account_code} name={row.account_name} stm={row.stm} /></Fact>
         <Fact label="กองทุน">{row.fund_name}</Fact>
         <Fact label="งบปี">{row.budget_year}</Fact>
         <Fact label="ที่มา">{SOURCE_LABEL[row.source]}</Fact>
         <Fact label="สถานะ"><Status status={row.status} /></Fact>
+        <Fact label="ชุดโอน">{row.batch}</Fact>
+        <Fact label="เลขที่ใบเสร็จ">{row.receipt_no}</Fact>
+        <Fact label="วันที่ใบเสร็จ">{row.receipt_date && formatThaiDate(row.receipt_date)}</Fact>
+        <Fact label="ลงรับโดย">{by(row.received_by, row.received_at)}</Fact>
+        {row.unreceived_by && <Fact label="ยกเลิกการรับล่าสุดโดย">{by(row.unreceived_by, row.unreceived_at)}</Fact>}
+        {row.unreceived_by && <Fact label="เหตุผลที่ยกเลิกการรับ">{row.unreceive_reason}</Fact>}
         <Fact label="หมายเหตุ">{row.note}</Fact>
         <Fact label={row.source === "smt" ? "นำเข้าโดย" : "เพิ่มโดย"}>{by(row.created_by, row.created_at)}</Fact>
         <Fact label="แก้ล่าสุดโดย">{by(row.updated_by, row.updated_at)}</Fact>
         {row.status === "cancelled" && <Fact label="ยกเลิกโดย">{by(row.cancelled_by, row.cancelled_at)}</Fact>}
         {row.status === "cancelled" && <Fact label="เหตุผลที่ยกเลิก">{row.cancel_reason}</Fact>}
       </Facts>
-      {row.status === "active" &&
+      {row.status !== "cancelled" &&
         (locked ? (
-          <p className="text-sm text-muted">งวดของวันที่โอนนี้ปิดแล้ว แก้หรือยกเลิกไม่ได้</p>
+          <p className="text-sm text-muted">งวดของวันที่ใบเสร็จนี้ปิดแล้ว แก้หรือยกเลิกไม่ได้</p>
         ) : (
           <>
+            {row.status === "pending" ? (
+              <section className="flex flex-col gap-2 border-t border-line pt-4">
+                <h3 className="text-sm font-semibold">ลงรับรายการนี้</h3>
+                <ReceiptForm min={row.transfer_date} target={{ id: row.id }} onDone={onDone} />
+              </section>
+            ) : (
+              <section className="flex flex-col gap-2 border-t border-line pt-4">
+                <h3 className="text-sm font-semibold">ยกเลิกการรับ</h3>
+                <ReasonForm
+                  label="เหตุผลที่ยกเลิกการรับ"
+                  submitText="ยกเลิกการรับ"
+                  onSubmit={async (reason) => {
+                    const r = await send("/api/fund/ar-transfer/receipt", { method: "POST", body: JSON.stringify({ action: "unreceive", id: row.id, reason }) });
+                    if (!r.ok) return r.error;
+                    onDone("ยกเลิกการรับแล้ว รายการกลับเป็นรอออกใบเสร็จ");
+                    return null;
+                  }}
+                />
+              </section>
+            )}
             <section className="flex flex-col gap-2 border-t border-line pt-4">
               <h3 className="text-sm font-semibold">แก้รายการ</h3>
               <TransferForm
                 id={`transfer-${row.id}`}
-                initial={{ transfer_date: row.transfer_date, ref_doc_no: "", account_code: row.account_code, amount: String(row.amount), note: row.note ?? "" }}
+                initial={{ transfer_date: row.transfer_date, ref_doc_no: "", account_code: row.account_code, amount: String(row.amount), note: row.note ?? "", receipt_no: "", receipt_date: "" }}
                 accounts={accounts}
                 withRef={false}
                 submitText="บันทึกการแก้ไข"
@@ -207,7 +286,16 @@ function Detail({ row, accounts, closedThrough, onDone }: { row: TransferRow; ac
             </section>
             <section className="flex flex-col gap-2 border-t border-line pt-4">
               <h3 className="text-sm font-semibold">ยกเลิกรายการ</h3>
-              <CancelForm id={row.id} onDone={onDone} />
+              <ReasonForm
+                label="เหตุผลที่ยกเลิก"
+                submitText="ยกเลิกรายการ"
+                onSubmit={async (reason) => {
+                  const r = await send("/api/fund/ar-transfer", { method: "PATCH", body: JSON.stringify({ id: row.id, action: "cancel", reason }) });
+                  if (!r.ok) return r.error;
+                  onDone("ยกเลิกรายการแล้ว");
+                  return null;
+                }}
+              />
             </section>
           </>
         ))}
@@ -218,9 +306,10 @@ function Detail({ row, accounts, closedThrough, onDone }: { row: TransferRow; ac
 /* ---------- ยอดรับต่อบัญชีต่อเดือน ---------- */
 
 function SummaryTable({ data }: { data: ArTransferSummary }) {
-  const names = new Map(data.accounts.map((a) => [a.code, a.name]));
+  const byCode = new Map(data.accounts.map((a) => [a.code, a]));
   const monthTotal = (m: string) => Math.round(data.summary.reduce((s, r) => s + (r.months[m] ?? 0) * 100, 0)) / 100;
   const grand = Math.round(data.summary.reduce((s, r) => s + r.total * 100, 0)) / 100;
+  const pendingGrand = Math.round(data.summary.reduce((s, r) => s + r.pending * 100, 0)) / 100;
   return (
     <div className="overflow-x-auto rounded-lg border border-line">
       <table className="w-full border-collapse text-sm">
@@ -232,16 +321,18 @@ function SummaryTable({ data }: { data: ArTransferSummary }) {
               <th key={m} scope="col" className={`${TH} text-right whitespace-nowrap`}>{monthLabel(m)}</th>
             ))}
             <th scope="col" className={`${TH} text-right whitespace-nowrap`}>รวม (บาท)</th>
+            <th scope="col" className={`${TH} text-right whitespace-nowrap`}>รอออกใบเสร็จ (บาท)</th>
           </tr>
         </thead>
         <tbody>
           {data.summary.map((r) => (
             <tr key={r.account_code} className="border-t border-line">
-              <th scope="row" className={`${TD} text-left font-normal`}><Account code={r.account_code} name={names.get(r.account_code)} /></th>
+              <th scope="row" className={`${TD} text-left font-normal`}><Account code={r.account_code} name={byCode.get(r.account_code)?.name} stm={byCode.get(r.account_code)?.stm} /></th>
               {data.months.map((m) => (
                 <td key={m} className={`${TD} ${num}`}><Money value={r.months[m]} /></td>
               ))}
               <td className={`${TD} ${num} font-semibold`}>{formatBaht(r.total)}</td>
+              <td className={`${TD} ${num} ${r.pending ? "text-warning" : ""}`}>{r.pending ? formatBaht(r.pending) : dash}</td>
             </tr>
           ))}
           {data.summary.length > 1 && (
@@ -251,11 +342,128 @@ function SummaryTable({ data }: { data: ArTransferSummary }) {
                 <td key={m} className={`${TD} ${num}`}>{data.summary.some((r) => m in r.months) ? formatBaht(monthTotal(m)) : dash}</td>
               ))}
               <td className={`${TD} ${num}`}>{formatBaht(grand)}</td>
+              <td className={`${TD} ${num}`}>{pendingGrand ? formatBaht(pendingGrand) : dash}</td>
             </tr>
           )}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/* ---------- รอออกใบเสร็จ ---------- */
+
+const batchName = (b: PendingBatch) => (b.batch ? `ชุด ${b.batch}` : "รายการเพิ่มเอง");
+
+/** ชุดโอนที่ยังไม่ลงรับ (ทุกปีงบ) ; กดแถวเปิด modal รายการในชุด + ฟอร์มใบเสร็จ */
+function PendingReceipts({ data, onDone }: { data: ArTransferSummary; onDone: (msg: string) => void }) {
+  const [openKey, setOpenKey] = useState<string>();
+  const open = data.pending.find((b) => b.key === openKey);
+  const total = Math.round(data.pending.reduce((s, b) => s + b.amount * 100, 0)) / 100;
+  const byCode = new Map(data.accounts.map((a) => [a.code, a]));
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-title">
+        รอออกใบเสร็จ
+        {data.pending.length > 0 && (
+          <span className="ml-2 text-sm font-normal text-warning tabular-nums">
+            {formatCount(data.pending.length)} ชุด · {formatBaht(total)} บาท
+          </span>
+        )}
+      </h2>
+      {data.pending.length === 0 ? (
+        <p className="text-sm text-muted">ลงรับครบทุกชุดแล้ว</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">ชุดโอนที่รอออกใบเสร็จ (บาท)</caption>
+            <thead className="bg-surface text-left text-grid-head text-muted">
+              <tr>
+                <th scope="col" className={TH}>วันที่โอน</th>
+                <th scope="col" className={TH}>ชุดโอน</th>
+                <th scope="col" className={`${TH} text-right`}>รายการ</th>
+                <th scope="col" className={TH}>เลขที่เอกสาร</th>
+                <th scope="col" className={`${TH} text-right whitespace-nowrap`}>ยอดสุทธิของชุด (บาท)</th>
+                <th scope="col" className={TH}><span className="sr-only">ลงรับ</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.pending.map((b) => (
+                <tr key={b.key} className="border-t border-line align-top">
+                  <td className={`${TD} whitespace-nowrap tabular-nums`}>{formatThaiDate(b.transfer_date)}</td>
+                  <td className={`${TD} whitespace-nowrap tabular-nums`}>
+                    {b.batch ?? <span className="text-muted">เพิ่มเอง</span>}
+                    {b.batch_receipt_no && <span className="block text-grid-sub text-warning">รับแล้วบางรายการ · {b.batch_receipt_no}</span>}
+                  </td>
+                  <td className={`${TD} ${num}`}>{formatCount(b.n)}</td>
+                  <td className={TD}>
+                    {b.lines[0].ref_doc_no || b.lines[0].fund_name || dash}
+                    {b.n > 1 && <span className="text-muted"> และอีก {formatCount(b.n - 1)} รายการ</span>}
+                  </td>
+                  <td className={`${TD} ${num} font-semibold`}>{formatBaht(b.amount)}</td>
+                  <td className={`${TD} text-right`}>
+                    <button type="button" className={btn} onClick={() => setOpenKey(b.key)} aria-label={`ลงรับ${batchName(b)} วันที่โอน ${formatThaiDate(b.transfer_date)}`}>
+                      ลงรับ
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <DetailModal
+        open={!!open}
+        onClose={() => setOpenKey(undefined)}
+        size="medium"
+        title={open && <>{batchName(open)} <span className="font-normal text-muted">โอน {formatThaiDate(open.transfer_date)}</span></>}
+      >
+        {open && (
+          <div className="flex flex-col gap-5">
+            <Facts>
+              <Fact label="ยอดสุทธิของชุด (บาท)"><span className="font-semibold">{formatBaht(open.amount)}</span></Fact>
+              <Fact label="จำนวนรายการ">{formatCount(open.n)}</Fact>
+              {open.batch_receipt_no && <Fact label="ลงรับไปแล้วบางรายการ"><span className="text-warning">ใบเสร็จ {open.batch_receipt_no}</span></Fact>}
+            </Facts>
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full border-collapse text-sm">
+                <caption className="sr-only">รายการในชุด (บาท)</caption>
+                <thead className="bg-surface text-left text-grid-head text-muted">
+                  <tr>
+                    <th scope="col" className={TH}>เลขที่เอกสาร</th>
+                    <th scope="col" className={TH}>กองทุน</th>
+                    <th scope="col" className={TH}>บัญชี (เครดิต)</th>
+                    <th scope="col" className={`${TH} text-right whitespace-nowrap`}>จำนวนเงิน (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {open.lines.map((l) => (
+                    <tr key={l.id} className="border-t border-line align-top">
+                      <td className={TD}>{l.ref_doc_no || dash}</td>
+                      <td className={TD}>{l.fund_name || dash}</td>
+                      <td className={TD}><Account code={l.account_code} name={byCode.get(l.account_code)?.name} stm={byCode.get(l.account_code)?.stm} /></td>
+                      <td className={`${TD} ${num}`}>{formatBaht(l.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <section className="flex flex-col gap-2 border-t border-line pt-4">
+              <h3 className="text-sm font-semibold">ใบเสร็จ</h3>
+              <ReceiptForm
+                key={open.key}
+                min={open.transfer_date}
+                target={open.batch ? { transfer_date: open.transfer_date, batch: open.batch } : { id: open.lines[0].id }}
+                onDone={(msg) => {
+                  setOpenKey(undefined);
+                  onDone(msg);
+                }}
+              />
+            </section>
+          </div>
+        )}
+      </DetailModal>
+    </section>
   );
 }
 
@@ -268,7 +476,8 @@ const inherits = (f: FundMapRow) => f.side !== "ALL" && !f.account_code && !f.ig
 /** บัญชีที่ใช้ของแถว mapping */
 function UsedAccount({ f, accounts }: { f: FundMapRow; accounts: AccountOption[] }) {
   if (f.ignore) return <span className="text-muted">ไม่ใช้</span>;
-  if (f.account_code) return <Account code={f.account_code} name={accounts.find((a) => a.code === f.account_code)?.name} />;
+  const acc = accounts.find((a) => a.code === f.account_code);
+  if (f.account_code) return <Account code={f.account_code} name={acc?.name} stm={acc?.stm} />;
   return inherits(f) ? <span className="text-muted">ใช้ตามบัญชีของกองทุน</span> : <span className="text-warning">ยังไม่จับคู่</span>;
 }
 
@@ -493,8 +702,8 @@ function FundMap({ data, onSaved }: { data: ArTransferSummary; onSaved: () => vo
 /* ---------- ดึงจาก SMT ---------- */
 
 const COUNT_TEXT: [keyof ImportCounts, string][] = [
-  ["new", "เพิ่มใหม่"], ["updated", "อัปเดตตาม SMT"], ["unchanged", "เหมือนเดิม"], ["kept", "แก้/ยกเลิกแล้ว ไม่ทับ"],
-  ["unmapped", "กองทุนยังไม่จับคู่"], ["ignored", "กองทุนที่ไม่ใช้"], ["pending", "รอโอน"], ["closed", "อยู่ในงวดที่ปิดแล้ว"],
+  ["new", "เพิ่มใหม่ (รอออกใบเสร็จ)"], ["updated", "อัปเดตตาม SMT"], ["unchanged", "เหมือนเดิม"], ["kept", "แก้/ยกเลิก/รับแล้ว ไม่ทับ"],
+  ["unmapped", "กองทุนยังไม่จับคู่"], ["ignored", "กองทุนที่ไม่ใช้"], ["pending", "รอโอน"],
 ];
 
 function ImportSummary({ r }: { r: ImportResult }) {
@@ -561,7 +770,7 @@ export function ArTransfer() {
         <h1 className="text-title text-balance">{TITLE}</h1>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-muted">ปีงบ (วันที่โอน)</span>
+            <span className="text-muted">ปีงบ</span>
             <select value={fyValue} onChange={(e) => set({ fy: e.target.value })} className={SELECT_CLASS}>
               {fyOptions.map((y) => (
                 <option key={y} value={y}>{y}</option>
@@ -587,13 +796,14 @@ export function ArTransfer() {
           <h2 className="text-title">เพิ่มรายการเอง</h2>
           <TransferForm
             id="transfer-new"
-            initial={{ transfer_date: todayIso(), ref_doc_no: "", account_code: "", amount: "", note: "" }}
+            initial={{ transfer_date: todayIso(), ref_doc_no: "", account_code: "", amount: "", note: "", receipt_no: "", receipt_date: todayIso() }}
             accounts={d.accounts}
             withRef
             submitText="เพิ่มรายการ"
             onSubmit={async (x) => {
-              if (closedIn(x.transfer_date, d.closed_through)) return `งวดถึงเดือน ${d.closed_through} ปิดแล้ว เลือกวันที่ในงวดที่เปิด`;
-              const r = await send("/api/fund/ar-transfer", { method: "POST", body: JSON.stringify({ ...payload(x), ref_doc_no: x.ref_doc_no }) });
+              const receipt = x.receipt_no.trim() ? { receipt_no: x.receipt_no, receipt_date: x.receipt_date } : {};
+              if (x.receipt_no.trim() && closedIn(x.receipt_date, d.closed_through)) return `งวดถึงเดือน ${d.closed_through} ปิดแล้ว เลือกวันที่ใบเสร็จในงวดที่เปิด`;
+              const r = await send("/api/fund/ar-transfer", { method: "POST", body: JSON.stringify({ ...payload(x), ref_doc_no: x.ref_doc_no, ...receipt }) });
               if (!r.ok) return r.error;
               setAdding(false);
               done("เพิ่มรายการแล้ว");
@@ -609,12 +819,13 @@ export function ArTransfer() {
         <Skeleton rows={4} />
       ) : (
         <div aria-busy={meta.loading} className={`flex flex-col gap-5 transition-opacity duration-200 ${meta.loading ? "opacity-60" : ""}`}>
+          <PendingReceipts data={d} onDone={done} />
           <section className="flex flex-col gap-2">
-            <h2 className="text-title">ยอดรับต่อบัญชี ปีงบ {d.fy}</h2>
+            <h2 className="text-title">ยอดรับต่อบัญชีตามวันที่ใบเสร็จ ปีงบ {d.fy}</h2>
             <SummaryTable data={d} />
           </section>
           <section className="flex flex-col gap-2">
-            <h2 className="text-title">รายการโอน</h2>
+            <h2 className="text-title">รายการโอนตามวันที่โอน ปีงบ {d.fy}</h2>
             <DataGrid<TransferRow>
               key={gridKey}
               endpoint="/api/fund/ar-transfer"

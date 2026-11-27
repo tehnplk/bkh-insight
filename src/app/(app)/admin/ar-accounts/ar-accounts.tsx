@@ -73,7 +73,7 @@ function Backfill() {
       }
       const c = (r.body as SyncLog).counts;
       const n = (k: string) => formatCount(c[k] ?? 0);
-      update({ status: "done", text: `OPD ${n("opd_set")} ราย · IPD ${n("ipd_set")} ราย · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${n("ipd_reverse")}` });
+      update({ status: "done", text: `OPD ${n("opd_set")} ราย · IPD ${n("ipd_set")} ราย · ปรับปรุง ${formatCount((c.opd_adjust ?? 0) + (c.ipd_adjust ?? 0))} · ยกเลิก ${n("opd_cancel")} · กลับรายการ ${formatCount((c.opd_reverse ?? 0) + (c.ipd_reverse ?? 0))}` });
     }
     setRunning(false);
   }
@@ -427,7 +427,7 @@ function Recompute({ reload }: { reload: () => void }) {
   const moves = preview ? sum(preview.moves.filter((m) => m.from !== m.to), (m) => `${m.from}>${m.to}`, (m) => m.refs, (m) => m.amount) : [];
   const diffs = preview ? sum(preview.diffs, (d) => `${d.account}`, (d) => d.n, (d) => d.amount) : [];
   const code = (c: string | null) => (c ? <span className="whitespace-nowrap tabular-nums">{c}</span> : <span className="text-warning">ไม่ระบุบัญชี</span>);
-  const changes = moves.length + diffs.length + (preview?.reversed.refs ?? 0) + (preview?.cr_split.refs ?? 0) + (preview?.coverage_updated ?? 0);
+  const changes = moves.length + diffs.length + (preview?.reversed.refs ?? 0) + (preview?.admit_reversed.refs ?? 0) + (preview?.cr_split.refs ?? 0) + (preview?.coverage_updated ?? 0);
 
   return (
     <Section
@@ -447,6 +447,7 @@ function Recompute({ reload }: { reload: () => void }) {
             <li>ย้ายบัญชี {formatCount(moves.reduce((s, m) => s + m.n, 0))} ราย</li>
             <li>ส่วนต่างตามเพดาน/สัดส่วน {formatCount(diffs.reduce((s, d) => s + d.n, 0))} รายการ</li>
             <li>กลับรายการสิทธิที่ไม่ตั้งลูกหนี้ {formatCount(preview.reversed.refs)} ราย · <Money value={preview.reversed.amount} /> บาท</li>
+            <li>กลับรายการหนี้ผู้ป่วยนอกของ visit ที่ admit {formatCount(preview.admit_reversed.refs)} ราย · <Money value={preview.admit_reversed.amount} /> บาท</li>
             <li>ไม่มีกติกา คงบัญชีเดิม {formatCount(preview.no_rule.refs)} ราย</li>
             <li>แยก HC/INST จาก .201 ไป .216 {formatCount(preview.cr_split.refs)} ราย · <Money value={preview.cr_split.amount} /> บาท</li>
             <li>ตัดหนี้แล้ว ไม่ลงส่วนต่าง/ไม่แยก {formatCount(preview.settled_skipped)} ราย</li>

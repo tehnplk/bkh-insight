@@ -7,6 +7,9 @@
 //   ส่วนต่าง (STM), ชื่อบัญชีตามผังบัญชี สธ. มองจากค่ารักษาที่เรียกเก็บ: ลบ = ได้รับต่ำกว่า Dr ส่วนต่างค่ารักษาที่สูงกว่าข้อตกลง / Cr ลูกหนี้ ; บวก = ได้รับสูงกว่า Dr ลูกหนี้ / Cr ส่วนต่างค่ารักษาที่ต่ำกว่าข้อตกลง
 //   ส่วนต่างตามเพดาน/สัดส่วนของกติกาบัญชี (kind diff ของ source rcpt_debt/ipt): ลบ Dr ส่วนต่างที่สูงกว่าข้อตกลง / Cr ลูกหนี้ ; บวก (ยกเลิก/กลับรายการ) กลับข้างในบัญชีเดียวกัน
 //   เงินโอนที่ได้รับ (kind transfer จาก ar_transfer ไม่ใช่ ar_ledger ; amount ส่งมาติดลบ = รับ): Dr เงินฝากธนาคาร / Cr account_code (รายได้เมื่อขึ้นต้น 4, ทุนเมื่อขึ้นต้น 3 เช่น PRIOR_YEAR_ACCOUNT ของงบปีก่อน) ; บวก (ถูกหักคืน) กลับข้าง
+//     ยกเว้นบัญชีลูกหนี้ที่ settles_by_stm: ไม่ลงบัญชี เพราะเงินก้อนเดียวกันลง Dr เงินฝาก / Cr ลูกหนี้ แล้วตอนตัดรายตัวด้วย STM (ตาม GL ของการเงิน)
+//   ส่วนต่างตอนรับเงิน (diff ของ stm/manual) ของหนี้ที่บริการปีงบก่อนปีงบที่ลงบัญชี (prior_year จาก SQL): บัญชีคู่ PRIOR_DIFF_ACCOUNT ทั้งสองทิศ
+//     ตาม GL (GL เคยลง Dr 3102010102.103 ฝั่งขาดหนึ่งใบ เราใช้ .102 อย่างเดียว) ชนิด equity ยกมาข้ามปีงบ ไม่ปิด 1 ต.ค.
 import { PRIOR_YEAR_ACCOUNT } from "../ar-transfer/transfer";
 
 /** ยอดรวมของ ar_ledger ต่อ (บัญชี, kind, เครื่องหมาย) พร้อมบัญชีคู่จาก ar_account */
@@ -19,6 +22,10 @@ export type JournalGroup = {
   /** บัญชีของชุดตัดหนี้เหมาจ่าย (source capitation เท่านั้น) */
   clear_code?: string | null;
   clear_short_code?: string | null;
+  /** diff ของ stm/manual ที่ ref_date (วันบริการ) อยู่ปีงบก่อนปีงบของ entry_date (คำนวณใน SQL) */
+  prior_year?: boolean | null;
+  /** ar_account.settles_by_stm ของ account_code (ใช้กับ kind transfer) */
+  settles_by_stm?: boolean | null;
   revenue_code: string | null;
   diff_under_code: string | null;
   diff_over_code: string | null;
@@ -33,6 +40,8 @@ export type JournalLine = {
 };
 
 export const CASH_NAME = "เงินฝากธนาคาร";
+/** ส่วนต่างของหนี้ปีงบก่อนที่รับเงิน/ปิดส่วนต่างในปีงบนี้ */
+export const PRIOR_DIFF_ACCOUNT = { code: "3102010102.102", name: "ผลสะสมจากการแก้ไขข้อผิดพลาด - รายได้" } as const;
 /** เงินรับล่วงหน้าบัตรประกันสุขภาพต่างด้าว (บัญชีงบดุล ไม่ปิดสิ้นปีงบ) */
 export const POOL_ACCOUNT = { code: "2103010103.502", name: "รายได้ค่ารักษาแรงงานต่างด้าวรับล่วงหน้า" } as const;
 const CAP_SHORT_NAME = "ส่วนต่างค่ารักษาที่สูงกว่าเหมาจ่ายรายหัว";
@@ -42,8 +51,8 @@ export function journalLines(groups: JournalGroup[]): JournalLine[] {
   const out = new Map<string, JournalLine>();
   for (const g of groups) {
     const cents = Math.round(Number(g.amount) * 100);
-    if (!cents) continue;
     const transfer = g.kind === "transfer";
+    if (!cents || (transfer && g.settles_by_stm)) continue; // เงินโอนเข้าลูกหนี้ที่ตัดด้วย STM ลงผ่าน settle ของ STM แล้ว ลงซ้ำ = นับเงินสองครั้ง
     const ar: { type: AccountType; code: string | null; name: string } = transfer
       ? g.account_code?.startsWith("3")
         ? { type: "equity", code: g.account_code, name: g.account_name ?? PRIOR_YEAR_ACCOUNT.name } // บัญชีทุนของเงินโอนมีแค่ PRIOR_YEAR_ACCOUNT (ไม่อยู่ใน ar_account)
@@ -54,6 +63,7 @@ export function journalLines(groups: JournalGroup[]): JournalLine[] {
     if (transfer) other = { type: "cash", code: null, name: CASH_NAME };
     else if (cap && g.kind === "settle") other = { type: "revenue", code: g.clear_code ?? null, name: "รายได้" };
     else if (cap && g.kind === "diff") other = { type: "diff_under", code: g.clear_short_code ?? null, name: CAP_SHORT_NAME };
+    else if (g.kind === "diff" && g.prior_year) other = { type: "equity", ...PRIOR_DIFF_ACCOUNT };
     else if (g.kind === "settle") other = g.source === "fwf" ? { type: "pool", ...POOL_ACCOUNT } : { type: "cash", code: null, name: CASH_NAME };
     // diff ของ source HOSxP = เพดาน/สัดส่วนของกติกาบัญชี: บวกคือกลับรายการส่วนต่างเดิม จึงลงบัญชี diff_under ข้างเดียวกันเสมอ
     else if (g.kind === "diff")

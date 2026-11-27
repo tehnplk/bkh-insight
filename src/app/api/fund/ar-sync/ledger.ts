@@ -63,7 +63,11 @@ export type Entry = Coverage & {
  * หนี้ใน ledger + ข้อมูลจากแถว set (ทุกแถวถัดไปคัดลอกจากแถวนี้) ยอดเป็นสตางค์ของ source เดียวกัน:
  * balance = ค่ารักษาเต็ม (ไม่นับ diff), diff = ส่วนต่างตามเพดาน/สัดส่วน, settled = มีแถวตัดหนี้จาก source อื่น (STM/fwf/รับเงิน)
  */
-export type RefState = Omit<Entry, "kind" | "entry_date" | "amount" | "note"> & { balance: number; diff: number; cancelled: boolean; settled: boolean };
+export type RefState = Omit<Entry, "kind" | "entry_date" | "amount" | "note"> & {
+  balance: number; diff: number; cancelled: boolean; settled: boolean;
+  /** มีแถวจาก source อื่น (ตัดหนี้ หรือปรับปรุงด้วยมือ manual adjust) ; กลับรายการ visit ที่ admit ไม่แตะหนี้เหล่านี้ */
+  touched?: boolean;
+};
 
 /** ผลจาก query A (rcpt_debt) */
 export type HisDebt = {
@@ -78,6 +82,8 @@ export type HisDebt = {
   hospmain: string | null;
   hospmain_chwpart: string | null;
   hospmain_type: string | number | null;
+  /** ovst.an: visit ที่ admit แล้ว ไม่ตั้งหนี้ OPD (ADMIT_NOTE) */
+  an?: string | null;
 };
 /** ผลจาก query B (rcpt_debt_cancel) */
 export type HisCancel = { debt_id: string | number; cancel_datetime: string };
@@ -151,6 +157,11 @@ const capNote = (rule: AccountRule | null) =>
   : rule?.debt_pct != null ? `ลูกหนี้ ${Number(rule.debt_pct)}% ของค่ารักษา`
   : "ยกเลิกส่วนต่างตามเพดาน/สัดส่วน";
 const NO_AR = "สิทธินี้ไม่ตั้งลูกหนี้";
+/**
+ * visit ที่ admit แล้ว (ovst.an) ไม่ตั้งหนี้ OPD ทุกบัญชี รวมรายที่ยังค้างรายการฝั่ง OPD เพราะโปรแกรม Claim/GL ตั้งหนี้ที่ผู้ป่วยในตอนจำหน่าย
+ * หนี้ที่ตั้งไปแล้วกลับรายการลงวันตั้งหนี้ ยกเว้นที่มีแถวจาก source อื่น (touched: ตัดแล้ว/ปรับปรุงด้วยมือ) ไม่แตะ
+ */
+export const ADMIT_NOTE = "admit แล้ว ตั้งหนี้ที่ผู้ป่วยใน";
 
 type RefInfo = Omit<RefState, "balance" | "diff" | "cancelled" | "settled">;
 const follow = (s: RefInfo, kind: Kind, entry_date: string, cents: number, note: string | null): Entry => ({
@@ -207,13 +218,25 @@ export const opdCoverage = (d: HisDebt): Coverage => ({
  * ค่ารักษาเต็มลงแถว set/adjust ส่วนที่เกินเพดาน/สัดส่วนของกติกาลงแถว diff (source เดียวกัน)
  * cr = ยอด HC + INST (สตางค์) ต่อ vn: หนี้ที่ลง .201 แยกส่วนนี้เป็น ref "<debt_id>:CR" (states ต้องโหลดทั้งสอง ref) ยอด HOSxP = หลัก + CR
  *   แยกครั้งแรกของหนี้ที่ตั้งแล้วลงวันตั้งหนี้ (เดือนจึงแยกเหมือน Claim) ; หนี้ที่ตัดแล้วและยังไม่เคยแยกไม่แยก ; ไม่ใช่ .201 แล้ว = CR กลับเป็น 0
+ * d.an (admit แล้ว) = ไม่ตั้ง ที่ตั้งแล้วกลับรายการทั้งหนี้หลักและ CR ตาม ADMIT_NOTE ; counts.opd_admit_skipped = หนี้ที่ข้ามเพราะ touched
  */
-export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: AccountRules, today: string, cr: Map<string, number> = new Map()): Entry[] {
+export function planOpd(
+  debts: HisDebt[], states: Map<string, RefState>, rules: AccountRules, today: string, cr: Map<string, number> = new Map(),
+  counts?: Record<string, number>,
+): Entry[] {
   const out: Entry[] = [];
   const seen = new Set<string>();
   const uniq = debts.filter((d) => !seen.has(String(d.debt_id)) && !!seen.add(String(d.debt_id)));
+  for (const d of uniq.filter((x) => x.an)) {
+    const ref = String(d.debt_id);
+    for (const x of [states.get(ref), states.get(crRef(ref))]) {
+      if (!x || x.cancelled) continue;
+      if (!x.touched) out.push(...closeEntries(x, "reverse", setDateOf(x.ref_date ?? today), ADMIT_NOTE));
+      else if (counts) counts.opd_admit_skipped = (counts.opd_admit_skipped ?? 0) + 1;
+    }
+  }
   const share = allocateCr(
-    uniq.flatMap((d) => {
+    uniq.filter((d) => !d.an).flatMap((d) => {
       const ref = String(d.debt_id);
       const s = states.get(ref);
       const ok = s
@@ -224,6 +247,7 @@ export function planOpd(debts: HisDebt[], states: Map<string, RefState>, rules: 
     cr,
   );
   for (const d of uniq) {
+    if (d.an) continue;
     const ref = String(d.debt_id);
     const target = toCents(d.amount);
     const split = share.get(ref) ?? 0;
@@ -324,15 +348,17 @@ export type Recomputed = { state: RecomputeState; to: string | null; entries: En
  * คำนวณบัญชีของหนี้ที่มีอยู่ตามกติกาปัจจุบัน (ใช้กับทุกแถวของหนี้ รวม stm/manual/fwf) กดซ้ำได้: ครั้งถัดไปไม่มีอะไรเปลี่ยน
  * ไม่มีกติกา = คงบัญชีเดิม (noRule) ; หนี้ที่ตัดแล้วไม่ลง diff/ไม่แยก CR เพิ่ม (นับใน settledSkip) แค่ย้ายบัญชี
  * cr = ยอด HC + INST ต่อ vn (เหมือน planOpd): หนี้ .201 แยกเป็นหนี้ CR / ปรับ CR ให้เท่ายอดนี้ ; หนี้ CR คงบัญชี .216 ตามหนี้หลัก
+ * admitted = vn ที่ admit แล้ว: กลับรายการหนี้ OPD (และ CR) ลงวันตั้งหนี้ตาม ADMIT_NOTE ; touched นับใน settledSkip
  */
-export function planRecompute(states: RecomputeState[], rules: AccountRules, cr: Map<string, number> = new Map()): Recomputed[] {
+export function planRecompute(states: RecomputeState[], rules: AccountRules, cr: Map<string, number> = new Map(), admitted: Set<string> = new Set()): Recomputed[] {
   const byRef = new Map(states.map((s) => [s.ref, s]));
   const crEntries = new Map<string, Entry[]>();
   const resOf = new Map(states.filter((s) => !isCrRef(s.ref)).map((s) => [s.ref, resolve(s, rules)]));
+  const isAdmit = (s: RecomputeState) => s.patient_type === "OP" && admitted.has(s.vn ?? "");
   const share = allocateCr(
     states.flatMap((s) => {
       const cs = byRef.get(crRef(s.ref));
-      const ok = s.patient_type === "OP" && !s.cancelled && (!s.settled || cs) && resOf.get(s.ref)?.account_code === CR_SPLIT.from;
+      const ok = s.patient_type === "OP" && !isAdmit(s) && !s.cancelled && (!s.settled || cs) && resOf.get(s.ref)?.account_code === CR_SPLIT.from;
       return ok ? [{ ref: s.ref, vn: s.vn, cap: s.balance + (cs?.balance ?? 0) }] : [];
     }),
     cr,
@@ -346,7 +372,13 @@ export function planRecompute(states: RecomputeState[], rules: AccountRules, cr:
     const entries: Entry[] = [];
     const crOut: Entry[] = [];
     let settledSkip = false;
-    if (!res.books) {
+    if (isAdmit(s)) {
+      for (const [x, sink] of [[t, entries], [cs, crOut]] as const) {
+        if (!x || x.cancelled) continue;
+        if (x.touched) settledSkip = true;
+        else sink.push(...closeEntries(x, "reverse", s.set_date, ADMIT_NOTE));
+      }
+    } else if (!res.books) {
       if (!s.settled) entries.push(...closeEntries(t, "reverse", s.set_date, NO_AR));
       if (cs && !cs.settled) crOut.push(...closeEntries(cs, "reverse", s.set_date, NO_AR));
     } else {

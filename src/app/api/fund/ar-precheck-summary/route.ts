@@ -29,7 +29,8 @@ FROM ipt i LEFT JOIN an_stat s ON s.an = i.an
 WHERE i.dchdate BETWEEN ? AND ?`;
 const ipRx = (n: number) =>
   `SELECT an AS \`key\`, ${RX_COLS} FROM opitemrece FORCE INDEX (ix_an) WHERE an IN (${Array(n).fill("?").join(", ")}) GROUP BY an`;
-// สมุดลูกหนี้ใช้แค่ให้สถานะ "ปรับปรุงในสมุดแล้ว" (stale_fixed) ของ OPD ตรงกับหน้า ar-precheck ที่ลิงก์ไป ; IPD ไม่ใช้
+// สมุดลูกหนี้ใช้แค่ให้สถานะ "สมุดไม่ค้างหนี้" (stale_fixed: ar-sync ไม่ตั้ง/กลับรายการหนี้ OPD ของ visit ที่ admit หรือปรับปรุงจนคงเหลือ 0)
+//   ของ OPD ตรงกับหน้า ar-precheck ที่ลิงก์ไป ; IPD ไม่ใช้
 const LEDGER_OPD = `SELECT s.vn AS key,
   SUM(x.amount) FILTER (WHERE x.source = s.source AND x.kind <> 'diff') AS booked,
   SUM(x.amount) AS balance
@@ -65,7 +66,7 @@ async function panel(type: PrecheckType, start: string, end: string, today: stri
     try {
       booked = await chunked(sources.map((s) => s.key), (part) => insightQuery<Booked>(LEDGER_OPD, [part]));
     } catch (e) {
-      // อ่านสมุดไม่ได้ ใบค้างหลัง admit ที่ปรับปรุงแล้วจะนับเป็นไม่ตรง (เหมือน ar-precheck ตอนอ่านสมุดไม่ได้)
+      // อ่านสมุดไม่ได้ ใบค้างหลัง admit ที่สมุดไม่ค้างหนี้แล้วจะนับเป็นไม่ตรง (เหมือน ar-precheck ตอนอ่านสมุดไม่ได้)
       console.error("ar-precheck-summary: ledger", e);
     }
   } else {
