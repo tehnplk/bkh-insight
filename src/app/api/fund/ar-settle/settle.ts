@@ -144,6 +144,10 @@ const keyOf = (pt: PatientType, l: { vn?: string | null; an?: string | null }) =
   const id = pt === "OP" ? l.vn : l.an;
   return id ? `${pt}:${id}` : null;
 };
+/** key ของแถวตัวอย่างที่บรรทัด STM/REP นี้อยู่ (PreviewRow.key) */
+export const lineKey = (l: StmLine) => keyOf(l.patient_type, l) ?? `row:${l.id}`;
+/** key ของหนี้ (หนึ่ง VN/AN มีได้หลายหนี้) */
+export const debtKey = (d: DebtRow) => keyOf(d.patient_type, d);
 
 type Debt = Omit<DebtRow, "balance"> & { balance: number };
 type Item = { key: string; pt: PatientType; ref: string | null; lines: StmLine[]; all: Debt[]; debts: Debt[] };
@@ -152,12 +156,12 @@ type Item = { key: string; pt: PatientType; ref: string | null; lines: StmLine[]
 function itemsOf(lines: StmLine[], debtRows: DebtRow[]): Item[] {
   const debtsBy = new Map<string, Debt[]>();
   for (const d of debtRows) {
-    const k = keyOf(d.patient_type, d);
+    const k = debtKey(d);
     if (k) debtsBy.set(k, [...(debtsBy.get(k) ?? []), { ...d, balance: cents(d.balance) }]);
   }
   const items = new Map<string, Item>();
   for (const l of [...lines].sort((a, b) => Number(a.id) - Number(b.id))) {
-    const k = keyOf(l.patient_type, l) ?? `row:${l.id}`;
+    const k = lineKey(l);
     const item = items.get(k);
     if (item) {
       item.lines.push(l);
@@ -284,6 +288,17 @@ export function planSettle(lines: StmLine[], debts: DebtRow[], opts: { entryDate
       if (d.balance !== 0) entries.push(row(d, "diff", -d.balance, d.balance > 0 ? "ได้รับต่ำกว่าลูกหนี้" : "ได้รับสูงกว่าลูกหนี้", last));
   }
   return entries;
+}
+
+/** แผนต่อหนี้ของรายเดียว (modal รายละเอียด) จาก planSettle ตัวเดียวกับตอนตัด: diff = ส่วนต่างที่ลงเมื่อติ๊กปิดส่วนต่าง ; ยอดเป็นบาท */
+export type DebtPlan = { ref: string; before: number; settle: number; after: number; diff: number };
+export function debtPlans(lines: StmLine[], debts: DebtRow[], entryDate: string): DebtPlan[] {
+  const entries = planSettle(lines, debts, { entryDate, close: () => true });
+  return debts.map((d) => {
+    const sum = (kind: SettleEntry["kind"]) => entries.filter((e) => e.ref === d.ref && e.kind === kind).reduce((s, e) => s + cents(e.amount), 0);
+    const before = cents(d.balance), settle = sum("settle");
+    return { ref: d.ref, before: before / 100, settle: settle / 100, after: (before + settle) / 100, diff: sum("diff") / 100 };
+  });
 }
 
 export const MAX_RECEIPT_NO = 50;
