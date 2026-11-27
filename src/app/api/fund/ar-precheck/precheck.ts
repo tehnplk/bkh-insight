@@ -9,7 +9,7 @@ export type PrecheckStatus =
 export const STATUS_LABEL: Record<PrecheckStatus, string> = {
   no_stat: "ไม่มีข้อมูลสรุป",
   stale_slip: "ใบลูกหนี้ค้างหลัง admit",
-  stale_fixed: "ปรับปรุงในสมุดแล้ว",
+  stale_fixed: "สมุดไม่ค้างหนี้",
   admitted: "admit แล้ว ตรวจที่ผู้ป่วยใน",
   overdue_lock: "ค้างล็อกเกินกำหนด",
   pending_lock: "ยังไม่ล็อกรายการ",
@@ -119,8 +119,9 @@ export function buildRows(type: PrecheckType, sources: PrecheckSource[], rx: RxS
       !stat ? "no_stat"
       : opd && s.an
         ? !isStaleSlip({ has_stat, an: s.an, debt_amount, n_items: nItems }) ? "admitted"
-          // ลงสมุดแล้วและปรับปรุงจนคงเหลือ 0 (HOSxP ยังมีใบอยู่) ; ติดลบยังเป็น stale_slip ให้เห็นว่าลดเกิน
-          : ledger && ledger.booked > 0 && ledger.balance === 0 ? "stale_fixed" : "stale_slip"
+          // สมุดคงเหลือ 0 (HOSxP ยังมีใบอยู่): ar-sync ไม่ตั้ง/กลับรายการหนี้ OPD ของ visit ที่ admit (ADMIT_NOTE) หรือปรับปรุงแล้ว
+          // ยังค้าง (sync ยังไม่รอบ หรือตัดแล้วจึงไม่กลับรายการ) / ติดลบ (ลดเกิน) / อ่านสมุดไม่ได้ = stale_slip
+          : ledger && ledger.balance === 0 ? "stale_fixed" : "stale_slip"
       : opd && !locked ? (lockOverdue(s.date, today) ? "overdue_lock" : "pending_lock")
       : total !== inc ? "total"
       // ใบลูกหนี้ตรงกับรายการ paidst 02 แล้ว แต่ vn_stat.uc_money ยังเป็นยอดเดิม หรือลบค่าธรรมเนียม 30 บาทตอนยกเว้น HOSxP คำนวณ income ใหม่แต่ paid_money ค้าง

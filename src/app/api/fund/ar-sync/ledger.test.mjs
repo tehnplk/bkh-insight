@@ -340,3 +340,46 @@ test("planRecompute CR: splits .201 on set date, adjusts existing CR, keeps CR a
   const after = [rs(mainState(1, 70000)), rs(crState(1, 30000)), rs(mainState(2, 75000)), rs(crState(2, 15000)), states[3]];
   assert.ok(planRecompute(after, rules, cr).every((p) => p.entries.length === 0 && p.to === p.state.account_code));
 });
+
+// ---- visit ที่ admit แล้ว (ovst.an): ไม่ตั้งหนี้ OPD ทุกบัญชี (โปรแกรม Claim ตั้งที่ผู้ป่วยใน) ----
+test("planOpd admit: not set ; set debt (+CR, +cap diff) reversed on set date once ; touched skipped and counted ; others unaffected", () => {
+  const today = "2026-11-27";
+  const an = "690012345";
+  const counts = {};
+  // ใหม่ ยังไม่เคยตั้ง = ไม่ตั้ง (แม้มี CR ใน map)
+  assert.deepEqual(planOpd([debt(1, 1000, { ...cup, an })], new Map(), rules, today, new Map([[vnOf(1), 30000]]), counts), []);
+  // ตั้งแล้ว (หลัก + CR) และ .203 มี diff เพดาน = กลับรายการทั้งหมดลงวันตั้งหนี้
+  let states = new Map([
+    ["1", mainState(1, 70000)], ["1:CR", crState(1, 30000)],
+    ["2", state("2", 90000, { ...uc, account_code: "1102050101.203", diff: -20000 })],
+  ]);
+  const out = planOpd([debt(1, 1000, { ...cup, an }), debt(2, 900, { ...uc, an }), debt(3, 50, uc)], states, rules, today, new Map(), counts);
+  assert.deepEqual(out.map((e) => [e.kind, e.ref, e.amount, e.entry_date, e.account_code]), [
+    ["reverse", "1", "-700.00", "2025-10-02", "1102050101.201"],
+    ["reverse", "1:CR", "-300.00", "2025-10-02", "1102050101.216"],
+    ["reverse", "2", "-900.00", "2025-10-02", "1102050101.203"],
+    ["diff", "2", "200.00", "2025-10-02", "1102050101.203"],
+    ["set", "3", "50.00", "2025-10-02", "1102050101.203"], // ไม่ admit ตั้งตามเดิม
+  ]);
+  states = applied(states, out);
+  assert.deepEqual(planOpd([debt(1, 1000, { ...cup, an }), debt(2, 900, { ...uc, an })], states, rules, today, new Map(), counts), []);
+  // ตัดแล้ว/ปรับด้วยมือ (touched) ไม่แตะ แต่นับ ; ยกเลิกแล้วข้ามเงียบ
+  const touched = new Map([["4", state("4", 5000, { touched: true, settled: true })], ["5", state("5", 0, { cancelled: true })]]);
+  assert.deepEqual(planOpd([debt(4, 50, { an }), debt(5, 50, { an })], touched, rules, today, new Map(), counts), []);
+  assert.equal(counts.opd_admit_skipped, 1);
+});
+
+test("planRecompute admit: reverse main + CR on set date, touched = settledSkip, idempotent ; summarized apart from free-right reversals", () => {
+  const rs = (s) => ({ ...s, set_date: "2026-10-05" });
+  const states = [rs(mainState(1, 70000)), rs(crState(1, 30000)), rs(mainState(2, 5000, { touched: true })), rs(mainState(3, 4000))];
+  const admitted = new Set([vnOf(1), vnOf(2)]);
+  const plan = planRecompute(states, rules, new Map([[vnOf(1), 30000]]), admitted);
+  assert.deepEqual(plan.map((p) => [p.state.ref, p.entries.map((e) => [e.kind, e.amount, e.entry_date]), p.settledSkip]), [
+    ["1", [["reverse", "-700.00", "2026-10-05"]], false],
+    ["2", [], true],
+    ["3", [], false],
+    ["1:CR", [["reverse", "-300.00", "2026-10-05"]], false],
+  ]);
+  const after = [rs(mainState(1, 0)), rs(crState(1, 0)), states[2], states[3]];
+  assert.ok(planRecompute(after, rules, new Map(), admitted).every((p) => p.entries.length === 0));
+});

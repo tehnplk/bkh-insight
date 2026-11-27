@@ -31,9 +31,9 @@ CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
   WHERE x.patient_type = s.patient_type AND x.ref = s.ref AND x.source IN (s.source, 'stm', 'manual', 'fwf', 'capitation')) b
 WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt') AND s.account_code = $1 AND s.ref_date BETWEEN $2::date AND $3::date AND b.balance > 0
 ORDER BY s.ref_date, s.ref`;
-// pool ของบัญชีรายได้ $1: รับโอน (ไม่ยกเลิก) ต้นปีงบ $2 ถึงสิ้นเดือน $3 ; ใช้แล้ว = settle ของทุกชุดในปีงบที่ตัดกับบัญชีนี้
+// pool ของบัญชีรายได้ $1: รับโอนที่ลงรับแล้ว (ไม่ยกเลิก) ตามวันที่ใบเสร็จ ต้นปีงบ $2 ถึงสิ้นเดือน $3 ; ใช้แล้ว = settle ของทุกชุดในปีงบที่ตัดกับบัญชีนี้
 const POOL_SQL = `SELECT
-  (SELECT COALESCE(SUM(amount), 0) FROM ar_transfer WHERE cancelled_at IS NULL AND account_code = $1 AND transfer_date BETWEEN $2::date AND $3::date) AS received,
+  (SELECT COALESCE(SUM(amount), 0) FROM ar_transfer WHERE cancelled_at IS NULL AND account_code = $1 AND receipt_date BETWEEN $2::date AND $3::date) AS received,
   (SELECT COALESCE(-SUM(l.amount), 0) FROM ar_capitation_batch b JOIN ar_ledger l ON l.capitation_batch_id = b.id
     WHERE l.kind = 'settle' AND b.clear_code = $1 AND b.month >= $2::date AND b.month < $2::date + interval '1 year') AS used`;
 

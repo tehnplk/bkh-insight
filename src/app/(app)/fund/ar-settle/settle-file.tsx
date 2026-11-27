@@ -119,8 +119,10 @@ const Value = ({ children }: { children: ReactNode }) => <span className="font-s
 function SettleForm({ s, grid, onChanged }: { s: SettleSummary; grid: SummaryGrid; onChanged: () => void }) {
   const { changed, clear } = useContext(ToggleContext);
   const today = todayIso();
-  const [date, setDate] = useState(today);
-  const [receipt, setReceipt] = useState("");
+  // ค่าเริ่มต้นจากใบเสร็จเงินโอน SMT งวดเดียวกันที่ลงรับแล้ว (/fund/ar-transfer) แก้ได้
+  const fromTransfer = s.transfer_receipt;
+  const [date, setDate] = useState(fromTransfer?.receipt_date ?? today);
+  const [receipt, setReceipt] = useState(fromTransfer?.receipt_no ?? "");
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +184,9 @@ function SettleForm({ s, grid, onChanged }: { s: SettleSummary; grid: SummaryGri
           <span className="text-muted">เลขที่ใบเสร็จ</span>
           <input value={receipt} onChange={(e) => setReceipt(e.target.value)} maxLength={MAX_RECEIPT_NO} className={input} disabled={confirming} />
         </label>
+        {fromTransfer && receipt === fromTransfer.receipt_no && date === fromTransfer.receipt_date && (
+          <span className="text-sm text-muted">ตามใบเสร็จเงินโอน SMT งวด {fromTransfer.period}</span>
+        )}
         <p className="text-muted tabular-nums">{plan}</p>
         {confirming ? (
           <span className="ml-auto flex gap-2">

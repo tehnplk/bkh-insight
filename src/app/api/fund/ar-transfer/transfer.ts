@@ -22,8 +22,8 @@ export type SmtTransferRow = {
 /** ฝั่งของ mapping: ALL = ทั้งกองทุน ; OP/IP = แถว SMT ฝั่งนั้น (ar_transfer_fund_map.side) */
 export type FundSide = "ALL" | "OP" | "IP";
 export type FundMapEntry = { account_code: string | null; ignore: boolean };
-/** แถว ar_transfer เดิมของ smt_key (edited = updated_by ไม่ NULL) */
-export type ExistingTransfer = { amount: string | number; account_code: string; edited: boolean; cancelled: boolean };
+/** แถว ar_transfer เดิมของ smt_key (edited = updated_by ไม่ NULL, received = ลงรับแล้ว) */
+export type ExistingTransfer = { amount: string | number; account_code: string; edited: boolean; cancelled: boolean; received?: boolean };
 
 export type TransferInsert = {
   smt_key: string; transfer_date: string; ref_doc_no: string | null; fund_key: string; fund_name: string; account_code: string; amount: number;
@@ -34,11 +34,10 @@ export type ImportCounts = {
   /** เพิ่มใหม่ */ new: number;
   /** ยอด/บัญชีเปลี่ยนตาม SMT หรือ mapping (แถวที่การเงินยังไม่แก้) */ updated: number;
   unchanged: number;
-  /** การเงินแก้หรือยกเลิกแล้ว ไม่ทับ */ kept: number;
+  /** การเงินแก้ ยกเลิก หรือลงรับแล้ว ไม่ทับ */ kept: number;
   /** รายการของกองทุนที่ยังไม่จับคู่บัญชี */ unmapped: number;
   /** รายการของกองทุนที่ตั้งว่าไม่ใช้ */ ignored: number;
   /** รอโอน (pmntStts W) */ pending: number;
-  /** อยู่ในงวดที่ปิดแล้ว ไม่เพิ่ม/ไม่แก้ */ closed: number;
 };
 export type ImportPlan = {
   inserts: TransferInsert[];
@@ -93,10 +92,11 @@ export function findMapping(map: Map<string, FundMapEntry>, fk: string, side: "O
 /**
  * แผนนำเข้า: ข้ามรอโอน ยอด 0 และกองทุนที่ยังไม่จับคู่/ไม่ใช้ (กองทุนที่ไม่เคยเห็นได้แถว mapping ว่างใน newFunds)
  * map คีย์ด้วย mapKey ; กองทุนที่มีทั้งแถว OP และ IP ได้แถว mapping ว่างของ OP/IP เพิ่ม ให้ admin แยกบัญชีได้ (ว่าง = ใช้ตาม ALL)
- * งบปีก่อนวันโอนลง PRIOR_YEAR_ACCOUNT ; แถวเดิมที่การเงินแก้หรือยกเลิกไม่แตะ ; closedThrough = เดือนล่าสุดที่ปิดงวด YYYY-MM (null = ไม่มี)
+ * งบปีก่อนวันโอนลง PRIOR_YEAR_ACCOUNT ; แถวเดิมที่การเงินแก้ ยกเลิก หรือลงรับแล้วไม่แตะ (ใบเสร็จออกตามยอดนั้นแล้ว)
+ * แถวใหม่/แถวที่อัปเดตเป็นรอออกใบเสร็จ ยังไม่ลงบัญชี งวดที่ปิดจึงไม่กัน (งวดปิดดูที่วันที่ใบเสร็จตอนลงรับ)
  */
-export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>, closedThrough: string | null): ImportPlan {
-  const counts: ImportCounts = { new: 0, updated: 0, unchanged: 0, kept: 0, unmapped: 0, ignored: 0, pending: 0, closed: 0 };
+export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry>, existing: Map<string, ExistingTransfer>): ImportPlan {
+  const counts: ImportCounts = { new: 0, updated: 0, unchanged: 0, kept: 0, unmapped: 0, ignored: 0, pending: 0 };
   const plan: ImportPlan = { inserts: [], updates: [], newFunds: [], unmapped: [], counts };
   const unmapped = new Map<string, UnmappedFund>();
   const sides = new Map<string, { op: boolean; ip: boolean; r: SmtTransferRow }>();
@@ -138,9 +138,8 @@ export function planImport(rows: SmtTransferRow[], map: Map<string, FundMapEntry
     const date = smtIso(r.postingDate);
     const amount = cents(r.total) / 100;
     const old = existing.get(key);
-    if (old?.edited || old?.cancelled) counts.kept++;
+    if (old?.edited || old?.cancelled || old?.received) counts.kept++;
     else if (old && cents(old.amount) === cents(amount) && old.account_code === account) counts.unchanged++;
-    else if (closedThrough && date.slice(0, 7) <= closedThrough) counts.closed++;
     else if (old) {
       plan.updates.push({ smt_key: key, account_code: account, amount });
       counts.updated++;
@@ -226,26 +225,30 @@ export function fundDetail(rows: SmtDetailRow[], key: string): FundDetail {
 /** บัญชีที่แสดงก่อน (รายได้เหมาจ่ายที่รอบตัดหนี้สิ้นเดือนใช้) */
 export const PRIMARY_ACCOUNTS = ["4301020105.214", "4301020105.217"];
 
-export type SummaryRow = { account_code: string; months: Record<string, number>; total: number };
+/** months/total = รับแล้วตามเดือนของวันที่ใบเสร็จ ; pending = รอออกใบเสร็จ (ทุกปีงบ) */
+export type SummaryRow = { account_code: string; months: Record<string, number>; total: number; pending: number };
 
-/** ยอดรับต่อบัญชีต่อเดือน (YYYY-MM ของ transfer_date) ไม่นับแถวที่ยกเลิก ; .214/.217 ขึ้นก่อนเสมอแม้ยังไม่มียอด */
-export function summarize(rows: { account_code: string; transfer_date: string; amount: string | number; cancelled: boolean }[]): SummaryRow[] {
+/** ยอดรับต่อบัญชีต่อเดือน (YYYY-MM ของ receipt_date ; null = รอออกใบเสร็จ) แถวที่ส่งมาต้องไม่ยกเลิก ; .214/.217 ขึ้นก่อนเสมอแม้ยังไม่มียอด */
+export function summarize(rows: { account_code: string; receipt_date: string | null; amount: string | number }[]): SummaryRow[] {
   const acc = new Map<string, Map<string, number>>(PRIMARY_ACCOUNTS.map((c) => [c, new Map()]));
   for (const r of rows) {
-    if (r.cancelled) continue;
     const m = acc.get(r.account_code) ?? new Map<string, number>();
-    const month = r.transfer_date.slice(0, 7);
+    const month = r.receipt_date?.slice(0, 7) ?? "pending";
     m.set(month, (m.get(month) ?? 0) + cents(r.amount));
     acc.set(r.account_code, m);
   }
   const rank = (c: string) => (PRIMARY_ACCOUNTS.includes(c) ? PRIMARY_ACCOUNTS.indexOf(c) : PRIMARY_ACCOUNTS.length);
   return [...acc]
     .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-    .map(([account_code, m]) => ({
-      account_code,
-      months: Object.fromEntries([...m].map(([k, c]) => [k, c / 100])),
-      total: [...m.values()].reduce((s, c) => s + c, 0) / 100,
-    }));
+    .map(([account_code, m]) => {
+      const months = [...m].filter(([k]) => k !== "pending");
+      return {
+        account_code,
+        months: Object.fromEntries(months.map(([k, c]) => [k, c / 100])),
+        total: months.reduce((s, [, c]) => s + c, 0) / 100,
+        pending: (m.get("pending") ?? 0) / 100,
+      };
+    });
 }
 
 /* ---------- ตรวจ body ของการเพิ่มเอง/แก้/ยกเลิก ---------- */
@@ -288,5 +291,87 @@ export function parseTransferPatch(b: unknown, from: string, today: string): ({ 
   return "error" in input ? input : { id, action: "edit", ...input };
 }
 
-export const STATUS_LABEL: Record<"active" | "cancelled", string> = { active: "ใช้งาน", cancelled: "ยกเลิก" };
+/** pending = รอออกใบเสร็จ (ยังไม่ลงบัญชี ไม่นับใน pool เหมาจ่าย), received = รับแล้ว (ลงบัญชีตามวันที่ใบเสร็จ) */
+export const STATUS_LABEL: Record<"pending" | "received" | "cancelled", string> = { pending: "รอออกใบเสร็จ", received: "รับแล้ว", cancelled: "ยกเลิก" };
+
+/* ---------- ลงรับเงินโอน (ใบเสร็จ) ---------- */
+
+/** แถวรอออกใบเสร็จ (ไม่ยกเลิก receipt_date NULL) ; batch = batchNo ใน smt_key, manual = null (ลงรับรายแถว) */
+export type PendingLine = {
+  id: string; source: "smt" | "manual"; transfer_date: string; batch: string | null; ref_doc_no: string | null; fund_name: string | null;
+  account_code: string; amount: string | number;
+  /** ใบเสร็จของแถวอื่นในชุดเดียวกันที่ลงรับแล้ว (ชุดรับไม่ครบ เช่น SMT เพิ่มรายการหลังลงรับ) */
+  batch_receipt_no: string | null;
+};
+export type PendingBatch = {
+  key: string; transfer_date: string; batch: string | null; n: number; amount: number; batch_receipt_no: string | null;
+  lines: (Omit<PendingLine, "amount" | "batch_receipt_no"> & { amount: number })[];
+};
+
+/** หนึ่งชุดโอน = (วันที่โอน, batchNo) ของ SMT เงินชุดเดียวกันเข้าธนาคารเป็นก้อนเดียว ; manual แยกรายแถว ; เรียงวันที่โอน */
+export function pendingBatches(rows: PendingLine[]): PendingBatch[] {
+  const out = new Map<string, PendingBatch & { c: number }>();
+  for (const { batch_receipt_no, amount, ...r } of rows) {
+    const batch = r.source === "smt" ? r.batch : null;
+    const key = batch ? `${r.transfer_date}|${batch}` : `id:${r.id}`;
+    const b = out.get(key) ?? { key, transfer_date: r.transfer_date, batch, n: 0, amount: 0, c: 0, lines: [], batch_receipt_no: null };
+    b.n++;
+    b.c += cents(amount);
+    b.lines.push({ ...r, amount: Number(amount) });
+    b.batch_receipt_no ??= batch_receipt_no;
+    out.set(key, b);
+  }
+  return [...out.values()]
+    .map(({ c, ...b }) => ({ ...b, amount: c / 100 }))
+    .sort((a, b) => a.transfer_date.localeCompare(b.transfer_date) || a.key.localeCompare(b.key));
+}
+
+/** ปีงบ พ.ศ. ของวันที่ ISO "2026-10-02" -> 2570 */
+const isoFy = (d: string) => +d.slice(0, 4) + 543 + (+d.slice(5, 7) >= 10 ? 1 : 0);
+
+/**
+ * บัญชีตอนลงรับ: แถว SMT ที่การเงินยังไม่แก้ และงบปี (mouGrpCode) ก่อนปีงบของวันที่ใบเสร็จ ย้ายไป PRIOR_YEAR_ACCOUNT
+ * เพราะลงบัญชีตามวันที่ใบเสร็จ (เช่น โอน 30 ก.ย. ออกใบเสร็จ ต.ค. = เงินงบปีก่อนที่รับในปีงบใหม่) ; ไม่ย้ายกลับ
+ */
+export function receiptAccount(r: { smt_key: string | null; account_code: string; edited: boolean }, receiptDate: string): string {
+  const by = keyBudgetYear(r.smt_key);
+  return !r.edited && by !== null && by < isoFy(receiptDate) ? PRIOR_YEAR_ACCOUNT.code : r.account_code;
+}
+
+export const MAX_RECEIPT_NO = 30;
+export type ReceiptFields = { receipt_no: string; receipt_date: string };
+
+/** เลขที่ใบเสร็จ (ไม่ว่าง ≤ 30 ตัว) และวันที่ใบเสร็จ (from..today) ; ไม่ก่อนวันที่โอน/งวดปิด route ตรวจกับข้อมูลจริง */
+export function parseReceiptFields(b: unknown, from: string, today: string): ReceiptFields | Err {
+  const x = (b ?? {}) as Record<string, unknown>;
+  const no = typeof x.receipt_no === "string" ? x.receipt_no.trim() : "";
+  if (!no || no.length > MAX_RECEIPT_NO) return { error: `กรอกเลขที่ใบเสร็จ ไม่เกิน ${MAX_RECEIPT_NO} ตัวอักษร` };
+  if (!validDate(x.receipt_date) || x.receipt_date < from || x.receipt_date > today) return { error: "วันที่ใบเสร็จต้องไม่ก่อนวันที่โอนและไม่เกินวันนี้" };
+  return { receipt_no: no, receipt_date: x.receipt_date };
+}
+
+export type ReceiptAction =
+  | ({ action: "receive"; target: { transfer_date: string; batch: string } | { id: string } } & ReceiptFields)
+  | { action: "unreceive"; id: string; reason: string };
+
+/** { action: "receive", (transfer_date + batch) หรือ id, receipt_no, receipt_date } หรือ { action: "unreceive", id, reason } */
+export function parseReceiptAction(b: unknown, from: string, today: string): ReceiptAction | Err {
+  const x = (b ?? {}) as Record<string, unknown>;
+  const id = typeof x.id === "string" || typeof x.id === "number" ? String(x.id) : null;
+  if (id !== null && !/^\d{1,18}$/.test(id)) return { error: "id ไม่ถูกต้อง" };
+  if (x.action === "unreceive") {
+    const reason = typeof x.reason === "string" ? x.reason.trim() : "";
+    if (!id) return { error: "id ไม่ถูกต้อง" };
+    if (!reason || reason.length > MAX_NOTE) return { error: `กรอกเหตุผลที่ยกเลิกการรับ ไม่เกิน ${MAX_NOTE} ตัวอักษร` };
+    return { action: "unreceive", id, reason };
+  }
+  if (x.action !== "receive") return { error: "action ต้องเป็น receive หรือ unreceive" };
+  const fields = parseReceiptFields(x, from, today);
+  if ("error" in fields) return fields;
+  if (id) return { action: "receive", target: { id }, ...fields };
+  const batch = typeof x.batch === "string" ? x.batch.trim() : "";
+  if (!validDate(x.transfer_date) || !batch || batch.length > 50) return { error: "ระบุชุดโอน (วันที่โอนและเลขชุด) หรือ id" };
+  if (fields.receipt_date < x.transfer_date) return { error: "วันที่ใบเสร็จต้องไม่ก่อนวันที่โอน" };
+  return { action: "receive", target: { transfer_date: x.transfer_date, batch }, ...fields };
+}
 export const SOURCE_LABEL: Record<"smt" | "manual", string> = { smt: "SMT", manual: "เพิ่มเอง" };

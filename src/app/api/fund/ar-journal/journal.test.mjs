@@ -70,6 +70,16 @@ test("transfer (ar_transfer ติดลบ = รับ): Dr เงินฝา�
   ]);
 });
 
+test("transfer เข้าลูกหนี้ที่ settles_by_stm ไม่เกิดบรรทัด (ลงผ่าน settle ของ STM แล้ว) ; transfer เข้า .214 ยังเกิด", () => {
+  const o = { account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer" };
+  const lines = journalLines([
+    g("transfer", "-41410000", { ...o, account_code: "1102050101.202", settles_by_stm: true }),
+    g("transfer", "500", { ...o, account_code: "1102050101.216", settles_by_stm: true }),
+    g("transfer", "-100", { ...o, account_code: "4301020105.214", settles_by_stm: false }),
+  ]);
+  assert.deepEqual(lines.map((l) => [l.kind, l.dr_type, l.cr_code, l.amount]), [["รับเงินโอน", "cash", "4301020105.214", 100]]);
+});
+
 test("transfer งบปีก่อน (3102010102.201 ไม่อยู่ใน ar_account): Cr บัญชีทุน equity ชื่อจาก PRIOR_YEAR_ACCOUNT", () => {
   const o = { account_name: null, revenue_code: null, diff_under_code: null, diff_over_code: null, source: "transfer", account_code: "3102010102.201" };
   const lines = journalLines([g("transfer", "-500", o)]);
@@ -84,5 +94,22 @@ test("capitation: settle Dr clear_code (รายได้) / Cr ลูกหน
   assert.deepEqual(lines.map((l) => [l.kind, l.dr_type, l.dr_code, l.cr_type, l.cr_code, l.n, l.amount]), [
     ["รับชำระ", "revenue", "4301020105.214", "ar", "1102050101.201", 1, 7245901.67],
     ["ส่วนต่าง", "diff_under", "4301020105.229", "ar", "1102050101.201", 3, 6925267.64],
+  ]);
+});
+
+test("diff ตอนรับเงินของบริการปีงบก่อน (prior_year): บัญชีคู่ 3102010102.102 equity ทั้งสองทิศ ; ปีเดียวกันใช้ diff_under/over เดิม ; Dr = Cr", () => {
+  const stm = { source: "stm" };
+  const lines = journalLines([
+    g("diff", "-200", { ...stm, prior_year: true }),
+    g("diff", "50", { ...stm, prior_year: true }),
+    g("diff", "-10", { source: "manual", prior_year: true }),
+    g("diff", "-30", { ...stm, prior_year: false }),
+    g("diff", "40", stm),
+  ]);
+  assert.deepEqual(lines.map((l) => [l.dr_type, l.dr_code, l.cr_type, l.cr_code, l.amount]), [
+    ["ar", "1102050101.202", "equity", "3102010102.102", 50],
+    ["ar", "1102050101.202", "diff_over", "4301020105.232", 40],
+    ["equity", "3102010102.102", "ar", "1102050101.202", 210],
+    ["diff_under", "4301020105.231", "ar", "1102050101.202", 30],
   ]);
 });

@@ -22,6 +22,8 @@ export type SettleSummary = {
   /** ตามค่าเริ่มต้นของ checkbox: รับชำระทุกรายที่จับคู่ได้ + ปิดส่วนต่างของรายที่ติ๊กไว้ (close_amount = ยอดสุทธิของแถว diff) */
   plan: { settle_n: number; settle_amount: number; close_n: number; close_amount: number };
   batches: SettleBatch[];
+  /** ใบเสร็จของเงินโอน SMT งวดเดียวกัน (ar_transfer ที่ลงรับแล้ว ต้น refDocNo = period) ใช้เป็นค่าเริ่มต้น ; null = ไม่พบหรือมีหลายใบ */
+  transfer_receipt?: { period: string; receipt_no: string; receipt_date: string } | null;
 };
 export type SettlePreviewPage = GridPage<PreviewRow> & { summary: SettleSummary };
 
