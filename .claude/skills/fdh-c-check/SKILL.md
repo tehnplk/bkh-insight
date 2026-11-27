@@ -127,7 +127,7 @@ DB_PASSWORD='...' db-cli -g my ... -e "$(node scripts/fill_params.mjs sql/ip/cas
 | C303 | DRU | จำนวนยาว่างหรือ ≤ 0 แต่มียอดเงิน | warn | |
 | C565 | DRU (op) | ยานอกบัญชีของ OFC/LGO ไม่มีเหตุผล EA–EF ใน `ovst_presc_ned` | warn | |
 | C302 | CHA | หมวดมียอดเงินแต่ไม่มีรายการ ADP/DRU | warn | |
-| C555 | CHA, CHT | ยอดหมวด CHA ไม่เท่าผลรวม จำนวน x ราคา ของรายการ ADP/DRU (FDH คิดใหม่แบบนี้) หรือ CHT ไม่เท่าผลรวม CHA | warn | |
+| C555 | CHA, CHT | ยอดหมวด CHA ไม่เท่าผลรวม จำนวน x ราคา ของรายการ ADP/DRU ที่ e-Claim จัดเข้าหมวดนั้น (ยาตาม USE_STATUS, ADP ตามตาราง ADP.TYPE↔CHA.CHRGITEM ของ กศภ. เช่น TYPE 4 = หมวด 19 ; หมวด 16–18 ไม่มี ADP TYPE) หรือ CHT ไม่เท่าผลรวม CHA | warn | |
 
 กฎกองทุน STP (บุคคลที่มีปัญหาสถานะและสิทธิ) ตรวจเฉพาะ visit/admission ที่ `pttype.hipdata_code = 'STP'` ตามรหัสตีกลับ (R) ของกองทุน ไม่ใช่รหัส C ของ สปสช. (ไม่นับใน 45):
 

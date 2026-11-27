@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { todayIso } from "@/lib/thai-date";
 import { parseFy } from "../data";
-import { cachedSmt, smtErrorText } from "../smt";
+import { SMT_SOURCES, cachedSmt, smtErrorText, type SmtSource } from "../smt";
 import { fundDetail, type FundDetail } from "../transfer";
 
 /** response ของ GET /api/fund/ar-transfer/fund-detail?fy=&fund_key= */
@@ -18,9 +18,10 @@ export async function GET(request: NextRequest) {
   const fy = parseFy(params);
   if (fy === null) return Response.json({ error: "fy ไม่ถูกต้อง" }, { status: 400 });
   const key = params.get("fund_key") ?? "";
-  if (!FUND_KEY_RE.test(key)) return Response.json({ error: "fund_key ไม่ถูกต้อง" }, { status: 400 });
+  const source = key.split("|")[0] as SmtSource;
+  if (!FUND_KEY_RE.test(key) || !SMT_SOURCES.includes(source)) return Response.json({ error: "fund_key ไม่ถูกต้อง" }, { status: 400 });
   try {
-    const body: FundDetailResult = { fy, fund_key: key, ...fundDetail(await cachedSmt(fy, todayIso()), key) };
+    const body: FundDetailResult = { fy, fund_key: key, ...fundDetail(await cachedSmt(fy, todayIso(), source), key) };
     return Response.json(body);
   } catch (e) {
     return Response.json({ error: smtErrorText(e as Error) }, { status: 502 });

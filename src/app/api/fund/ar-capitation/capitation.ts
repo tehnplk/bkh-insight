@@ -22,6 +22,23 @@ export const fyStartOf = (month: string) => `${+month.slice(0, 4) - (+month.slic
 /** pool คงเหลือ = รับโอนในปีงบถึงสิ้นเดือน − ที่ตัดไปแล้วในปีงบ (ทุกเดือน ตัดย้อนเดือนจึงใช้ pool ซ้ำไม่ได้) ไม่ติดลบ */
 export const poolAvailable = (received: Num, used: Num) => Math.max(0, cents(received) - cents(used)) / 100;
 
+/**
+ * เหตุที่ยืนยันตัดหนี้ของ (เดือน, บัญชี) ไม่ได้ (null = ได้) ; เดือนที่ปิดงวดแล้วไม่ตัด เพราะรายได้/ส่วนต่างของงวดที่ปิดต้องไม่เปลี่ยน
+ * มีเงินโอนเข้า clear_code ที่รอออกใบเสร็จ (โอนถึงสิ้นเดือน) = pool ยังไม่ครบ ตัดตอนนี้หนี้จะลงส่วนต่างทั้งที่มีเงินแล้ว
+ */
+export function capBlock(x: {
+  ended: boolean; month: string; through: string | null; code: string; clear_code: string; clear_short_code: string | null;
+  pending_n: number; entries: number;
+}): string | null {
+  if (!x.ended) return "ยืนยันได้เมื่อจบเดือนแล้ว";
+  if (x.through && x.month <= x.through) return `งวดถึงเดือน ${x.through} ปิดแล้ว ตัดหนี้ของเดือนที่ปิดไม่ได้`;
+  // นับรายการ ไม่ใช่ยอด: ยอดรอรับติดลบ (ถูกหัก) ก็ทำให้ pool ไม่ตรง
+  if (x.pending_n > 0) return `มีเงินโอนเข้า ${x.clear_code} รอออกใบเสร็จ ${x.pending_n} รายการ ลงรับที่หน้าเงินโอนที่ได้รับก่อนตัดหนี้`;
+  if (!x.clear_short_code) return `ยังไม่กำหนดบัญชีส่วนต่างของ ${x.code}`;
+  if (!x.entries) return "ไม่มีหนี้คงเหลือที่ต้องตัด";
+  return null;
+}
+
 /** แผนตัดหนี้: หนี้ balance > 0 ที่ from ≤ ref_date ≤ end ตัด min(คงเหลือ, pool) ที่เหลือลง diff ; entry_date = end */
 export function planCapitation(debts: CapDebt[], pool: Num, from: string, end: string): CapPlan {
   let left = Math.max(0, cents(pool));

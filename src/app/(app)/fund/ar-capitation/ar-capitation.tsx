@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { copyable } from "@/components/copy-button/copy-button";
 import { DataGrid, gridColumnHelper } from "@/components/data-grid/data-grid";
 import { DetailModal } from "@/components/detail-modal/detail-modal";
@@ -10,7 +11,7 @@ import { LEDGER_START } from "@/app/api/fund/ar-sync/ledger";
 import type { CapRow } from "@/app/api/fund/ar-capitation/capitation";
 import type { CapAccountPreview, CapPreview, CapResult } from "@/app/api/fund/ar-capitation/route";
 import type { CapDebtPage } from "@/app/api/fund/ar-capitation/debts/route";
-import { Money, Notice, Skeleton, btn, num, useJson, useUrlParams } from "../_components/ui";
+import { Money, Notice, Skeleton, btn, focusRing, num, useJson, useUrlParams } from "../_components/ui";
 import { MonthSelect, Status, monthLabel, primary, send } from "../fwf-card/shared";
 
 const TH = "px-3 py-2 font-medium";
@@ -90,6 +91,12 @@ function AccountSection({ a, data, onOpen, onDone }: { a: CapAccountPreview; dat
           ["เหมาจ่ายคงเหลือหลังตัด (บาท)", a.pool_after],
         ]}
       />
+      {a.pending_n > 0 && (
+        <p className="text-sm text-warning tabular-nums">
+          เงินโอนเข้า {a.clear_code} ที่โอนถึง {formatThaiDate(data.month_end)} รอออกใบเสร็จ {formatCount(a.pending_n)} รายการ {formatBaht(a.pending)} บาท ยังไม่นับในยอดใช้ตัดได้ ·{" "}
+          <Link href="/fund/ar-transfer" className={`rounded underline underline-offset-2 ${focusRing}`}>ลงรับที่หน้าเงินโอนที่ได้รับ</Link>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {t.n > 0 && <button type="button" onClick={onOpen} className={btn}>ดูรายหนี้ {formatCount(t.n)} ราย</button>}
         {a.can_confirm ? (
@@ -105,7 +112,13 @@ function AccountSection({ a, data, onOpen, onDone }: { a: CapAccountPreview; dat
             <button type="button" onClick={() => setConfirming(true)} className={primary}>ตัดหนี้สิ้นเดือน {monthLabel(data.month)}</button>
           )
         ) : (
-          data.ended && a.blocked && <span className="text-sm text-muted">{a.blocked}</span>
+          data.ended && a.blocked && (
+            <>
+              <button type="button" disabled aria-describedby={`cap-${a.code}-blocked`} className={primary}>ตัดหนี้สิ้นเดือน {monthLabel(data.month)}</button>
+              {/* รายละเอียดเงินรอออกใบเสร็จอยู่ในบรรทัดเตือนด้านบนแล้ว */}
+              <span id={`cap-${a.code}-blocked`} className="text-sm text-muted">{a.pending_n > 0 && !(data.closed_through && data.month <= data.closed_through) ? "ลงรับเงินโอนก่อนตัดหนี้" : a.blocked}</span>
+            </>
+          )
         )}
       </div>
     </section>

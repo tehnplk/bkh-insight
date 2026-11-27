@@ -66,11 +66,11 @@ orf_s AS (
 ),
 it AS (
   SELECT op.hn AS HN, op.an AS AN, '' AS SEQ, op.an AS K, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS D,
-         op.icode AS ICODE, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM,
+         op.icode AS ICODE, CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN IF((op.item_type = 'H' OR op.income = '04'), '04', '03') WHEN inc.drg_chrgitem_id IN (16, 17, 18) THEN '19' ELSE LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') END AS CHRGITEM,
          COALESCE(nd.icode IS NOT NULL AND COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4), 0) AS IS_ADP,
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
-         COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3) AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+         COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 2 THEN 2 WHEN 5 THEN 11 WHEN 9 THEN 9 WHEN 13 THEN 12 WHEN 15 THEN 13 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3) AS ADPTYPE, nd.nhso_adp_code AS ADPCODE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
          op.qty AS QTY, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END AS SP, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END AS TOTAL, ROUND(COALESCE(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END, 0) * CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 AND CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END > 0 THEN ROUND(op.sum_price / CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END, 2) ELSE ROUND(op.unitprice, 2) END, 2) AS QXP
   FROM a JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.AN
   LEFT JOIN income inc ON inc.income = op.income
@@ -86,30 +86,31 @@ cha AS (
   GROUP BY HN, AN, SEQ, K, D, CHRGITEM HAVING ROUND(SUM(SP), 2) > 0
 ),
 cmp AS (
-  SELECT HN, AN, SEQ, K, CHRGITEM,
+  SELECT HN, AN, SEQ, K, C AS CHRGITEM,
          SUM(CASE WHEN AMT > 0 THEN AMT END) AS A,
          CASE WHEN SUM(ITN) > 0 THEN ROUND(SUM(ITM), 2) END AS T
-  FROM (SELECT HN, AN, SEQ, K, D, CHRGITEM, ROUND(SUM(SP), 2) AS AMT, SUM(IS_ADP OR IS_DRU) AS ITN,
-               SUM(CASE WHEN IS_ADP OR IS_DRU THEN QXP END) AS ITM
-        FROM it GROUP BY HN, AN, SEQ, K, D, CHRGITEM) g
-  GROUP BY HN, AN, SEQ, K, CHRGITEM HAVING SUM(AMT > 0) > 0
+  FROM (SELECT HN, AN, SEQ, K, D, IF(x.rk, IF(IS_DRU, CHRGITEM, CASE ADPTYPE WHEN 10 THEN '01' WHEN 2 THEN '02' WHEN 11 THEN '05' WHEN 14 THEN '06' WHEN 15 THEN '07' WHEN 16 THEN '08' WHEN 9 THEN '09' WHEN 18 THEN '10' WHEN 19 THEN '11' WHEN 17 THEN '12' WHEN 12 THEN '13' WHEN 20 THEN '14' WHEN 13 THEN '15' WHEN 8 THEN CHRGITEM ELSE '19' END), CHRGITEM) AS C, ROUND(SUM(IF(x.rk, 0, SP)), 2) AS AMT, SUM(x.rk) AS ITN,
+               SUM(IF(x.rk, QXP, 0)) AS ITM
+        FROM it JOIN (SELECT 0 AS rk UNION ALL SELECT 1) x ON x.rk = 0 OR IS_ADP OR IS_DRU
+        GROUP BY HN, AN, SEQ, K, D, C) g
+  GROUP BY HN, AN, SEQ, K, C HAVING SUM(AMT > 0) > 0 OR SUM(ITN) > 0
 ),
 adp_s AS (
-  SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3) AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
+  SELECT s.HN, s.AN, s.SEQ, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS DATEOPD, COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 2 THEN 2 WHEN 5 THEN 11 WHEN 9 THEN 9 WHEN 13 THEN 12 WHEN 15 THEN 13 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3) AS ADPTYPE, COALESCE(nd.nhso_adp_code, nd.billcode, op.icode) AS CODE,
          ROUND(op.qty, 2) AS QTY, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 AND CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END > 0 THEN ROUND(op.sum_price / CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END, 2) ELSE ROUND(op.unitprice, 2) END AS RATE, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END AS TOTAL
   FROM stp s JOIN opitemrece op ON op.an = s.AN INNER JOIN nondrugitems nd ON nd.icode = op.icode LEFT JOIN income inc ON inc.income = op.income
   WHERE COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)
 ),
 dru_s AS (
   SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 AND CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END > 0 THEN ROUND(op.sum_price / CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END, 2) ELSE ROUND(op.unitprice, 2) END AS DRUGPRICE, CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END AS TOTAL,
-         CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS USE_STATUS
+         CASE WHEN (op.item_type = 'H' OR op.income = '04') THEN '2' ELSE '1' END AS USE_STATUS
   FROM stp s JOIN opitemrece op ON op.an = s.AN INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4) INNER JOIN drugitems d ON d.icode = op.icode
 ),
 cha_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
-         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END), 2) AS AMOUNT
+         CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN IF((op.item_type = 'H' OR op.income = '04'), '04', '03') WHEN inc.drg_chrgitem_id IN (16, 17, 18) THEN '19' ELSE LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') END AS CHRGITEM, ROUND(SUM(CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END), 2) AS AMOUNT
   FROM stp s JOIN opitemrece op ON op.an = s.AN LEFT JOIN income inc ON inc.income = op.income
-  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
+  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN IF((op.item_type = 'H' OR op.income = '04'), '04', '03') WHEN inc.drg_chrgitem_id IN (16, 17, 18) THEN '19' ELSE LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') END
   HAVING ROUND(SUM(CASE WHEN ABS(COALESCE(op.sum_price, 0) - COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0)) >= 1 THEN ROUND(op.sum_price, 2) ELSE COALESCE(ROUND(CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END * ROUND(op.unitprice, 2), 2), 0) END), 2) > 0
 ),
 cht_s AS (

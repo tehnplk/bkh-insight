@@ -492,7 +492,7 @@ function Recompute({ reload }: { reload: () => void }) {
   );
 }
 
-/* ---------- ตั้งค่าบัญชี: บัญชีคู่ (สมุดรายวัน), การตัดหนี้ด้วย STM, กลุ่มเรียกเก็บ ---------- */
+/* ---------- ตั้งค่าบัญชี: บัญชีคู่ (สมุดรายวัน), การตัดหนี้รายตัว (STM/REP), กลุ่มเรียกเก็บ ---------- */
 
 type SettingDraft = Pick<ArAccount, "code" | "revenue_code" | "diff_under_code" | "diff_over_code" | "clear_code" | "settles_by_stm" | "collect_group">;
 const INPUT = `h-8 w-36 rounded-md border border-line bg-surface px-2 tabular-nums ${focusRing}`;
@@ -541,7 +541,7 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
             <th className={TH}>รายได้คู่</th>
             <th className={TH}>ส่วนต่างค่ารักษาสูงกว่าข้อตกลง (Dr)</th>
             <th className={TH}>ส่วนต่างค่ารักษาต่ำกว่าข้อตกลง (Cr)</th>
-            <th className={TH}>ตัดหนี้ด้วย STM</th>
+            <th className={TH}>ตัดรายตัว (STM/REP)</th>
             <th className={TH}>กลุ่มเรียกเก็บ</th>
             <th className={TH}>ตัดอัตโนมัติ (Dr)</th>
             <th className={TH}><span className="sr-only">จัดการ</span></th>
@@ -558,7 +558,7 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
               <td className={TD}>{editing ? input("diff_over_code", `ส่วนต่างค่ารักษาต่ำกว่าข้อตกลงของ ${a.code}`) : a.diff_over_code ? code(a.diff_over_code) : dash}</td>
               <td className={TD}>
                 {editing ? (
-                  <input type="checkbox" aria-label={`ตัดหนี้ ${a.code} ด้วย STM`} checked={draft.settles_by_stm} onChange={(e) => setDraft({ ...draft, settles_by_stm: e.target.checked })} className="size-4 accent-accent" />
+                  <input type="checkbox" aria-label={`ตัดหนี้ ${a.code} รายตัวด้วย STM/REP`} checked={draft.settles_by_stm} onChange={(e) => setDraft({ ...draft, settles_by_stm: e.target.checked })} className="size-4 accent-accent" />
                 ) : a.settles_by_stm ? "ตัด" : <span className="text-muted">ไม่ตัด</span>}
               </td>
               <td className={TD}>
@@ -589,7 +589,7 @@ function AccountSettings({ data, reload }: { data: ArAccountsData; reload: () =>
           );
         })}
       </Table>
-      <p className="text-xs text-muted">ส่วนต่างใช้เมื่อตัดหนี้ด้วย STM แล้วยอดที่ได้รับไม่เท่าลูกหนี้ บัญชีที่ไม่ตัดด้วย STM (เช่น .201 เหมาจ่ายรายหัว) ยอดจะคงอยู่จนกว่าจะตัดด้วยวิธีอื่น ตัดอัตโนมัติ (Dr) คือบัญชีที่ลงเมื่อตัดหนี้โดยไม่ได้รับเงิน เช่น .201 ตัดด้วยเงินเหมาจ่ายรายหัว</p>
+      <p className="text-xs text-muted">ส่วนต่างใช้เมื่อตัดหนี้รายตัวด้วย STM หรือ REP (อปท.) แล้วยอดที่ได้รับไม่เท่าลูกหนี้ บัญชีที่ไม่ตัดรายตัว (เช่น .201 เหมาจ่ายรายหัว) ยอดจะคงอยู่จนกว่าจะตัดด้วยวิธีอื่น ตัดอัตโนมัติ (Dr) คือบัญชีที่ลงเมื่อตัดหนี้โดยไม่ได้รับเงิน เช่น .201 ตัดด้วยเงินเหมาจ่ายรายหัว</p>
     </Section>
   );
 }

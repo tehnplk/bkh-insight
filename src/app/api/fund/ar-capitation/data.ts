@@ -32,8 +32,11 @@ CROSS JOIN LATERAL (SELECT SUM(x.amount) AS balance FROM ar_ledger x
 WHERE s.kind = 'set' AND s.source IN ('rcpt_debt', 'ipt') AND s.account_code = $1 AND s.ref_date BETWEEN $2::date AND $3::date AND b.balance > 0
 ORDER BY s.ref_date, s.ref`;
 // pool ของบัญชีรายได้ $1: รับโอนที่ลงรับแล้ว (ไม่ยกเลิก) ตามวันที่ใบเสร็จ ต้นปีงบ $2 ถึงสิ้นเดือน $3 ; ใช้แล้ว = settle ของทุกชุดในปีงบที่ตัดกับบัญชีนี้
+// pending = โอนถึงสิ้นเดือนที่ยังรอออกใบเสร็จ (ทุกปีงบ ไม่ยกเลิก) ยังไม่นับใน pool
 const POOL_SQL = `SELECT
   (SELECT COALESCE(SUM(amount), 0) FROM ar_transfer WHERE cancelled_at IS NULL AND account_code = $1 AND receipt_date BETWEEN $2::date AND $3::date) AS received,
+  (SELECT COALESCE(SUM(amount), 0) FROM ar_transfer WHERE cancelled_at IS NULL AND account_code = $1 AND receipt_date IS NULL AND transfer_date <= $3::date) AS pending,
+  (SELECT count(*)::int FROM ar_transfer WHERE cancelled_at IS NULL AND account_code = $1 AND receipt_date IS NULL AND transfer_date <= $3::date) AS pending_n,
   (SELECT COALESCE(-SUM(l.amount), 0) FROM ar_capitation_batch b JOIN ar_ledger l ON l.capitation_batch_id = b.id
     WHERE l.kind = 'settle' AND b.clear_code = $1 AND b.month >= $2::date AND b.month < $2::date + interval '1 year') AS used`;
 
@@ -56,7 +59,7 @@ export type CapBatch = {
   id: string; month: string; account_code: string; clear_code: string; clear_short_code: string; pool_before: string; pool_after: string;
   counts: Record<string, number>; created_by: string; created_at: string;
 };
-export type AccountPlan = { account: CapAccount; received: number; used: number; plan: CapPlan };
+export type AccountPlan = { account: CapAccount; received: number; used: number; pending: number; pending_n: number; plan: CapPlan };
 
 export const loadAccounts = (q: InsightTx) => q<CapAccount>(ACCOUNTS_SQL, [[FWF_ACCOUNTS.OP, FWF_ACCOUNTS.IP]]);
 
@@ -65,7 +68,9 @@ export async function planAccount(q: InsightTx, account: CapAccount, month: stri
   const from = fyStartOf(month);
   const [debts, [pool]] = await Promise.all([
     q<CapDebt>(DEBTS_SQL, [account.code, from, end]),
-    q<{ received: string; used: string }>(POOL_SQL, [account.clear_code, from, end]),
+    q<{ received: string; used: string; pending: string; pending_n: number }>(POOL_SQL, [account.clear_code, from, end]),
   ]);
-  return { account, received: Number(pool.received), used: Number(pool.used), plan: planCapitation(debts, poolAvailable(pool.received, pool.used), from, end) };
+  return {
+    account, received: Number(pool.received), used: Number(pool.used), pending: Number(pool.pending), pending_n: pool.pending_n,
+    plan: planCapitation(debts, poolAvailable(pool.received, pool.used), from, end) };
 }

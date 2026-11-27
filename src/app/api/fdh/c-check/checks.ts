@@ -15,7 +15,12 @@ const AI = "p JOIN ipt a ON a.dchdate BETWEEN p.s AND p.e";
 // แยกยา/ไม่ใช่ยาด้วยหมวดค่ารักษา 3/4 และ ADP.TYPE: สูตรเดียวกับ fdh/files/sql.ts (ไม่ import ค่า ; fdh.test.mjs ตรวจว่าตรงกัน)
 const DRUG_INC = "INNER JOIN income inc ON inc.income = op.income AND inc.drg_chrgitem_id IN (3, 4)";
 const NOT_DRUG = "COALESCE(inc.drg_chrgitem_id, 0) NOT IN (3, 4)";
-const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 5 THEN 11 WHEN 13 THEN 12 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+const ADP_TYPE = "COALESCE(CASE inc.drg_chrgitem_id WHEN 1 THEN 10 WHEN 2 THEN 2 WHEN 5 THEN 11 WHEN 9 THEN 9 WHEN 13 THEN 12 WHEN 15 THEN 13 WHEN 6 THEN 14 WHEN 7 THEN 15 WHEN 8 THEN 16 WHEN 12 THEN 17 WHEN 10 THEN 18 WHEN 11 THEN 19 WHEN 14 THEN 20 END, nd.nhso_adp_type_id, 3)";
+// ยากลับบ้าน (DRU.USE_STATUS 2 / CHA 04) และ CHA.CHRGITEM: ข้อความเดียวกับ HOME_DRUG/CHRGITEM ของ fdh/files/sql.ts (fdh.test.mjs ตรวจ)
+const HOME_DRUG = "(op.item_type = 'H' OR op.income = '04')";
+const CHRGITEM = `CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN IF(${HOME_DRUG}, '04', '03') WHEN inc.drg_chrgitem_id IN (16, 17, 18) THEN '19' ELSE LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') END`;
+// หมวดที่ e-Claim/FDH จัดรายการให้ (C555): ยา = หมวดของ DRU (USE_STATUS) ; ADP ตามตาราง ADP.TYPE↔CHA.CHRGITEM ของ กศภ. (TYPE 8 ลงตามหมวดเอง, 1/3–7 = หมวด 19) ; ใช้คอลัมน์ของ it
+const ITEM_CAT = "IF(IS_DRU, CHRGITEM, CASE ADPTYPE WHEN 10 THEN '01' WHEN 2 THEN '02' WHEN 11 THEN '05' WHEN 14 THEN '06' WHEN 15 THEN '07' WHEN 16 THEN '08' WHEN 9 THEN '09' WHEN 18 THEN '10' WHEN 19 THEN '11' WHEN 17 THEN '12' WHEN 12 THEN '13' WHEN 20 THEN '14' WHEN 13 THEN '15' WHEN 8 THEN CHRGITEM ELSE '19' END)";
 // ยอด/ราคารายแถวที่เขียนลงแฟ้ม ADP/DRU/CHA/CHT (ITEM_LINE/ITEM_RATE ของ fdh/files/sql.ts ข้อความเดียวกัน) ; C555 เทียบ CHA กับ จำนวน x ราคา (ITEM_QXP) แบบที่ FDH คิดใหม่
 const ITEM_QTY = "CASE WHEN inc.drg_chrgitem_id IN (3, 4) THEN ROUND(op.qty, 0) ELSE ROUND(op.qty, 2) END";
 const ITEM_CALC = `COALESCE(ROUND(${ITEM_QTY} * ROUND(op.unitprice, 2), 2), 0)`;
@@ -60,7 +65,7 @@ const OP_COUNT = {
   OOP: n(`(SELECT 1 FROM p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e INNER JOIN doctor_operation dop ON dop.vn = v.vn INNER JOIN patient pt ON pt.hn = v.hn
     UNION ALL SELECT 1 FROM p JOIN ovstdiag od ON od.vstdate BETWEEN p.s AND p.e INNER JOIN ovst v ON v.vn = od.vn INNER JOIN patient pt ON pt.hn = v.hn WHERE ${OD_ICD9_NOT_IN_DOP}) u`),
   CHT: n("p JOIN vn_stat vs ON vs.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = vs.hn INNER JOIN ovst v ON v.vn = vs.vn WHERE v.an IS NULL OR v.an = ''"),
-  CHA: n(`(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
+  CHA: n(`(SELECT 1 FROM p JOIN opitemrece op FORCE INDEX (ix_vstdate) ON op.vstdate BETWEEN p.s AND p.e INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income WHERE op.vn IS NOT NULL AND (op.an IS NULL OR op.an = '') GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}, pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
   AER: n(`p JOIN ovst v ON v.vstdate BETWEEN p.s AND p.e ${AER_REF} WHERE (v.an IS NULL OR v.an = '') AND ${aerHas("v.vn")}`),
   ADP: { sql: OP_ITEMS, col: "adp_phdb" },
   DRU: { sql: OP_ITEMS, col: "dru" },
@@ -77,7 +82,7 @@ const IP_COUNT = {
   IDX: n(`${AI} INNER JOIN iptdiag id ON id.an = a.an`),
   IOP: n(`${AI} INNER JOIN iptoprt io ON io.an = a.an`),
   CHT: n(`${AI} INNER JOIN an_stat ans ON ans.an = a.an INNER JOIN patient pt ON pt.hn = ans.hn`),
-  CHA: n(`(SELECT 1 FROM ${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0'), pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
+  CHA: n(`(SELECT 1 FROM ${AI} JOIN opitemrece op FORCE INDEX (ix_an) ON op.an = a.an INNER JOIN patient pt ON pt.hn = op.hn LEFT JOIN income inc ON inc.income = op.income GROUP BY op.hn, op.an, op.vn, COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}, pt.cid HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0) g`),
   AER: n(`${AI} INNER JOIN ovst v ON v.an = a.an ${AER_REF} WHERE ${aerHas("a.an")}`),
   ADP: { sql: IP_ITEMS, col: "adp_phdb" },
   LVD: n(`${AI} INNER JOIN ipt_home_leave hl ON hl.an = a.an`),
@@ -125,16 +130,16 @@ const STP_OP_ITEMS = `adp_s AS (
 ),
 dru_s AS (
   SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ${ITEM_RATE} AS DRUGPRICE, ${ITEM_LINE} AS TOTAL,
-         CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS USE_STATUS
+         CASE WHEN ${HOME_DRUG} THEN '2' ELSE '1' END AS USE_STATUS
   FROM stp s JOIN opitemrece op ON op.vn = s.SEQ ${DRUG_INC} INNER JOIN drugitems d ON d.icode = op.icode
   WHERE (op.an IS NULL OR op.an = '')
 ),
 cha_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
-         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
+         ${CHRGITEM} AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
   FROM stp s JOIN opitemrece op ON op.vn = s.SEQ LEFT JOIN income inc ON inc.income = op.income
   WHERE (op.an IS NULL OR op.an = '')
-  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
+  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}
   HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0
 ),
 cht_s AS (
@@ -174,14 +179,14 @@ const STP_IP_ITEMS = `adp_s AS (
 ),
 dru_s AS (
   SELECT s.HN, s.AN, s.SEQ, ROUND(op.qty, 0) AS AMOUNT, ${ITEM_RATE} AS DRUGPRICE, ${ITEM_LINE} AS TOTAL,
-         CASE WHEN op.item_type = 'H' OR op.income = '04' THEN '2' ELSE '1' END AS USE_STATUS
+         CASE WHEN ${HOME_DRUG} THEN '2' ELSE '1' END AS USE_STATUS
   FROM stp s JOIN opitemrece op ON op.an = s.AN ${DRUG_INC} INNER JOIN drugitems d ON d.icode = op.icode
 ),
 cha_s AS (
   SELECT s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate) AS D,
-         LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
+         ${CHRGITEM} AS CHRGITEM, ROUND(SUM(${ITEM_LINE}), 2) AS AMOUNT
   FROM stp s JOIN opitemrece op ON op.an = s.AN LEFT JOIN income inc ON inc.income = op.income
-  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0')
+  GROUP BY s.HN, s.AN, s.SEQ, COALESCE(op.rxdate, op.vstdate), ${CHRGITEM}
   HAVING ROUND(SUM(${ITEM_LINE}), 2) > 0
 ),
 cht_s AS (
@@ -264,19 +269,21 @@ dx AS (
 ${STP_IP_BASE}`,
 };
 
-// cha/cmp ใช้ข้อความเดียวกันทั้งสองหมวด ; cmp = ยอด CHA ต่อหมวด (A) เทียบผลรวม จำนวน x ราคา ของ ADP+DRU ในหมวดนั้น (T, NULL = ไม่มีรายการในหมวด)
+// cha/cmp ใช้ข้อความเดียวกันทั้งสองหมวด ; cmp = ยอด CHA ต่อหมวด (A, NULL = ไม่มีแถว CHA) เทียบผลรวม จำนวน x ราคา ของ ADP+DRU ที่ e-Claim จัดเข้าหมวดนั้นตาม ITEM_CAT
+// (T, NULL = ไม่มีรายการ) ; x.rk = 1 คือแถวรายการ จึงอ่าน it ครั้งเดียว (MariaDB ประเมิน CTE ใหม่ทุกครั้งที่อ้าง)
 const CHA_CMP = `cha AS (
   SELECT HN, AN, SEQ, K, D, CHRGITEM, ROUND(SUM(SP), 2) AS AMOUNT FROM it
   GROUP BY HN, AN, SEQ, K, D, CHRGITEM HAVING ROUND(SUM(SP), 2) > 0
 ),
 cmp AS (
-  SELECT HN, AN, SEQ, K, CHRGITEM,
+  SELECT HN, AN, SEQ, K, C AS CHRGITEM,
          SUM(CASE WHEN AMT > 0 THEN AMT END) AS A,
          CASE WHEN SUM(ITN) > 0 THEN ROUND(SUM(ITM), 2) END AS T
-  FROM (SELECT HN, AN, SEQ, K, D, CHRGITEM, ROUND(SUM(SP), 2) AS AMT, SUM(IS_ADP OR IS_DRU) AS ITN,
-               SUM(CASE WHEN IS_ADP OR IS_DRU THEN QXP END) AS ITM
-        FROM it GROUP BY HN, AN, SEQ, K, D, CHRGITEM) g
-  GROUP BY HN, AN, SEQ, K, CHRGITEM HAVING SUM(AMT > 0) > 0
+  FROM (SELECT HN, AN, SEQ, K, D, IF(x.rk, ${ITEM_CAT}, CHRGITEM) AS C, ROUND(SUM(IF(x.rk, 0, SP)), 2) AS AMT, SUM(x.rk) AS ITN,
+               SUM(IF(x.rk, QXP, 0)) AS ITM
+        FROM it JOIN (SELECT 0 AS rk UNION ALL SELECT 1) x ON x.rk = 0 OR IS_ADP OR IS_DRU
+        GROUP BY HN, AN, SEQ, K, D, C) g
+  GROUP BY HN, AN, SEQ, K, C HAVING SUM(AMT > 0) > 0 OR SUM(ITN) > 0
 )`;
 
 // it = รายการของแฟ้ม ADP/DRU/CHA ในรูปเดียวกับแฟ้มส่งออก (scan opitemrece ด้วย FORCE INDEX) ; ia (op) = รวมต่อ visit ครั้งเดียวให้ block ADP op
@@ -284,7 +291,7 @@ const PREFIX_ITEMS: Record<FdhType, string> = {
   op: `${PREFIX_BASE.op},
 it AS (
   SELECT op.hn AS HN, '' AS AN, op.vn AS SEQ, op.vn AS K, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS D,
-         op.icode AS ICODE, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM,
+         op.icode AS ICODE, ${CHRGITEM} AS CHRGITEM,
          COALESCE(nd.icode IS NOT NULL AND ${NOT_DRUG}, 0) AS IS_ADP,
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
@@ -319,7 +326,7 @@ ${STP_OP_ITEMS}`,
   ip: `${PREFIX_BASE.ip},
 it AS (
   SELECT op.hn AS HN, op.an AS AN, '' AS SEQ, op.an AS K, DATE_FORMAT(COALESCE(op.rxdate, op.vstdate), '%Y-%m-%d') AS D,
-         op.icode AS ICODE, LPAD(COALESCE(inc.drg_chrgitem_id, inc.std_group, op.income), 2, '0') AS CHRGITEM,
+         op.icode AS ICODE, ${CHRGITEM} AS CHRGITEM,
          COALESCE(nd.icode IS NOT NULL AND ${NOT_DRUG}, 0) AS IS_ADP,
          COALESCE(d.icode IS NOT NULL AND inc.drg_chrgitem_id IN (3, 4), 0) AS IS_DRU,
          COALESCE(d.icode IS NOT NULL AND (op.income = '20' OR COALESCE(d.drugaccount, '') IN ('', '-')), 0) AS IS_NED,
@@ -496,10 +503,10 @@ UNION ALL SELECT '565', 'DRU', x.HN, x.AN, x.SEQ, x.ICODE FROM it x JOIN ovst o 
     AND NOT EXISTS (SELECT 1 FROM ovst_presc_ned pn WHERE pn.vn = x.SEQ AND pn.icode = x.ICODE AND UPPER(pn.presc_reason) REGEXP '^E[A-F]$')`;
 const DRU_IP_952 ="\nUNION ALL SELECT '952', 'DRU', HN, AN, SEQ, CONCAT(CHRGITEM, ' ', COUNT(*)) FROM it WHERE IS_DRU GROUP BY HN, AN, SEQ, CHRGITEM HAVING COUNT(*) > 999";
 
-// C302 = หมวดมียอดแต่ไม่มีรายการ ADP/DRU, C555 = ยอดหมวดไม่เท่าผลรวมรายการ (arm เดียวสองรหัส อ่าน cmp ครั้งเดียว)
+// C302 = หมวดมียอดแต่ไม่มีรายการ ADP/DRU, C555 = ยอดหมวดไม่เท่าผลรวมรายการที่ e-Claim จัดเข้าหมวดนั้น (รวมรายการที่ตกหมวดที่ CHA ไม่มี) ; arm เดียวสองรหัส อ่าน cmp ครั้งเดียว
 const CHA_BLOCK = `SELECT IF(T IS NULL, '302', '555') AS c_code, 'CHA' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq,
-       IF(T IS NULL, CONCAT(CHRGITEM, ' ', A), CONCAT(CHRGITEM, ' CHA ', A, ' <> ', T)) AS found
-FROM cmp WHERE T IS NULL OR ABS(A - T) >= 0.01`;
+       IF(T IS NULL, CONCAT(CHRGITEM, ' ', A), CONCAT(CHRGITEM, ' CHA ', COALESCE(A, 0), ' <> ', T)) AS found
+FROM cmp WHERE T IS NULL OR ABS(COALESCE(A, 0) - T) >= 0.01`;
 const CHT_BLOCK = `SELECT '301' AS c_code, 'CHT' AS fdh_file, HN AS hn, AN AS an, SEQ AS seq, TOTAL AS found FROM cht WHERE TOTAL IS NULL OR TOTAL <= 0
 UNION ALL SELECT '555', 'CHT', t.HN, t.AN, t.SEQ, CONCAT('CHT ', t.TOTAL, ' <> CHA ', COALESCE(h.S, 0)) FROM cht t
   LEFT JOIN (SELECT K, SUM(AMOUNT) AS S FROM cha GROUP BY K) h ON h.K = t.K

@@ -98,9 +98,17 @@ export type HisIpd = {
  * source/vn/ref_date เดียวกับหนี้หลัก แล้วลด .201 เท่ากัน ยอดรวมต่อ visit จึงเท่ายอด HOSxP ; CR ตัดด้วย STM ส่วน .201 ตัดด้วยเหมาจ่าย
  */
 export const CR_SPLIT = { from: "1102050101.201", to: "1102050101.216" } as const;
+/**
+ * UC IP (.202): ค่าพาหนะส่งต่อ (กองทุนย่อยใน codes = รายการรหัสเบิก S18xx) แยกเป็นหนี้ ref "<an>:CR" บัญชี .217 แบบเดียวกับ OP
+ * ผู้ใช้เลือก 27 พ.ย. 2569 ตามที่ สปสช. จ่ายจริง (STM AE) ; INST มี account_ip .217 แต่ไม่แยก (เลนส์/อุปกรณ์และรถพยาบาลระดับสูงคงอยู่ .202)
+ */
+export const IP_CR_SPLIT = { from: "1102050101.202", to: "1102050101.217", codes: ["CARREF"] } as const;
 export const crRef = (ref: string) => `${ref}:CR`;
 export const isCrRef = (ref: string) => ref.endsWith(":CR");
 const CR_NOTE = "แยก HC/INST ไปบัญชี CR";
+const IP_CR_NOTE = "แยกค่าพาหนะส่งต่อไปบัญชี CR";
+const crSplitOf = (pt: PatientType) => (pt === "OP" ? CR_SPLIT : IP_CR_SPLIT);
+const crNote = (pt: PatientType) => (pt === "OP" ? CR_NOTE : IP_CR_NOTE);
 
 /**
  * แบ่งยอด CR (สตางค์ต่อ vn) ให้หนี้ของ vn เรียงตาม debt_id ไม่เกินยอดของแต่ละหนี้ (cap) -> สตางค์ต่อ ref ; หนี้ที่ไม่ได้ = ไม่มีใน map
@@ -172,7 +180,7 @@ const follow = (s: RefInfo, kind: Kind, entry_date: string, cents: number, note:
 const changed = (from: number, to: number) => `ยอดใน HOSxP เปลี่ยน ${fromCents(from)} → ${fromCents(to)}`;
 /** แถว set ของหนี้ CR ที่คัดลอกข้อมูลจากหนี้หลัก */
 const crSet = (s: RefInfo, date: string, cents: number): Entry =>
-  follow({ ...s, ref: crRef(s.ref), account_code: CR_SPLIT.to }, "set", date, cents, CR_NOTE);
+  follow({ ...s, ref: crRef(s.ref), account_code: crSplitOf(s.patient_type).to }, "set", date, cents, crNote(s.patient_type));
 /** วันตั้งหนี้ OPD = วันรับบริการ ไม่ก่อน LEDGER_START */
 const setDateOf = (svc: string) => (svc < LEDGER_START ? LEDGER_START : svc);
 
@@ -202,6 +210,37 @@ function closeEntries(s: RefState, kind: "cancel" | "reverse", date: string, not
   const out: Entry[] = [];
   if (s.balance !== 0) out.push(follow(s, kind, date, -s.balance, note));
   if (s.diff !== 0) out.push(follow(s, "diff", date, -s.diff, capNote(null)));
+  return out;
+}
+
+/** ตั้งหนี้ใหม่ยอด target โดยแยก split ไปหนี้ CR ; ar_ledger ห้ามยอด 0: CR เต็มยอดหนี้ = ตั้งเต็มแล้วปรับลดวันเดียวกัน (หนี้หลักต้องมีแถว set ไว้ให้ sync ถัดไปหาเจอ) */
+function setWithCr(info: Omit<RefInfo, "account_code"> & { entry_date: string }, target: number, split: number, rules: AccountRules): Entry[] {
+  const main = target - split;
+  const out = setEntries(info, main || target, rules);
+  if (split) {
+    const s0 = { ...info, account_code: crSplitOf(info.patient_type).from };
+    if (!main) out.push(follow(s0, "adjust", info.entry_date, -target, crNote(info.patient_type)));
+    out.push(crSet(s0, info.entry_date, split));
+  }
+  return out;
+}
+
+/**
+ * หนี้ที่ตั้งแล้ว (s หลัก, cs CR) ยอด HOSxP = target: ให้ CR = split แล้วปรับหนี้หลักให้รวมเท่า target
+ * ยังไม่เคยแยก = แยกลงวันตั้งหนี้ (setDate) ; ตัดแล้ว (หลักหรือ CR) ไม่ย้ายยอดระหว่างสอง ref อีก ยอดที่เปลี่ยนลงหนี้หลัก ; note(ยอดเดิมรวม) = หมายเหตุของแถวปรับหนี้หลัก
+ */
+function followWithCr(
+  s: RefState, cs: RefState | undefined, target: number, split: number, rules: AccountRules, today: string, setDate: string, note: (total: number) => string,
+): Entry[] {
+  const out: Entry[] = [];
+  const have = cs?.balance ?? 0;
+  const c = cs && (s.settled || cs.settled) ? have : split;
+  let main = s;
+  if (!cs && c) {
+    out.push(follow(s, "adjust", setDate, -c, crNote(s.patient_type)), crSet(s, setDate, c));
+    main = { ...s, balance: s.balance - c };
+  } else if (cs && c !== have) out.push(follow(cs, "adjust", today, c - have, crNote(s.patient_type)));
+  out.push(...followEntries(main, target - c, rules, today, note(s.balance + have)));
   return out;
 }
 
@@ -255,27 +294,11 @@ export function planOpd(
     if (!s) {
       if (target === 0) continue;
       const svc = day(d.vstdate ?? d.debt_date);
-      const info = { ...opdCoverage(d), source: "rcpt_debt" as const, ref, vn: d.vn, an: null, ref_date: svc, entry_date: setDateOf(svc) };
-      // ar_ledger ห้ามยอด 0: CR เต็มยอดหนี้ = ตั้งเต็มแล้วปรับลดวันเดียวกัน (หนี้หลักต้องมีแถว set ไว้ให้ sync ถัดไปหาเจอ ; .201 ไม่มีเพดาน diff จึงไม่เปลี่ยน)
-      const main = target - split;
-      out.push(...setEntries(info, main || target, rules));
-      if (split) {
-        const s0 = { ...info, account_code: CR_SPLIT.from };
-        if (!main) out.push(follow(s0, "adjust", info.entry_date, -target, CR_NOTE));
-        out.push(crSet(s0, info.entry_date, split));
-      }
+      // .201 ไม่มีเพดาน diff การแยก CR จึงไม่เปลี่ยน diff
+      out.push(...setWithCr({ ...opdCoverage(d), source: "rcpt_debt", ref, vn: d.vn, an: null, ref_date: svc, entry_date: setDateOf(svc) }, target, split, rules));
     } else if (!s.cancelled) {
-      const cs = states.get(crRef(ref));
-      const have = cs?.balance ?? 0;
-      // ตัดแล้ว (เหมาจ่าย .201 หรือ STM ของ CR) ไม่ย้ายยอดระหว่างสอง ref อีก ยอด HOSxP ที่เปลี่ยนลงหนี้หลัก
-      const c = cs && (s.settled || cs.settled) ? have : split;
-      let main = s;
-      if (!cs && c) {
-        const date = setDateOf(s.ref_date ?? today);
-        out.push(follow(s, "adjust", date, -c, CR_NOTE), crSet(s, date, c));
-        main = { ...s, balance: s.balance - c };
-      } else if (cs && c !== have) out.push(follow(cs, "adjust", today, c - have, CR_NOTE));
-      out.push(...followEntries(main, target - c, rules, today, s.balance + have !== target ? changed(s.balance + have, target) : CR_NOTE));
+      out.push(...followWithCr(s, states.get(crRef(ref)), target, split, rules, today, setDateOf(s.ref_date ?? today),
+        (total) => (total !== target ? changed(total, target) : CR_NOTE)));
     }
   }
   return out;
@@ -308,11 +331,13 @@ export function planCancels(cancels: HisCancel[], states: Map<string, RefState>)
  * IPD ที่ปิดสิทธิแล้ว (finance_lock = 'Y') ในช่วง from..to ของ dchdate
  * - ยังไม่มี: ตั้งเมื่อ uc_money > 0 ลงวันจำหน่าย (dchdate) ทุกโหมด ให้หนี้อยู่ในเดือนที่เกิด ไม่ใช่เดือนที่ปิดสิทธิ
  * - มีแล้วยอดต่าง (รวมปิดสิทธิอีกครั้งหลังกลับรายการ): ปรับปรุงส่วนต่างลงวันที่ sync
- * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ (และ diff)
+ * - เคยตั้งแต่ไม่อยู่ในผลแล้ว (finance_lock กลับเป็น N) และ dchdate อยู่ในช่วงที่ดึง: กลับรายการเต็มยอดคงเหลือ (และ diff) ทั้งหนี้หลักและ CR
+ * cr = ค่าพาหนะส่งต่อ (สตางค์) ต่อ AN: หนี้ที่ลง .202 แยกส่วนนี้ (ไม่เกินยอด) เป็น ref "<an>:CR" บัญชี .217 (states ต้องโหลดทั้งสอง ref) ยอด HOSxP = หลัก + CR
+ *   แยกครั้งแรกของหนี้ที่ตั้งแล้วลงวันจำหน่าย ; หนี้ที่มีแถวจาก source อื่นแล้ว (touched: ตัด/ปรับด้วยมือ) และยังไม่เคยแยกไม่แยก ; ไม่ใช่ .202 แล้ว = CR กลับเป็น 0
  */
 export function planIpd(
   rows: HisIpd[], states: Map<string, RefState>, rules: AccountRules,
-  window: { from: string; to: string }, today: string,
+  window: { from: string; to: string }, today: string, cr: Map<string, number> = new Map(),
 ): Entry[] {
   const out: Entry[] = [];
   const seen = new Set<string>();
@@ -321,20 +346,24 @@ export function planIpd(
     seen.add(r.an);
     const target = toCents(r.uc_money);
     const s = states.get(r.an);
+    const cs = states.get(crRef(r.an));
+    const splitOf = (c: Coverage, ok: boolean) => (ok && resolve(c, rules).account_code === IP_CR_SPLIT.from ? Math.min(cr.get(r.an) ?? 0, Math.max(target, 0)) : 0);
     if (!s) {
       if (target <= 0) continue;
-      out.push(...setEntries({
-        patient_type: "IP", pttype: blank(r.pttype), hipdata_code: blank(r.hipdata_code), hospmain: blank(r.hospmain),
+      const info = {
+        patient_type: "IP" as const, pttype: blank(r.pttype), hipdata_code: blank(r.hipdata_code), hospmain: blank(r.hospmain),
         hospmain_chwpart: blank(r.hospmain_chwpart), hospmain_type: blank(r.hospmain_type),
-        source: "ipt", ref: r.an, vn: null, an: r.an, ref_date: day(r.dchdate), entry_date: day(r.dchdate),
-      }, target, rules));
+        source: "ipt" as const, ref: r.an, vn: null, an: r.an, ref_date: day(r.dchdate), entry_date: day(r.dchdate),
+      };
+      out.push(...setWithCr(info, target, splitOf(info, true), rules));
     } else {
-      out.push(...followEntries(s, target, rules, today, s.balance === 0 ? "ปิดสิทธิอีกครั้ง" : changed(s.balance, target)));
+      out.push(...followWithCr(s, cs, target, splitOf(s, !!cs || !s.touched), rules, today, s.ref_date ?? today,
+        (total) => (total === 0 ? "ปิดสิทธิอีกครั้ง" : total !== target ? changed(total, target) : IP_CR_NOTE)));
     }
   }
   for (const [an, s] of states) {
-    if (seen.has(an) || !s.ref_date || s.ref_date < window.from || s.ref_date > window.to) continue;
-    out.push(...closeEntries(s, "reverse", today, "ยกเลิกปิดสิทธิ (finance_lock ไม่ใช่ Y)"));
+    if (isCrRef(an) || seen.has(an) || !s.ref_date || s.ref_date < window.from || s.ref_date > window.to) continue;
+    for (const x of [s, states.get(crRef(an))]) if (x) out.push(...closeEntries(x, "reverse", today, "ยกเลิกปิดสิทธิ (finance_lock ไม่ใช่ Y)"));
   }
   return out;
 }
@@ -347,10 +376,13 @@ export type Recomputed = { state: RecomputeState; to: string | null; entries: En
 /**
  * คำนวณบัญชีของหนี้ที่มีอยู่ตามกติกาปัจจุบัน (ใช้กับทุกแถวของหนี้ รวม stm/manual/fwf) กดซ้ำได้: ครั้งถัดไปไม่มีอะไรเปลี่ยน
  * ไม่มีกติกา = คงบัญชีเดิม (noRule) ; หนี้ที่ตัดแล้วไม่ลง diff/ไม่แยก CR เพิ่ม (นับใน settledSkip) แค่ย้ายบัญชี
- * cr = ยอด HC + INST ต่อ vn (เหมือน planOpd): หนี้ .201 แยกเป็นหนี้ CR / ปรับ CR ให้เท่ายอดนี้ ; หนี้ CR คงบัญชี .216 ตามหนี้หลัก
+ * cr = ยอด HC + INST ต่อ vn (เหมือน planOpd): หนี้ .201 แยกเป็นหนี้ CR / ปรับ CR ให้เท่ายอดนี้ ; หนี้ CR คงบัญชี (.216/.217) ตามหนี้หลัก
+ * ipCr = ค่าพาหนะส่งต่อต่อ AN (เหมือน planIpd): หนี้ .202 แยกเป็นหนี้ CR .217 ; touched และยังไม่เคยแยก = ไม่แยก (นับใน settledSkip)
  * admitted = vn ที่ admit แล้ว: กลับรายการหนี้ OPD (และ CR) ลงวันตั้งหนี้ตาม ADMIT_NOTE ; touched นับใน settledSkip
  */
-export function planRecompute(states: RecomputeState[], rules: AccountRules, cr: Map<string, number> = new Map(), admitted: Set<string> = new Set()): Recomputed[] {
+export function planRecompute(
+  states: RecomputeState[], rules: AccountRules, cr: Map<string, number> = new Map(), admitted: Set<string> = new Set(), ipCr: Map<string, number> = new Map(),
+): Recomputed[] {
   const byRef = new Map(states.map((s) => [s.ref, s]));
   const crEntries = new Map<string, Entry[]>();
   const resOf = new Map(states.filter((s) => !isCrRef(s.ref)).map((s) => [s.ref, resolve(s, rules)]));
@@ -363,6 +395,15 @@ export function planRecompute(states: RecomputeState[], rules: AccountRules, cr:
     }),
     cr,
   );
+  // IP หนึ่ง AN หนึ่งหนี้ ไม่ต้องแบ่ง
+  for (const s of states) {
+    const cs = byRef.get(crRef(s.ref));
+    const n = s.patient_type === "IP" && !isCrRef(s.ref) && !s.cancelled && (cs || !s.touched) && resOf.get(s.ref)?.account_code === IP_CR_SPLIT.from
+      ? Math.min(ipCr.get(s.ref) ?? 0, Math.max(s.balance + (cs?.balance ?? 0), 0)) : 0;
+    if (n > 0) share.set(s.ref, n);
+  }
+  const pendingCr = (s: RecomputeState) => (s.patient_type === "OP" ? cr.get(s.vn ?? "") : ipCr.get(s.ref)) ?? 0;
+  const blocked = (s: RecomputeState) => (s.patient_type === "OP" ? s.settled : !!s.touched);
   const plan = states.filter((s) => !isCrRef(s.ref)).map((s): Recomputed => {
     const res = resOf.get(s.ref)!;
     const noRule = res.books && !res.account_code;
@@ -388,11 +429,11 @@ export function planRecompute(states: RecomputeState[], rules: AccountRules, cr:
         settledSkip = true;
         c = have;
       }
-      // ตัดแล้วและยังไม่เคยแยก (ไม่อยู่ใน allocateCr) แต่มี HC/INST
-      if (s.settled && !cs && !s.cancelled && res.account_code === CR_SPLIT.from && (cr.get(s.vn ?? "") ?? 0) > 0) settledSkip = true;
+      // ตัดแล้ว (IP: มีแถวจาก source อื่น) และยังไม่เคยแยก (ไม่อยู่ใน share) แต่มียอด CR
+      if (blocked(s) && !cs && !s.cancelled && res.account_code === crSplitOf(s.patient_type).from && pendingCr(s) > 0) settledSkip = true;
       if (c !== have) {
-        entries.push(follow(t, "adjust", s.set_date, have - c, CR_NOTE));
-        crOut.push(cs ? follow(cs, "adjust", s.set_date, c - have, CR_NOTE) : crSet(t, s.set_date, c));
+        entries.push(follow(t, "adjust", s.set_date, have - c, crNote(s.patient_type)));
+        crOut.push(cs ? follow(cs, "adjust", s.set_date, c - have, crNote(s.patient_type)) : crSet(t, s.set_date, c));
       }
       const want = capDiff(s.balance + have - c, res.rule);
       if (want !== s.diff) {
@@ -404,7 +445,7 @@ export function planRecompute(states: RecomputeState[], rules: AccountRules, cr:
     else entries.push(...crOut);
     return { state: s, to, entries, noRule, settledSkip };
   });
-  // หนี้ CR คงบัญชี .216 ; แถวที่ต้องลงคำนวณในรอบของหนี้หลักข้างบน
+  // หนี้ CR คงบัญชี (.216/.217) ; แถวที่ต้องลงคำนวณในรอบของหนี้หลักข้างบน
   const crs = states.filter((s) => isCrRef(s.ref)).map((s): Recomputed => ({ state: s, to: s.account_code, entries: crEntries.get(s.ref) ?? [], noRule: false, settledSkip: false }));
   return [...plan, ...crs];
 }
