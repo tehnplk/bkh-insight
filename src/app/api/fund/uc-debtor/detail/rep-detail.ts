@@ -17,8 +17,10 @@ export type RepErrorInfo = { code: string; description: string | null; fix: stri
 /** response ของ /api/fund/uc-debtor/detail */
 export type RepDetailResponse = {
   history: RepHistoryRow[];
-  /** REP ล่าสุด (tran_id มากสุด) null = ยังไม่มี REP */
+  /** REP ล่าสุด (tran_id มากสุด) หรือแถวของ ?tran= ; null = ยังไม่มี REP */
   latest: {
+    tran_id: string;
+    rep_no: string;
     net_nhso: number | null;
     net_affiliation: number | null;
     claim_total: number | null;
